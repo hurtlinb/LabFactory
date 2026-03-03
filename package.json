@@ -1,0 +1,16 @@
+{
+  "name": "lab-orchestrator-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "terraform-worker": "node workers/startTerraformWorkerService.js",
+    "ansible-worker": "node workers/startAnsibleWorkerService.js",
+    "dashboard": "node dashboard/server.js"
+  },
+  "dependencies": {
+    "bullmq": "^5.70.1",
+    "express": "^4.19.2",
+    "redis": "^5.11.0"
+  }
+}

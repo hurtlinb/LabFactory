@@ -1,0 +1,12 @@
+- name: Demo Ansible provisioning
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    lab_instance_id: "{{ lab_instance_id | default('lab-demo') }}"
+    run_id: "{{ run_id | default('demo-run') }}"
+    terraform_status: "{{ terraform_status | default('unknown') }}"
+  tasks:
+    - name: Display lab context
+      ansible.builtin.debug:
+        msg: "Provisioning {{ lab_instance_id }} (run {{ run_id }}) after Terraform {{ terraform_status }}"

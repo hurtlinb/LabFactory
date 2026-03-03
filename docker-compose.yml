@@ -1,0 +1,73 @@
+services:
+  redis:
+    image: redis:8-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  terraform-worker:
+    build: .
+    image: lab-orchestrator-demo:latest
+    restart: on-failure
+    depends_on:
+      - redis
+    volumes:
+      - ./terraform:/usr/src/app/terraform:cached
+      - ./config:/usr/src/app/config:cached
+      - terraform-cache:/usr/src/app/.terraform
+    environment:
+      - TF_IN_AUTOMATION=1
+      - TF_DATA_DIR=/usr/src/app/.terraform
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command: npm run terraform-worker
+
+  ansible-worker:
+    build: .
+    image: lab-orchestrator-demo:latest
+    restart: on-failure
+    depends_on:
+      - redis
+    volumes:
+      - ./ansible:/usr/src/app/ansible:cached
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command: npm run ansible-worker
+
+  terraform-validator:
+    build: .
+    image: lab-orchestrator-demo:latest
+    depends_on:
+      - redis
+      - terraform-worker
+    volumes:
+      - ./terraform:/usr/src/app/terraform:cached
+      - ./config:/usr/src/app/config:cached
+      - terraform-cache:/usr/src/app/.terraform
+    environment:
+      - TF_IN_AUTOMATION=1
+      - TF_DATA_DIR=/usr/src/app/.terraform
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command: npm run validate
+    restart: "no"
+
+  dashboard:
+    build: .
+    image: lab-orchestrator-demo:latest
+    depends_on:
+      - redis
+    ports:
+      - "8080:3000"
+    environment:
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    command: npm run dashboard
+    volumes:
+      - ./config:/usr/src/app/config:cached
+    restart: unless-stopped
+
+volumes:
+  terraform-cache:
+  redis-data:
