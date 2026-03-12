@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: labfactory-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: labfactory-scheduler
+  template:
+    metadata:
+      labels:
+        app: labfactory-scheduler
+    spec:
+      serviceAccountName: labfactory-scheduler
+      containers:
+        - name: scheduler
+          image: labfactory/scheduler:latest
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: labfactory-secrets
+                  key: database-url
+            - name: REDIS_HOST
+              value: redis
+            - name: REDIS_PORT
+              value: '6379'
+            - name: LOG_LEVEL
+              value: info

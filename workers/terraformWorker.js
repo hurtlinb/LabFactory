@@ -3,7 +3,12 @@ import { fileURLToPath } from 'node:url';
 import { Worker } from 'bullmq';
 import { runCommand } from '../lib/runCommand.js';
 import { readFile, writeFile } from 'node:fs/promises';
-import { sanitizeSettingsInput, defaultTerraformSettings } from '../lib/terraformSettings.js';
+import {
+  assertRequiredTerraformEnvSettings,
+  defaultTerraformSettings,
+  readTerraformEnvSettings,
+  sanitizeSettingsInput
+} from '../lib/terraformSettings.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const terraformDir = path.resolve(__dirname, '../terraform');
@@ -26,7 +31,9 @@ export function startTerraformWorker(connection) {
         const raw = await readFile(terraformVarsPath, 'utf8');
         const rawSettings = JSON.parse(raw);
         const sanitized = sanitizeSettingsInput(rawSettings);
-        const merged = { ...defaultTerraformSettings, ...sanitized };
+        const envSettings = readTerraformEnvSettings();
+        const merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
+        assertRequiredTerraformEnvSettings(merged);
         await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2));
         preparedVarFile = sanitizedVarsPath;
       } catch (err) {

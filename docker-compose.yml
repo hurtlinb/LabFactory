@@ -11,6 +11,8 @@ services:
     restart: on-failure
     depends_on:
       - redis
+    env_file:
+      - .env
     volumes:
       - ./terraform:/usr/src/app/terraform:cached
       - ./config:/usr/src/app/config:cached
@@ -28,6 +30,8 @@ services:
     restart: on-failure
     depends_on:
       - redis
+    env_file:
+      - .env
     volumes:
       - ./ansible:/usr/src/app/ansible:cached
     environment:
@@ -41,6 +45,8 @@ services:
     depends_on:
       - redis
       - terraform-worker
+    env_file:
+      - .env
     volumes:
       - ./terraform:/usr/src/app/terraform:cached
       - ./config:/usr/src/app/config:cached
@@ -58,6 +64,8 @@ services:
     image: lab-orchestrator-demo:latest
     depends_on:
       - redis
+    env_file:
+      - .env
     ports:
       - "8080:3000"
     environment:

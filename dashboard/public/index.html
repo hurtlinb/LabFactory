@@ -670,28 +670,8 @@
           <div class="grid">
             <article class="card">
               <h3>Connexion Proxmox</h3>
-              <div class="form-group">
-                <label>URL API Proxmox</label>
-                <input type="text" name="proxmox_api_url" placeholder="https://pve.example.com:8006/api2/json" required />
-              </div>
-              <div class="form-group">
-                <label>Token ID</label>
-                <input type="text" name="proxmox_api_token_id" placeholder="terraform@pve!labfactory" required />
-              </div>
-              <div class="form-group">
-                <label>Token secret</label>
-                <input type="password" name="proxmox_api_token_secret" placeholder="••••••••" required />
-              </div>
-              <div class="form-group">
-                <label>Node cible</label>
-                <input type="text" name="proxmox_node" placeholder="pve01" required />
-              </div>
-              <div class="form-group">
-                <label style="display:flex; align-items:center; gap:0.5rem;">
-                  <input type="checkbox" name="proxmox_tls_insecure" />
-                  Autoriser TLS auto-signé
-                </label>
-              </div>
+              <p style="margin:0; color:var(--muted); font-size:0.9rem;">La connexion Proxmox est lue depuis `.env` via `PROXMOX_API_URL`, `PROXMOX_NODE`, `PROXMOX_API_TOKEN_ID` et `PROXMOX_API_TOKEN_SECRET`.</p>
+              <p style="margin:0; color:var(--muted); font-size:0.9rem;">Le comportement TLS est lu depuis `.env` avec `PROXMOX_TLS_INSECURE`.</p>
             </article>
             <article class="card">
               <h3>VM & ressources</h3>
@@ -1043,3 +1023,6 @@
   </script>
 </body>
 </html>
+
+
+

@@ -50,6 +50,11 @@ const readTerraformSettings = async () => {
   return JSON.parse(content);
 };
 
+const readPublicTerraformSettings = async () => {
+  const settings = await readTerraformSettings();
+  return sanitizeSettingsInput(settings);
+};
+
 const writeTerraformSettings = async settings => {
   await fs.mkdir(settingsDir, { recursive: true });
   await fs.writeFile(terraformSettingsPath, JSON.stringify(settings, null, 2));
@@ -92,7 +97,7 @@ app.get('/api/workers', async (req, res) => {
 
 app.get('/api/settings/terraform', async (req, res) => {
   try {
-    const settings = await readTerraformSettings();
+    const settings = await readPublicTerraformSettings();
     res.json(settings);
   } catch (err) {
     console.error('Unable to fetch terraform settings', err);
@@ -106,8 +111,8 @@ app.post('/api/settings/terraform', async (req, res) => {
     if (!Object.keys(sanitized).length) {
       return res.status(400).json({ error: 'no valid settings provided' });
     }
-    const existing = await readTerraformSettings();
-    const updated = { ...existing, ...sanitized };
+    const existing = await readPublicTerraformSettings();
+    const updated = { ...defaultTerraformSettings, ...existing, ...sanitized };
     await writeTerraformSettings(updated);
     res.json(updated);
   } catch (err) {
