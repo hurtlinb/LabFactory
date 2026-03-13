@@ -73,6 +73,17 @@ const blueprintSchema = z.object({
   vms: z.array(blueprintVmSchema).min(1)
 });
 
+const classroomSchema = z.object({
+  name: z.string().trim().min(1),
+  workstationCount: z.number().int().positive(),
+  startingVlan: z.number().int().positive()
+});
+
+const deploymentCreateSchema = z.object({
+  blueprintId: z.string().uuid(),
+  classroomId: z.string().uuid()
+});
+
 const ensureTerraformSettingsFile = async () => {
   try {
     await fs.access(terraformSettingsPath);
@@ -182,6 +193,38 @@ const mapLifecycle = row => ({
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
 
+const mapClassroom = row => ({
+  id: row.id,
+  name: row.name,
+  workstationCount: Number(row.workstation_count),
+  startingVlan: Number(row.starting_vlan),
+  vlans: Array.from({ length: Number(row.workstation_count) }, (_, index) => Number(row.starting_vlan) + index),
+  createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+  updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
+});
+
+const mapDeployment = row => ({
+  id: row.id,
+  status: row.status,
+  lastAction: row.last_action,
+  lastJobId: row.last_job_id,
+  lastRunId: row.last_run_id,
+  createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+  updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at,
+  blueprint: {
+    id: row.blueprint_id,
+    name: row.blueprint_name,
+    description: row.blueprint_description ?? ''
+  },
+  classroom: {
+    id: row.classroom_id,
+    name: row.classroom_name,
+    workstationCount: Number(row.workstation_count ?? 0),
+    startingVlan: Number(row.starting_vlan ?? 0)
+  },
+  totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
+});
+
 const fetchBlueprintById = async blueprintId => {
   const blueprintResult = await dbPool.query(
     `SELECT
@@ -275,6 +318,83 @@ const buildTerraformBlueprintPayload = blueprint => {
   };
 };
 
+const fetchClassroomById = async classroomId => {
+  const result = await dbPool.query('SELECT * FROM classrooms WHERE id = $1', [classroomId]);
+  if (!result.rowCount) return null;
+  return mapClassroom(result.rows[0]);
+};
+
+const fetchDeploymentById = async deploymentId => {
+  const result = await dbPool.query(
+    `SELECT
+       d.*,
+       b.name AS blueprint_name,
+       b.description AS blueprint_description,
+       c.name AS classroom_name,
+       c.workstation_count,
+       c.starting_vlan,
+       (
+         SELECT COUNT(*)
+         FROM lab_blueprint_vms v
+         WHERE v.blueprint_id = d.blueprint_id
+       ) AS blueprint_vm_count
+     FROM lab_deployments d
+     INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+     INNER JOIN classrooms c ON c.id = d.classroom_id
+     WHERE d.id = $1`,
+    [deploymentId]
+  );
+  if (!result.rowCount) return null;
+  return mapDeployment(result.rows[0]);
+};
+
+const updateDeploymentState = async ({ deploymentId, action, status, jobId = null, runId = null }) => {
+  const result = await dbPool.query(
+    `UPDATE lab_deployments
+     SET
+       status = $2,
+       last_action = $3,
+       last_job_id = $4,
+       last_run_id = $5,
+       updated_at = NOW()
+     WHERE id = $1
+     RETURNING id`,
+    [deploymentId, status, action, jobId, runId]
+  );
+  if (!result.rowCount) return null;
+  return fetchDeploymentById(result.rows[0].id);
+};
+
+const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom }) => {
+  const baseVmid = computeBlueprintBaseVmid(deploymentId);
+  const labName = sanitizeVmName(blueprint.name);
+  const vms = [];
+
+  for (let workstationIndex = 0; workstationIndex < classroom.workstationCount; workstationIndex += 1) {
+    const workstationNumber = String(workstationIndex + 1).padStart(2, '0');
+    const vlanTag = classroom.startingVlan + workstationIndex;
+
+    for (const vm of blueprint.vms) {
+      vms.push({
+        id: `${workstationNumber}-${vm.id}`,
+        name: sanitizeVmName(`${labName}-${workstationNumber}-${vm.name}`),
+        vmid: baseVmid + vms.length,
+        cloneSource: String(vm.template.proxmoxTemplateVmid),
+        fullClone: Boolean(vm.template.fullClone),
+        vlanTag
+      });
+    }
+  }
+
+  return {
+    id: deploymentId,
+    name: blueprint.name,
+    classroomName: classroom.name,
+    description: blueprint.description ?? '',
+    vms
+  };
+};
+
 const persistBlueprint = async (blueprintId, payload) => {
   const client = await dbPool.connect();
   try {
@@ -315,6 +435,186 @@ const persistBlueprint = async (blueprintId, payload) => {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get(
+  '/api/classrooms',
+  wrapAsync(async (req, res) => {
+    const result = await dbPool.query('SELECT * FROM classrooms ORDER BY name ASC');
+    res.json(result.rows.map(mapClassroom));
+  })
+);
+
+app.post(
+  '/api/classrooms',
+  wrapAsync(async (req, res) => {
+    const parsed = classroomSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const result = await dbPool.query(
+      `INSERT INTO classrooms
+        (id, name, workstation_count, starting_vlan, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW(), NOW())
+       RETURNING *`,
+      [uuidv4(), parsed.data.name, parsed.data.workstationCount, parsed.data.startingVlan]
+    );
+
+    res.status(201).json(mapClassroom(result.rows[0]));
+  })
+);
+
+app.delete(
+  '/api/classrooms/:id',
+  wrapAsync(async (req, res) => {
+    const result = await dbPool.query('DELETE FROM classrooms WHERE id = $1 RETURNING id', [req.params.id]);
+    if (!result.rowCount) {
+      res.status(404).json({ error: 'classroom not found' });
+      return;
+    }
+    res.json({ ok: true, id: result.rows[0].id });
+  })
+);
+
+app.get(
+  '/api/lifecycle/deployments',
+  wrapAsync(async (req, res) => {
+    const result = await dbPool.query(
+      `SELECT
+         d.*,
+         b.name AS blueprint_name,
+         b.description AS blueprint_description,
+         c.name AS classroom_name,
+         c.workstation_count,
+         c.starting_vlan,
+         (
+           SELECT COUNT(*)
+           FROM lab_blueprint_vms v
+           WHERE v.blueprint_id = d.blueprint_id
+       ) AS blueprint_vm_count
+       FROM lab_deployments d
+       INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+       INNER JOIN classrooms c ON c.id = d.classroom_id
+       ORDER BY LOWER(b.name) ASC, LOWER(c.name) ASC, d.created_at ASC`
+    );
+    res.json(result.rows.map(mapDeployment));
+  })
+);
+
+app.post(
+  '/api/lifecycle/deployments',
+  wrapAsync(async (req, res) => {
+    const parsed = deploymentCreateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const blueprint = await fetchBlueprintById(parsed.data.blueprintId);
+    if (!blueprint) {
+      res.status(404).json({ error: 'blueprint not found' });
+      return;
+    }
+
+    const classroom = await fetchClassroomById(parsed.data.classroomId);
+    if (!classroom) {
+      res.status(404).json({ error: 'classroom not found' });
+      return;
+    }
+
+    const deploymentInsert = await dbPool.query(
+      `INSERT INTO lab_deployments
+        (id, blueprint_id, classroom_id, status, last_action, created_at, updated_at)
+       VALUES ($1, $2, $3, 'idle', 'prepare', NOW(), NOW())
+       RETURNING id`,
+      [uuidv4(), blueprint.id, classroom.id]
+    );
+
+    const deploymentId = deploymentInsert.rows[0].id;
+    const deployment = await fetchDeploymentById(deploymentId);
+
+    res.status(201).json({
+      ok: true,
+      deployment
+    });
+  })
+);
+
+app.post(
+  '/api/lifecycle/deployments/:id/:action',
+  wrapAsync(async (req, res) => {
+    const action = req.params.action;
+    if (!['deploy', 'start', 'stop', 'destroy'].includes(action)) {
+      res.status(400).json({ error: 'invalid deployment lifecycle action' });
+      return;
+    }
+
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const runId = `deployment-${deployment.id}-${Date.now()}`;
+    const jobName =
+      action === 'deploy'
+        ? 'apply'
+        : action === 'destroy'
+          ? 'destroy'
+          : action;
+    const job = await queues.terraform.add(
+      jobName,
+      {
+        action,
+        labInstanceId: deployment.id,
+        runId,
+        deploymentId: deployment.id,
+        blueprint: buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom })
+      },
+      {
+        attempts: 1,
+        ...queueRetention
+      }
+    );
+
+    const updated = await updateDeploymentState({
+      deploymentId: deployment.id,
+      action,
+      status: 'queued',
+      jobId: String(job.id),
+      runId
+    });
+
+    res.json({
+      ok: true,
+      deployment: updated,
+      jobId: job.id,
+      runId
+    });
+  })
+);
+
+app.delete(
+  '/api/lifecycle/deployments/:id',
+  wrapAsync(async (req, res) => {
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    if (!['idle', 'failed', 'destroyed'].includes(deployment.status)) {
+      res.status(409).json({ error: 'deployment can only be deleted when it is not deployed' });
+      return;
+    }
+
+    const result = await dbPool.query('DELETE FROM lab_deployments WHERE id = $1 RETURNING id', [req.params.id]);
+    res.json({ ok: true, id: result.rows[0].id });
+  })
+);
 
 app.get(
   '/api/templates',
@@ -572,6 +872,77 @@ app.get('/api/queues', async (req, res) => {
   } catch (err) {
     console.error('Unable to fetch queues', err);
     res.status(500).json({ error: 'unable to fetch queue stats' });
+  }
+});
+
+app.get('/api/jobs', async (req, res) => {
+  try {
+    const payload = [];
+    for (const [name, queue] of Object.entries(queues)) {
+      const jobs = await queue.getJobs(['active', 'waiting', 'delayed', 'completed', 'failed'], 0, 49, true);
+      for (const job of jobs) {
+        const state = await job.getState();
+        const createdAt = job.timestamp ? new Date(job.timestamp).toISOString() : null;
+        const startedAt = job.processedOn ? new Date(job.processedOn).toISOString() : null;
+        const finishedAt = job.finishedOn ? new Date(job.finishedOn).toISOString() : null;
+        const durationMs =
+          job.processedOn && job.finishedOn
+            ? Math.max(0, job.finishedOn - job.processedOn)
+            : job.processedOn
+              ? Math.max(0, Date.now() - job.processedOn)
+              : null;
+        const blueprint = job.data?.blueprint ?? null;
+        const associatedLab =
+          blueprint?.name && blueprint?.classroomName
+            ? `${blueprint.name} @ ${blueprint.classroomName}`
+            : blueprint?.name ?? job.data?.labInstanceId ?? 'n/a';
+
+        payload.push({
+          id: String(job.id),
+          queue: queue.name,
+          queueKey: name,
+          name: job.name,
+          state,
+          action: job.data?.action ?? job.name,
+          associatedLab,
+          runId: job.data?.runId ?? null,
+          createdAt,
+          startedAt,
+          finishedAt,
+          durationMs,
+          attemptsMade: job.attemptsMade ?? 0,
+          failedReason: job.failedReason ?? null
+        });
+      }
+    }
+
+    payload.sort((a, b) => new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime());
+    res.json(payload);
+  } catch (err) {
+    console.error('Unable to fetch jobs', err);
+    res.status(500).json({ error: 'unable to fetch jobs' });
+  }
+});
+
+app.post('/api/jobs/clear-history', async (req, res) => {
+  try {
+    const summary = {};
+    for (const [name, queue] of Object.entries(queues)) {
+      let removed = 0;
+      for (const status of ['completed', 'failed']) {
+        while (true) {
+          const deleted = await queue.clean(0, 1000, status);
+          removed += deleted.length;
+          if (!deleted.length) break;
+        }
+      }
+      summary[name] = removed;
+    }
+
+    res.json({ ok: true, removed: summary });
+  } catch (err) {
+    console.error('Unable to clear job history', err);
+    res.status(500).json({ error: 'unable to clear job history' });
   }
 });
 

@@ -79,6 +79,7 @@ variable "vm_definitions" {
     name         = string
     clone_source = string
     full_clone   = bool
+    vlan_tag     = number
   }))
   default = []
 }

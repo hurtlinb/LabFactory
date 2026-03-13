@@ -1,7 +1,8 @@
 const state = {
+  classrooms: [],
   templates: [],
   blueprints: [],
-  lifecycleLabs: [],
+  deployments: [],
   currentBlueprint: createEmptyBlueprint()
 };
 
@@ -11,6 +12,7 @@ const globalStatus = document.getElementById('globalStatus');
 
 const blueprintList = document.getElementById('blueprintList');
 const modelList = document.getElementById('modelList');
+const classroomList = document.getElementById('classroomList');
 const lifecycleList = document.getElementById('lifecycleList');
 const templatePalette = document.getElementById('templatePalette');
 const templateCount = document.getElementById('templateCount');
@@ -24,14 +26,20 @@ const blueprintDescriptionInput = document.getElementById('blueprintDescription'
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
 const newBlueprintButton = document.getElementById('newBlueprintButton');
 const templateForm = document.getElementById('templateForm');
+const classroomForm = document.getElementById('classroomForm');
+const deploymentForm = document.getElementById('deploymentForm');
+const deploymentBlueprintSelect = document.getElementById('deploymentBlueprintSelect');
+const deploymentClassroomSelect = document.getElementById('deploymentClassroomSelect');
 
 const queueTableBody = document.getElementById('queueTableBody');
+const jobsTableBody = document.getElementById('jobsTableBody');
 const workersContainer = document.getElementById('workers');
-const terraformButton = document.getElementById('terraformJobButton');
 const terraformStatus = document.getElementById('terraformJobStatus');
 const terraformSettingsForm = document.getElementById('terraformSettingsForm');
 const terraformSettingsStatus = document.getElementById('terraformSettingsStatus');
 const resetSettingsButton = document.getElementById('resetSettingsButton');
+const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
+const settingsStatus = document.getElementById('settingsStatus');
 
 const statusTimers = new WeakMap();
 
@@ -131,6 +139,28 @@ function renderBlueprintList() {
   });
 }
 
+function renderDeploymentSelectors() {
+  if (deploymentBlueprintSelect) {
+    const selected = deploymentBlueprintSelect.value;
+    deploymentBlueprintSelect.innerHTML =
+      '<option value="">Select a blueprint</option>' +
+      state.blueprints
+        .map(blueprint => `<option value="${blueprint.id}">${escapeHtml(blueprint.name)}</option>`)
+        .join('');
+    deploymentBlueprintSelect.value = selected;
+  }
+
+  if (deploymentClassroomSelect) {
+    const selected = deploymentClassroomSelect.value;
+    deploymentClassroomSelect.innerHTML =
+      '<option value="">Select a classroom</option>' +
+      state.classrooms
+        .map(classroom => `<option value="${classroom.id}">${escapeHtml(classroom.name)}</option>`)
+        .join('');
+    deploymentClassroomSelect.value = selected;
+  }
+}
+
 function renderTemplates() {
   templateCount.textContent = `${state.templates.length} model${state.templates.length > 1 ? 's' : ''}`;
 
@@ -223,6 +253,52 @@ function renderModelList() {
   });
 }
 
+function renderClassrooms() {
+  if (!classroomList) return;
+  if (!state.classrooms.length) {
+    classroomList.innerHTML = '<p class="placeholder">No classrooms registered yet.</p>';
+    return;
+  }
+
+  classroomList.innerHTML = state.classrooms
+    .map(
+      classroom => `
+        <article class="blueprint-item">
+          <div class="panel-head">
+            <div>
+              <strong>${escapeHtml(classroom.name)}</strong>
+              <p class="muted">${classroom.workstationCount} workstation(s)</p>
+            </div>
+            <button class="icon-btn delete-classroom-button" type="button" data-classroom-id="${classroom.id}" aria-label="Delete classroom">×</button>
+          </div>
+          <div class="template-meta">
+            <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
+            <span class="mini-pill">VLAN end: ${classroom.vlans[classroom.vlans.length - 1]}</span>
+          </div>
+          <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
+        </article>
+      `
+    )
+    .join('');
+
+  classroomList.querySelectorAll('.delete-classroom-button').forEach(button => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await fetchJson(`/api/classrooms/${button.dataset.classroomId}`, { method: 'DELETE' });
+        await loadClassrooms();
+        showMessage(globalStatus, 'Classroom deleted.', 'success');
+      } catch (error) {
+        showMessage(globalStatus, error.message, 'danger');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+
+  renderDeploymentSelectors();
+}
+
 function renderCanvas() {
   vmCount.textContent = `${state.currentBlueprint.vms.length} VM`;
 
@@ -280,21 +356,22 @@ function renderCanvas() {
 
 function renderLifecycleLabs() {
   if (!lifecycleList) return;
-  if (!state.lifecycleLabs.length) {
-    lifecycleList.innerHTML = '<p class="placeholder">No saved labs available yet.</p>';
+  if (!state.deployments.length) {
+    lifecycleList.innerHTML = '<p class="placeholder">No deployments yet.</p>';
     return;
   }
 
-  lifecycleList.innerHTML = state.lifecycleLabs
+  lifecycleList.innerHTML = state.deployments
     .map(
-      lab => {
-        const actions = resolveLifecycleActions(lab.lifecycle.status);
+      deployment => {
+        const actions = resolveLifecycleActions(deployment.status);
+        const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
         const actionMarkup = actions.busy
           ? '<span class="loading-spinner" aria-hidden="true"></span>'
           : actions.items
               .map(
                 action =>
-                  `<button class="icon-btn lifecycle-action" type="button" data-action="${action.action}" data-blueprint-id="${lab.id}" aria-label="${action.label}" title="${action.label}">${action.icon}</button>`
+                  `<button class="icon-btn lifecycle-action" type="button" data-action="${action.action}" data-deployment-id="${deployment.id}" aria-label="${action.label}" title="${action.label}">${action.icon}</button>`
               )
               .join('');
 
@@ -303,12 +380,19 @@ function renderLifecycleLabs() {
           <div class="panel-head">
             <div>
               <strong style="display:inline-flex; align-items:center; gap:8px;">
-                <span>${escapeHtml(lab.name)} (${escapeHtml(lab.lifecycle.status || 'idle')})</span>
+                <span>${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${escapeHtml(deployment.status || 'idle')})</span>
                 ${actionMarkup}
               </strong>
-              <p class="muted">${escapeHtml(lab.description || 'No description')}</p>
+              <p class="muted">${escapeHtml(deployment.blueprint.description || 'No description')}</p>
             </div>
-            <span class="pill">${lab.vmCount} VM</span>
+            <div class="inline-actions">
+              <span class="pill">${deployment.totalVmCount} VM</span>
+              ${
+                canDeleteDeployment
+                  ? `<button class="icon-btn delete-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Supprimer le déploiement" title="Supprimer le déploiement">🗑</button>`
+                  : ''
+              }
+            </div>
           </div>
         </article>
       `;
@@ -321,7 +405,7 @@ function renderLifecycleLabs() {
       button.disabled = true;
       try {
         const result = await fetchJson(
-          `/api/lifecycle/labs/${button.dataset.blueprintId}/${button.dataset.action}`,
+          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${button.dataset.action}`,
           { method: 'POST' }
         );
         await refreshLifecycleLabs();
@@ -338,11 +422,34 @@ function renderLifecycleLabs() {
       }
     });
   });
+
+  lifecycleList.querySelectorAll('.delete-deployment-button').forEach(button => {
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      try {
+        await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, {
+          method: 'DELETE'
+        });
+        await refreshLifecycleLabs();
+        showMessage(globalStatus, 'Deployment deleted.', 'success');
+      } catch (error) {
+        showMessage(globalStatus, error.message, 'danger');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 function resolveLifecycleActions(status) {
   if (['queued', 'deploying', 'starting', 'stopping', 'destroying'].includes(status)) {
     return { busy: true, items: [] };
+  }
+  if (status === 'destroyed') {
+    return {
+      busy: false,
+      items: [{ action: 'deploy', icon: '↑', label: 'Deploy lab' }]
+    };
   }
   if (status === 'running') {
     return { busy: false, items: [{ action: 'stop', icon: '■', label: 'Stop lab' }] };
@@ -359,7 +466,13 @@ function resolveLifecycleActions(status) {
   if (status === 'deployed') {
     return { busy: false, items: [{ action: 'stop', icon: '■', label: 'Stop lab' }] };
   }
-  return { busy: false, items: [{ action: 'deploy', icon: '⬆', label: 'Deploy lab' }] };
+  return {
+    busy: false,
+    items: [
+      { action: 'deploy', icon: '⬆', label: 'Deploy lab' },
+      { action: 'destroy', icon: '✕', label: 'Destroy deployment' }
+    ]
+  };
 }
 
 function updateVm(vmId, mutator) {
@@ -407,13 +520,19 @@ async function loadTemplates() {
   renderTemplates();
 }
 
+async function loadClassrooms() {
+  state.classrooms = await fetchJson('/api/classrooms');
+  renderClassrooms();
+}
+
 async function loadBlueprints() {
   state.blueprints = await fetchJson('/api/blueprints');
   renderBlueprintList();
+  renderDeploymentSelectors();
 }
 
 async function refreshLifecycleLabs() {
-  state.lifecycleLabs = await fetchJson('/api/lifecycle/labs');
+  state.deployments = await fetchJson('/api/lifecycle/deployments');
   renderLifecycleLabs();
 }
 
@@ -528,6 +647,7 @@ function escapeHtmlAttr(value) {
 }
 
 function fillSettingsForm(settings) {
+  if (!terraformSettingsForm) return;
   Object.entries(settings).forEach(([key, value]) => {
     const field = terraformSettingsForm.elements[key];
     if (!field) return;
@@ -540,6 +660,7 @@ function fillSettingsForm(settings) {
 }
 
 function collectSettingsPayload() {
+  if (!terraformSettingsForm) return {};
   const payload = {};
   Array.from(terraformSettingsForm.elements).forEach(element => {
     if (!element.name) return;
@@ -558,6 +679,7 @@ function collectSettingsPayload() {
 }
 
 async function loadTerraformSettings() {
+  if (!terraformSettingsForm || !terraformSettingsStatus) return;
   try {
     const settings = await fetchJson('/api/settings/terraform');
     fillSettingsForm(settings);
@@ -638,6 +760,52 @@ async function refreshQueues() {
   }
 }
 
+function formatDuration(durationMs) {
+  if (durationMs == null) return 'n/a';
+  if (durationMs < 1000) return `${durationMs} ms`;
+  const totalSeconds = Math.floor(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return `${minutes}m ${seconds}s`;
+}
+
+function formatJobDetail(job) {
+  if (job.failedReason) return job.failedReason;
+  if (job.runId) return job.runId;
+  return '-';
+}
+
+async function refreshJobs() {
+  if (!jobsTableBody) return;
+  try {
+    const jobs = await fetchJson('/api/jobs');
+    if (!jobs.length) {
+      jobsTableBody.innerHTML = '<tr><td colspan="8">No jobs yet.</td></tr>';
+      return;
+    }
+
+    jobsTableBody.innerHTML = jobs
+      .map(
+        job => `
+          <tr>
+            <td>#${escapeHtml(job.id)}</td>
+            <td>${escapeHtml(job.queue)}</td>
+            <td>${escapeHtml(job.state ?? 'unknown')}</td>
+            <td>${escapeHtml(job.associatedLab ?? 'n/a')}</td>
+            <td>${escapeHtml(job.action ?? job.name ?? 'n/a')}</td>
+            <td>${escapeHtml(formatDuration(job.durationMs))}</td>
+            <td>${escapeHtml(job.createdAt ? new Date(job.createdAt).toLocaleString() : 'n/a')}</td>
+            <td title="${escapeHtmlAttr(formatJobDetail(job))}">${escapeHtml(formatJobDetail(job))}</td>
+          </tr>
+        `
+      )
+      .join('');
+  } catch {
+    jobsTableBody.innerHTML = '<tr><td colspan="8">Unable to load jobs.</td></tr>';
+  }
+}
+
 async function refreshWorkers() {
   try {
     const workers = await fetchJson('/api/workers');
@@ -687,6 +855,50 @@ templateForm.addEventListener('submit', async event => {
   }
 });
 
+classroomForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = new FormData(classroomForm);
+  const payload = {
+    name: String(form.get('name') || '').trim(),
+    workstationCount: Number(form.get('workstationCount') || 0),
+    startingVlan: Number(form.get('startingVlan') || 0)
+  };
+
+  try {
+    await fetchJson('/api/classrooms', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    classroomForm.reset();
+    await loadClassrooms();
+    showMessage(globalStatus, 'Classroom created.', 'success');
+  } catch (error) {
+    showMessage(globalStatus, error.message, 'danger');
+  }
+});
+
+deploymentForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = new FormData(deploymentForm);
+  const payload = {
+    blueprintId: String(form.get('blueprintId') || ''),
+    classroomId: String(form.get('classroomId') || '')
+  };
+
+  try {
+    await fetchJson('/api/lifecycle/deployments', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    await refreshLifecycleLabs();
+    showMessage(globalStatus, 'Deployment prepared.', 'success');
+  } catch (error) {
+    showMessage(globalStatus, error.message, 'danger');
+  }
+});
+
 newBlueprintButton.addEventListener('click', () => {
   resetBlueprintEditor();
 });
@@ -718,7 +930,7 @@ dropzone.addEventListener('drop', event => {
   addVmFromTemplate(templateId);
 });
 
-terraformSettingsForm.addEventListener('submit', async event => {
+terraformSettingsForm?.addEventListener('submit', async event => {
   event.preventDefault();
   try {
     await fetchJson('/api/settings/terraform', {
@@ -733,21 +945,23 @@ terraformSettingsForm.addEventListener('submit', async event => {
   }
 });
 
-resetSettingsButton.addEventListener('click', () => {
+resetSettingsButton?.addEventListener('click', () => {
   loadTerraformSettings();
 });
 
-terraformButton.addEventListener('click', async () => {
-  terraformButton.disabled = true;
-  showMessage(terraformStatus, 'Queueing Terraform job...', 'warning');
+clearJobHistoryButton?.addEventListener('click', async () => {
+  clearJobHistoryButton.disabled = true;
   try {
-    const payload = await fetchJson('/api/jobs/terraform', { method: 'POST' });
-    showMessage(terraformStatus, `Job ${payload.jobId} queued in ${payload.queue}.`, 'success');
-    await refreshQueues();
+    await fetchJson('/api/jobs/clear-history', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    await Promise.all([refreshQueues(), refreshJobs()]);
+    showMessage(settingsStatus, "Historique des jobs vidé.", 'success');
   } catch (error) {
-    showMessage(terraformStatus, error.message, 'danger');
+    showMessage(settingsStatus, error.message, 'danger');
   } finally {
-    terraformButton.disabled = false;
+    clearJobHistoryButton.disabled = false;
   }
 });
 
@@ -756,15 +970,18 @@ async function bootstrap() {
   syncBlueprintFields();
   renderCanvas();
   await Promise.all([
+    loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),
     refreshLifecycleLabs(),
     loadTerraformSettings(),
     refreshQueues(),
+    refreshJobs(),
     refreshWorkers()
   ]);
   setInterval(() => {
     refreshQueues();
+    refreshJobs();
     refreshWorkers();
     refreshLifecycleLabs();
   }, 5000);

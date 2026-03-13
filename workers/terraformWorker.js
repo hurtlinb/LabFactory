@@ -89,16 +89,14 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
 const updateLifecycleStatus = async (blueprintId, status, details = {}) => {
   if (!blueprintId) return;
   await dbPool.query(
-    `INSERT INTO lab_blueprint_lifecycle
-      (blueprint_id, status, last_action, last_job_id, last_run_id, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW())
-     ON CONFLICT (blueprint_id)
-     DO UPDATE SET
-       status = EXCLUDED.status,
-       last_action = EXCLUDED.last_action,
-       last_job_id = EXCLUDED.last_job_id,
-       last_run_id = EXCLUDED.last_run_id,
-       updated_at = NOW()`,
+    `UPDATE lab_deployments
+     SET
+       status = $2,
+       last_action = $3,
+       last_job_id = $4,
+       last_run_id = $5,
+       updated_at = NOW()
+     WHERE id = $1`,
     [blueprintId, status, details.action ?? 'deploy', details.jobId ?? null, details.runId ?? null]
   );
 };
@@ -177,7 +175,8 @@ export function startTerraformWorker(connection) {
               vmid: Number(vm.vmid),
               name: vm.name,
               clone_source: String(vm.cloneSource),
-              full_clone: Boolean(vm.fullClone)
+              full_clone: Boolean(vm.fullClone),
+              vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
           }
           assertRequiredTerraformEnvSettings(merged);

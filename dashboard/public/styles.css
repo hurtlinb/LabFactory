@@ -93,7 +93,22 @@ select {
 
 .nav {
   display: grid;
+  gap: 18px;
+}
+
+.nav-group {
+  display: grid;
   gap: 10px;
+}
+
+.nav-group-title {
+  margin: 0 0 2px;
+  padding: 0 8px;
+  color: rgba(226, 232, 240, 0.56);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .nav button {
@@ -165,6 +180,10 @@ select {
 
 .panel-wide {
   min-height: 620px;
+}
+
+.panel-full {
+  margin-top: 24px;
 }
 
 .panel-head,
@@ -452,6 +471,16 @@ select:focus {
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--muted);
+}
+
+.jobs-table td {
+  white-space: nowrap;
+}
+
+.jobs-table td:last-child {
+  max-width: 360px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .worker-card {

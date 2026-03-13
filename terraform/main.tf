@@ -23,6 +23,7 @@ locals {
       name         = var.vm_name
       clone_source = var.vm_template_name
       full_clone   = var.vm_full_clone
+      vlan_tag     = var.network_vlan_tag
     }
   ]
 
@@ -59,6 +60,6 @@ resource "proxmox_vm_qemu" "lab_vm" {
     model    = var.network_model
     bridge   = var.network_bridge
     firewall = var.network_firewall
-    tag      = var.network_vlan_tag == 0 ? null : var.network_vlan_tag
+    tag      = each.value.vlan_tag == 0 ? null : each.value.vlan_tag
   }
 }
