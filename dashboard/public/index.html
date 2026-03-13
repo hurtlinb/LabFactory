@@ -50,6 +50,31 @@
                 <span>Name</span>
                 <input type="text" name="name" placeholder="VM Ubuntu 24.04" required>
               </label>
+              <fieldset class="field os-fieldset">
+                <legend>OS</legend>
+                <div class="os-choice-grid">
+                  <label class="os-choice-card">
+                    <input type="radio" name="osType" value="windows11" required>
+                    <img src="/assets/os-windows11.svg" alt="" aria-hidden="true">
+                    <span>Windows 11</span>
+                  </label>
+                  <label class="os-choice-card">
+                    <input type="radio" name="osType" value="windows-server" required>
+                    <img src="/assets/os-windows-server.svg" alt="" aria-hidden="true">
+                    <span>Windows Server</span>
+                  </label>
+                  <label class="os-choice-card">
+                    <input type="radio" name="osType" value="ubuntu" required checked>
+                    <img src="/assets/os-ubuntu.svg" alt="" aria-hidden="true">
+                    <span>Ubuntu</span>
+                  </label>
+                  <label class="os-choice-card">
+                    <input type="radio" name="osType" value="other" required>
+                    <img src="/assets/os-other.svg" alt="" aria-hidden="true">
+                    <span>Other</span>
+                  </label>
+                </div>
+              </fieldset>
               <div class="split">
                 <label class="field">
                   <span>Proxmox VMID</span>
@@ -80,11 +105,10 @@
 
       <section class="page" data-view="blueprint">
         <div class="hero-grid">
-          <article class="panel">
+          <article class="panel panel-full">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">blueprints</p>
-                <h3>Saved labs</h3>
               </div>
               <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
             </div>
@@ -99,9 +123,7 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">palette</p>
-                <h3>Drag a VM model</h3>
               </div>
-              <span id="templateCount" class="pill">0 models</span>
             </div>
             <div id="templatePalette" class="template-palette">
               <p class="placeholder">No VM models yet.</p>
@@ -112,7 +134,7 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">workspace</p>
-                <h3 id="editorTitle">New blueprint</h3>
+                <h3>Blueprint</h3>
               </div>
               <div class="inline-actions">
                 <span id="vmCount" class="pill">0 VM</span>
@@ -185,7 +207,7 @@
         <article class="panel">
           <p class="eyebrow">deployment</p>
           <h3>Prepare a lab in a classroom</h3>
-          <form id="deploymentForm" class="stack" style="margin-top:1rem;">
+          <form id="deploymentForm" class="stack section-form">
             <div class="split">
               <label class="field">
                 <span>Blueprint</span>
@@ -222,7 +244,8 @@
           <p class="eyebrow">settings</p>
           <h3>Settings</h3>
           <p class="muted">No settings are currently used on this page.</p>
-          <div class="inline-actions" style="margin-top: 1rem;">
+          <div class="inline-actions section-actions">
+            <button type="button" id="refreshLabsStateButton" class="btn btn-ghost">Refresh labs state</button>
             <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Clear job history</button>
             <div id="settingsStatus" class="status-message" hidden></div>
           </div>

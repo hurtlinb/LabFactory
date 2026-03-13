@@ -1,49 +1,190 @@
 # LabFactory
 
-This project splits the Terraform and Ansible workers into separate container services while providing a single LabFactory dashboard for orchestration and blueprint design.
+LabFactory is a Proxmox lab orchestration dashboard built around:
+- reusable VM models
+- drag-and-drop blueprints
+- classroom-based deployments
+- BullMQ job queues
+- Terraform workers for deploy, start, stop, and destroy operations
 
-## Prerequisites
-- Terraform 1.5+ and Ansible (built into the Dockerfile).
-- Node.js 20+ for the Node scripts.
-- Redis for BullMQ job queues (`docker-compose.yml` provides it).
-- PostgreSQL for persistent storage of VM templates and lab blueprints (`docker-compose.yml` provides it).
+The UI is served by the `dashboard` service, state is stored in PostgreSQL, and workflow execution is handled by Redis-backed workers.
 
-## Structure
-1. `workers/terraformWorker.js` and `workers/ansibleWorker.js` run BullMQ jobs for each workflow.
-2. `workers/startTerraformWorkerService.js` and `workers/startAnsibleWorkerService.js` launch the workers, publish heartbeat/status to `worker:<name>` in Redis, and listen to `control:<name>` channels for pause/resume commands.
-3. `lib/jobMonitor.js` contains `waitForJobCompletion`, which polls job state instead of relying on `QueueEvents`.
-4. `docker-compose.yml` runs five services: `postgres`, `redis`, `terraform-worker`, `ansible-worker`, and `dashboard`.
-5. `terraform/` contains the Proxmox configuration used by Terraform jobs.
+## Stack
+- `dashboard`: Express server + static UI
+- `postgres`: persistent storage for models, blueprints, classrooms, and deployments
+- `redis`: BullMQ backend
+- `terraform-worker`: executes Terraform and Proxmox lifecycle actions
+- `ansible-worker`: reserved for Ansible workflows
 
-## Terraform playbook
-The configuration under `terraform/` uses the Telmate Proxmox provider to create VMs from an existing Proxmox template. Runtime defaults are managed from the LabFactory Settings page and saved to `config/terraform-settings.json`.
+Current Docker services are defined in [docker-compose.yml](./docker-compose.yml).
 
-### Usage
-1. Copy `.env.example` to `.env` and set `PROXMOX_API_URL`, `PROXMOX_NODE`, `PROXMOX_TLS_INSECURE`, `PROXMOX_API_TOKEN_ID`, and `PROXMOX_API_TOKEN_SECRET`.
-2. `npm install`
-3. `docker compose up --build dashboard terraform-worker ansible-worker`
-4. Open <http://localhost:8080>
+## Main Features
 
-### Notes
-- Authentication requires an API token (`PROXMOX_API_TOKEN_ID` and `PROXMOX_API_TOKEN_SECRET` in `.env`).
-- Keep `vm_id` unique on the cluster; Proxmox rejects duplicates.
-- The deployment assumes the configured bridge and storage pool already exist on the Proxmox cluster.
-- VM deployments clone an existing Proxmox template (`vm_template_name`, managed through Settings). The template defines disks, NICs, cloud-init data, and CPU flavor.
-- Terraform workers load `config/terraform-settings.json` for non-secret defaults, and inject Proxmox connection/auth values from environment variables at runtime.
-- Each run writes a sanitized copy to `terraform/.terraform-vars.json`, ensuring Terraform only sees declared variables.
-- The dashboard and terraform worker containers mount the host `config/` directory, so settings survive container restarts.
+### VM Models
+VM models are stored in PostgreSQL and include:
+- name
+- description
+- OS
+  - `Windows 11`
+  - `Windows Server`
+  - `Ubuntu`
+  - `Other`
+- Proxmox template VMID
+- clone mode
+  - `full clone`
+  - `linked clone`
 
-## Dashboard
-The LabFactory sidebar exposes:
-- `Blueprints` to create reusable VM templates and build labs with drag and drop.
-- `Lifecycle` as a placeholder for future deployment flow views.
-- `Settings` to edit non-secret Terraform and VM defaults.
-- `Queues` to monitor BullMQ workers and enqueue Terraform jobs.
+The UI exposes OS selection with logos and uses the selected OS in the model cards and blueprint palette.
 
-Blueprints and templates are stored in PostgreSQL and can be reopened and edited later.
+### Blueprints
+Blueprints are created with drag and drop:
+- drag VM models from the palette
+- create one or more VM instances
+- rename each instance
+- save, reload, and delete blueprints
+
+Each blueprint stores a reusable lab definition in PostgreSQL.
+
+### Classrooms
+Classrooms are used as deployment targets and include:
+- name
+- workstation count
+- starting VLAN
+
+For a classroom deployment:
+- each workstation gets its own VLAN
+- VLAN = `startingVlan + workstationIndex`
+
+### Lifecycle
+Lifecycle works with prepared deployments:
+1. choose a blueprint
+2. choose a classroom
+3. click `Prepare`
+4. launch actions from the deployment row
+
+Supported actions:
+- deploy
+- start
+- stop
+- destroy
+
+Each prepared deployment is stored independently, so multiple labs can target the same classroom.
+
+For a classroom deployment, the blueprint is replicated for every workstation in the classroom.
+
+VM naming convention:
+- `<blueprint-name>-<two-digit-workstation-number>-<instance-name>`
+
+Example:
+- `soc-lab-01-dc`
+- `soc-lab-01-client`
+- `soc-lab-02-dc`
+
+### Lifecycle State Refresh
+The `Settings` page contains a `Refresh labs state` button.
+
+This action queries Proxmox and reconciles deployment state with the real VM state:
+- `running`
+- `stopped`
+- `destroyed`
+- `mixed`
+
+If a deployment is in a mixed state, the `Lifecycle` page shows:
+- both `Start` and `Stop` icons
+- a warning badge
+
+### Jobs
+The `Jobs` page provides:
+- queue counters for Terraform and Ansible
+- worker status
+- one-line job history with:
+  - queue
+  - status
+  - associated lab
+  - action
+  - duration
+  - creation time
+  - detail / error
+
+The `Settings` page also contains a `Clear job history` button to remove completed and failed jobs from BullMQ history.
+
+## Terraform Behavior
+Terraform is used for deployment and destruction.
+
+Important points:
+- Proxmox authentication is done with API token environment variables
+- LabFactory stores template VMIDs in the database
+- before deploy, the Terraform worker resolves template VMID -> Proxmox VM name
+- each deployment uses its own Terraform workspace
+- deployment state is tracked in PostgreSQL
+
+`start` and `stop` do not run Terraform apply; they call the Proxmox API directly on the deployed VMIDs.
+
+## Data Model
+Main SQL migrations:
+- [001-init.sql](./db/migrations/001-init.sql)
+- [002-blueprints.sql](./db/migrations/002-blueprints.sql)
+- [003-lifecycle.sql](./db/migrations/003-lifecycle.sql)
+- [004-classrooms.sql](./db/migrations/004-classrooms.sql)
+- [005-lab-deployments.sql](./db/migrations/005-lab-deployments.sql)
+- [006-template-os-type.sql](./db/migrations/006-template-os-type.sql)
+
+The dashboard keeps track of applied migrations with `schema_migrations`.
+
+## Repository Layout
+- [dashboard/](./dashboard): UI and API server
+- [workers/](./workers): BullMQ workers
+- [terraform/](./terraform): Terraform Proxmox module
+- [config/](./config): runtime configuration files
+- [db/migrations/](./db/migrations): PostgreSQL schema and seed data
+
+## Environment
+Copy `.env.example` to `.env` and set at least:
+- `PROXMOX_API_URL`
+- `PROXMOX_NODE`
+- `PROXMOX_TLS_INSECURE`
+- `PROXMOX_API_TOKEN_ID`
+- `PROXMOX_API_TOKEN_SECRET`
+
+## Run
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start the stack:
+
+```bash
+docker compose up --build
+```
+
+3. Open:
+
+```text
+http://localhost:8080
+```
+
+## Notes
+- PostgreSQL stores VM models, blueprints, classrooms, and prepared deployments.
+- Redis stores BullMQ queue data.
+- `config/terraform-settings.json` is still mounted and available, but the old settings form is no longer used for operational parameters.
+- The old `terraform-validator` service has been removed from the stack.
 
 ## Cleanup
-- `docker compose down` removes all containers and networks.
-- Remove Terraform artifacts in `terraform/.terraform` or `terraform.tfstate*` if you need a clean local state.
+- Stop containers:
 
-This skeleton is ready to host the API, the HTTP Terraform backend, RBAC auditing, and more complex orchestration flows.
+```bash
+docker compose down
+```
+
+- Stop containers and delete volumes:
+
+```bash
+docker compose down -v
+```
+
+- If you need to reset local Terraform cache/state used by the worker, remove:
+  - `terraform/.terraform`
+  - `terraform/.terraform-vars.json`
+  - any local `terraform.tfstate*` artifacts if present

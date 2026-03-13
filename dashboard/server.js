@@ -3,13 +3,20 @@ import express from 'express';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import http from 'node:http';
+import https from 'node:https';
 import { promises as fs } from 'node:fs';
 import { createClient } from 'redis';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { redisConnectionOptions } from '../config/redis.js';
-import { sanitizeSettingsInput, defaultTerraformSettings } from '../lib/terraformSettings.js';
+import {
+  sanitizeSettingsInput,
+  defaultTerraformSettings,
+  readTerraformEnvSettings,
+  assertRequiredTerraformEnvSettings
+} from '../lib/terraformSettings.js';
 
 const require = createRequire(import.meta.url);
 const { Queue } = require('bullmq');
@@ -55,6 +62,7 @@ const wrapAsync =
 const templateSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().optional().default(''),
+  osType: z.enum(['windows11', 'windows-server', 'ubuntu', 'other']),
   proxmoxTemplateVmid: z.number().int().positive(),
   fullClone: z.boolean().optional().default(false),
 });
@@ -113,6 +121,47 @@ const writeTerraformSettings = async settings => {
   await fs.writeFile(terraformSettingsPath, JSON.stringify(settings, null, 2));
 };
 
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true }) =>
+  new Promise((resolve, reject) => {
+    const target = new URL(url);
+    const transport = target.protocol === 'https:' ? https : http;
+    const request = transport.request(
+      target,
+      {
+        method,
+        headers,
+        rejectUnauthorized
+      },
+      response => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => {
+          body += chunk;
+        });
+        response.on('end', () => {
+          if ((response.statusCode ?? 500) >= 400) {
+            reject(new Error(`HTTP ${response.statusCode}: ${body}`));
+            return;
+          }
+          try {
+            resolve(JSON.parse(body));
+          } catch (error) {
+            reject(error);
+          }
+        });
+      }
+    );
+    request.on('error', reject);
+    request.end();
+  });
+
+const proxmoxRequestOptions = envSettings => ({
+  headers: {
+    Authorization: `PVEAPIToken=${envSettings.proxmox_api_token_id}=${envSettings.proxmox_api_token_secret}`
+  },
+  rejectUnauthorized: !envSettings.proxmox_tls_insecure
+});
+
 const runMigrations = async () => {
   await dbPool.query(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -149,6 +198,7 @@ const mapTemplate = row => ({
   id: row.id,
   name: row.name,
   description: row.description ?? '',
+  osType: row.os_type,
   proxmoxTemplateVmid: row.proxmox_template_vmid,
   fullClone: Boolean(row.full_clone),
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
@@ -395,6 +445,49 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
   };
 };
 
+const fetchDeploymentRows = async () => {
+  const result = await dbPool.query(
+    `SELECT
+       d.*,
+       b.name AS blueprint_name,
+       b.description AS blueprint_description,
+       c.name AS classroom_name,
+       c.workstation_count,
+       c.starting_vlan,
+       (
+         SELECT COUNT(*)
+         FROM lab_blueprint_vms v
+         WHERE v.blueprint_id = d.blueprint_id
+       ) AS blueprint_vm_count
+     FROM lab_deployments d
+     INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+     INNER JOIN classrooms c ON c.id = d.classroom_id
+     ORDER BY LOWER(b.name) ASC, LOWER(c.name) ASC, d.created_at ASC`
+  );
+  return result.rows;
+};
+
+const deriveDeploymentStatusFromResources = (currentStatus, expectedVmids, resourceByVmid) => {
+  const states = expectedVmids
+    .map(vmid => resourceByVmid.get(Number(vmid))?.status ?? null)
+    .filter(Boolean);
+
+  if (!states.length) {
+    if (['idle', 'failed', 'destroyed'].includes(currentStatus)) {
+      return currentStatus;
+    }
+    return 'destroyed';
+  }
+
+  const allRunning = states.length === expectedVmids.length && states.every(state => state === 'running');
+  if (allRunning) return 'running';
+
+  const allStopped = states.length === expectedVmids.length && states.every(state => state === 'stopped');
+  if (allStopped) return 'stopped';
+
+  return 'mixed';
+};
+
 const persistBlueprint = async (blueprintId, payload) => {
   const client = await dbPool.connect();
   try {
@@ -480,25 +573,58 @@ app.delete(
 app.get(
   '/api/lifecycle/deployments',
   wrapAsync(async (req, res) => {
-    const result = await dbPool.query(
-      `SELECT
-         d.*,
-         b.name AS blueprint_name,
-         b.description AS blueprint_description,
-         c.name AS classroom_name,
-         c.workstation_count,
-         c.starting_vlan,
-         (
-           SELECT COUNT(*)
-           FROM lab_blueprint_vms v
-           WHERE v.blueprint_id = d.blueprint_id
-       ) AS blueprint_vm_count
-       FROM lab_deployments d
-       INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
-       INNER JOIN classrooms c ON c.id = d.classroom_id
-       ORDER BY LOWER(b.name) ASC, LOWER(c.name) ASC, d.created_at ASC`
-    );
-    res.json(result.rows.map(mapDeployment));
+    const rows = await fetchDeploymentRows();
+    res.json(rows.map(mapDeployment));
+  })
+);
+
+app.post(
+  '/api/lifecycle/deployments/refresh-state',
+  wrapAsync(async (req, res) => {
+    const envSettings = readTerraformEnvSettings();
+    assertRequiredTerraformEnvSettings(envSettings);
+
+    const payload = await requestJson({
+      url: new URL('cluster/resources?type=vm', `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
+      method: 'GET',
+      ...proxmoxRequestOptions(envSettings)
+    });
+
+    const resources = Array.isArray(payload?.data) ? payload.data : [];
+    const resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
+    const rows = await fetchDeploymentRows();
+    const refreshed = [];
+
+    for (const row of rows) {
+      const deployment = mapDeployment(row);
+      const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+      const classroom = await fetchClassroomById(deployment.classroom.id);
+      const vmids = buildTerraformDeploymentPayload({
+        deploymentId: deployment.id,
+        blueprint,
+        classroom
+      }).vms.map(vm => vm.vmid);
+
+      const reconciledStatus = deriveDeploymentStatusFromResources(
+        deployment.status,
+        vmids,
+        resourceByVmid
+      );
+
+      await dbPool.query(
+        `UPDATE lab_deployments
+         SET status = $2, last_action = 'refresh', updated_at = NOW()
+         WHERE id = $1`,
+        [deployment.id, reconciledStatus]
+      );
+
+      const next = await fetchDeploymentById(deployment.id);
+      if (next) {
+        refreshed.push(next);
+      }
+    }
+
+    res.json({ ok: true, deployments: refreshed });
   })
 );
 
@@ -636,13 +762,14 @@ app.post(
     const id = uuidv4();
     const result = await dbPool.query(
       `INSERT INTO vm_templates
-        (id, name, description, proxmox_template_vmid, full_clone, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        (id, name, description, os_type, proxmox_template_vmid, full_clone, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
        RETURNING *`,
       [
         id,
         parsed.data.name,
         parsed.data.description,
+        parsed.data.osType,
         parsed.data.proxmoxTemplateVmid,
         parsed.data.fullClone
       ]

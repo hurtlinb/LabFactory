@@ -15,11 +15,9 @@ const modelList = document.getElementById('modelList');
 const classroomList = document.getElementById('classroomList');
 const lifecycleList = document.getElementById('lifecycleList');
 const templatePalette = document.getElementById('templatePalette');
-const templateCount = document.getElementById('templateCount');
 const vmCount = document.getElementById('vmCount');
 const canvasVmList = document.getElementById('canvasVmList');
 const dropzone = document.getElementById('dropzone');
-const editorTitle = document.getElementById('editorTitle');
 
 const blueprintNameInput = document.getElementById('blueprintName');
 const blueprintDescriptionInput = document.getElementById('blueprintDescription');
@@ -38,6 +36,7 @@ const terraformStatus = document.getElementById('terraformJobStatus');
 const terraformSettingsForm = document.getElementById('terraformSettingsForm');
 const terraformSettingsStatus = document.getElementById('terraformSettingsStatus');
 const resetSettingsButton = document.getElementById('resetSettingsButton');
+const refreshLabsStateButton = document.getElementById('refreshLabsStateButton');
 const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
 const settingsStatus = document.getElementById('settingsStatus');
 
@@ -86,9 +85,6 @@ function setActiveView(view) {
 function syncBlueprintFields() {
   blueprintNameInput.value = state.currentBlueprint.name;
   blueprintDescriptionInput.value = state.currentBlueprint.description;
-  editorTitle.textContent = state.currentBlueprint.id
-    ? `Editing ${state.currentBlueprint.name || 'blueprint'}`
-    : 'New blueprint';
 }
 
 function renderBlueprintList() {
@@ -102,17 +98,15 @@ function renderBlueprintList() {
       blueprint => `
         <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${blueprint.id}">
           <div class="panel-head">
-            <div>
+            <div class="blueprint-summary">
               <strong>${escapeHtml(blueprint.name)}</strong>
               <p class="muted">${escapeHtml(blueprint.description || 'No description')}</p>
             </div>
             <div class="inline-actions">
+              <span class="mini-pill">${new Date(blueprint.updatedAt).toLocaleString()}</span>
               <span class="pill">${blueprint.vmCount} VM</span>
               <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint">×</button>
             </div>
-          </div>
-          <div class="template-meta">
-            <span class="mini-pill">${new Date(blueprint.updatedAt).toLocaleString()}</span>
           </div>
         </article>
       `
@@ -169,8 +163,6 @@ function renderDeploymentSelectors() {
 }
 
 function renderTemplates() {
-  templateCount.textContent = `${state.templates.length} model${state.templates.length > 1 ? 's' : ''}`;
-
   renderModelList();
 
   if (!state.templates.length) {
@@ -183,8 +175,11 @@ function renderTemplates() {
       template => `
         <article class="template-card" draggable="true" data-template-id="${template.id}">
           <div class="template-top">
-            <div class="template-badge">${escapeHtml(getModelBadge(template.name))}</div>
+            <div class="template-badge template-badge-image">
+              <img src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
+            </div>
             <div class="template-meta">
+              <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
               <span class="mini-pill">VMID ${template.proxmoxTemplateVmid}</span>
               <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
             </div>
@@ -224,7 +219,10 @@ function renderModelList() {
               <strong>${escapeHtml(template.name)}</strong>
               <p class="muted">${escapeHtml(template.description || 'No description')}</p>
             </div>
-            <span class="pill">VMID ${template.proxmoxTemplateVmid}</span>
+            <div class="inline-actions">
+              <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
+              <span class="pill">VMID ${template.proxmoxTemplateVmid}</span>
+            </div>
           </div>
           <div class="panel-head">
             <div class="template-meta">
@@ -321,7 +319,9 @@ function renderCanvas() {
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
             <div style="display:flex; gap:12px; align-items:center;">
-              <div class="vm-badge">${escapeHtml(getModelBadge(template?.name || 'VM'))}</div>
+              <div class="vm-badge template-badge-image">
+                <img src="${escapeHtmlAttr(getOsLogo(template?.osType))}" alt="" aria-hidden="true">
+              </div>
               <div>
                 <strong>${escapeHtml(template?.name || 'Unknown template')}</strong>
                 <p class="muted">${escapeHtml(template?.description || '')}</p>
@@ -373,6 +373,7 @@ function renderLifecycleLabs() {
       deployment => {
         const actions = resolveLifecycleActions(deployment.status);
         const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
+        const hasWarning = deployment.status === 'mixed';
         const actionMarkup = actions.busy
           ? '<span class="loading-spinner" aria-hidden="true"></span>'
           : actions.items
@@ -388,6 +389,7 @@ function renderLifecycleLabs() {
             <div>
               <strong style="display:inline-flex; align-items:center; gap:8px;">
                 <span>${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${escapeHtml(deployment.status || 'idle')})</span>
+                ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
                 ${actionMarkup}
               </strong>
               <p class="muted">${escapeHtml(deployment.blueprint.description || 'No description')}</p>
@@ -460,6 +462,15 @@ function resolveLifecycleActions(status) {
   }
   if (status === 'running') {
     return { busy: false, items: [{ action: 'stop', icon: '■', label: 'Stop lab' }] };
+  }
+  if (status === 'mixed') {
+    return {
+      busy: false,
+      items: [
+        { action: 'start', icon: '▶', label: 'Start lab' },
+        { action: 'stop', icon: '■', label: 'Stop lab' }
+      ]
+    };
   }
   if (status === 'stopped') {
     return {
@@ -638,6 +649,20 @@ function getModelBadge(name) {
     .filter(Boolean)
     .slice(0, 2);
   return parts.map(part => part[0]).join('').toUpperCase() || 'VM';
+}
+
+function getOsLabel(osType) {
+  if (osType === 'windows11') return 'Windows 11';
+  if (osType === 'windows-server') return 'Windows Server';
+  if (osType === 'other') return 'Other';
+  return 'Ubuntu';
+}
+
+function getOsLogo(osType) {
+  if (osType === 'windows11') return '/assets/os-windows11.svg';
+  if (osType === 'windows-server') return '/assets/os-windows-server.svg';
+  if (osType === 'other') return '/assets/os-other.svg';
+  return '/assets/os-ubuntu.svg';
 }
 
 function escapeHtml(value) {
@@ -844,6 +869,7 @@ templateForm.addEventListener('submit', async event => {
   const payload = {
     name: String(form.get('name') || '').trim(),
     description: String(form.get('description') || '').trim(),
+    osType: String(form.get('osType') || 'ubuntu'),
     proxmoxTemplateVmid: Number(form.get('proxmoxTemplateVmid') || 0),
     fullClone: form.get('fullClone') === 'on'
   };
@@ -956,6 +982,22 @@ resetSettingsButton?.addEventListener('click', () => {
   loadTerraformSettings();
 });
 
+refreshLabsStateButton?.addEventListener('click', async () => {
+  refreshLabsStateButton.disabled = true;
+  try {
+    await fetchJson('/api/lifecycle/deployments/refresh-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    await refreshLifecycleLabs();
+    showMessage(globalStatus, 'Labs state refreshed.', 'success');
+  } catch (error) {
+    showMessage(globalStatus, error.message, 'danger');
+  } finally {
+    refreshLabsStateButton.disabled = false;
+  }
+});
+
 clearJobHistoryButton?.addEventListener('click', async () => {
   clearJobHistoryButton.disabled = true;
   try {
@@ -964,9 +1006,9 @@ clearJobHistoryButton?.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' }
     });
     await Promise.all([refreshQueues(), refreshJobs()]);
-    showMessage(settingsStatus, "Job history cleared.", 'success');
+    showMessage(globalStatus, "Job history cleared.", 'success');
   } catch (error) {
-    showMessage(settingsStatus, error.message, 'danger');
+    showMessage(globalStatus, error.message, 'danger');
   } finally {
     clearJobHistoryButton.disabled = false;
   }
