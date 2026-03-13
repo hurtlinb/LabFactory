@@ -1,4 +1,16 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: labfactory
+      POSTGRES_USER: labfactory
+      POSTGRES_PASSWORD: labfactory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   redis:
     image: redis:8-alpine
     restart: unless-stopped
@@ -18,6 +30,7 @@ services:
       - ./config:/usr/src/app/config:cached
       - terraform-cache:/usr/src/app/.terraform
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - TF_IN_AUTOMATION=1
       - TF_DATA_DIR=/usr/src/app/.terraform
       - REDIS_HOST=redis
@@ -52,6 +65,7 @@ services:
       - ./config:/usr/src/app/config:cached
       - terraform-cache:/usr/src/app/.terraform
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - TF_IN_AUTOMATION=1
       - TF_DATA_DIR=/usr/src/app/.terraform
       - REDIS_HOST=redis
@@ -63,12 +77,14 @@ services:
     build: .
     image: lab-orchestrator-demo:latest
     depends_on:
+      - postgres
       - redis
     env_file:
       - .env
     ports:
       - "8080:3000"
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     command: npm run dashboard
@@ -77,5 +93,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  postgres-data:
   terraform-cache:
   redis-data:

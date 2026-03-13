@@ -72,6 +72,17 @@ variable "vm_template_name" {
   }
 }
 
+variable "vm_definitions" {
+  description = "Optional list of VMs to create for a lab blueprint deployment."
+  type = list(object({
+    vmid         = number
+    name         = string
+    clone_source = string
+    full_clone   = bool
+  }))
+  default = []
+}
+
 variable "vm_full_clone" {
   description = "Whether the clone should be a full copy."
   type        = bool

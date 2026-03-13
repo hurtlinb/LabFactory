@@ -16,10 +16,27 @@ provider "proxmox" {
   pm_tls_insecure     = var.proxmox_tls_insecure
 }
 
-resource "proxmox_vm_qemu" "blank_vm" {
-  name        = var.vm_name
+locals {
+  vm_definitions = length(var.vm_definitions) > 0 ? var.vm_definitions : [
+    {
+      vmid         = var.vm_id
+      name         = var.vm_name
+      clone_source = var.vm_template_name
+      full_clone   = var.vm_full_clone
+    }
+  ]
+
+  vm_definitions_by_id = {
+    for vm in local.vm_definitions : tostring(vm.vmid) => vm
+  }
+}
+
+resource "proxmox_vm_qemu" "lab_vm" {
+  for_each = local.vm_definitions_by_id
+
+  name        = each.value.name
   target_node = var.proxmox_node
-  vmid        = var.vm_id
+  vmid        = each.value.vmid
 
   cpu {
     cores   = var.vm_cores
@@ -30,8 +47,8 @@ resource "proxmox_vm_qemu" "blank_vm" {
   start_at_node_boot = var.vm_onboot
   pool    = var.vm_pool == "" ? null : var.vm_pool
 
-  clone     = var.vm_template_name
-  full_clone = var.vm_full_clone
+  clone      = each.value.clone_source
+  full_clone = each.value.full_clone
 
   bootdisk = "scsi0"
   scsihw   = var.vm_scsi_hw
