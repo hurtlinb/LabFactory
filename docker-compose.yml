@@ -52,27 +52,6 @@ services:
       - REDIS_PORT=6379
     command: npm run ansible-worker
 
-  terraform-validator:
-    build: .
-    image: lab-orchestrator-demo:latest
-    depends_on:
-      - redis
-      - terraform-worker
-    env_file:
-      - .env
-    volumes:
-      - ./terraform:/usr/src/app/terraform:cached
-      - ./config:/usr/src/app/config:cached
-      - terraform-cache:/usr/src/app/.terraform
-    environment:
-      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
-      - TF_IN_AUTOMATION=1
-      - TF_DATA_DIR=/usr/src/app/.terraform
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    command: npm run validate
-    restart: "no"
-
   dashboard:
     build: .
     image: lab-orchestrator-demo:latest

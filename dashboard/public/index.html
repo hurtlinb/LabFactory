@@ -1,5 +1,5 @@
-<!doctype html>
-<html lang="fr">
+﻿<!doctype html>
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <title>LabFactory</title>
@@ -13,10 +13,11 @@
   <div class="shell">
     <aside class="sidebar">
       <div class="brand-lockup">
-        <div class="logo">LF</div>
-        <div>
-          <h1>LabFactory</h1>
-        </div>
+        <img
+          class="brand-wordmark"
+          src="/assets/labfactory-logoname.png"
+          alt="LabFactory"
+        >
       </div>
 
       <nav class="nav">
@@ -27,22 +28,16 @@
         </div>
         <div class="nav-group">
           <p class="nav-group-title">Configuration</p>
-          <button data-view="models">Modèles de VM</button>
-          <button data-view="classrooms">Salle de cours</button>
-          <button data-view="admin-settings">Paramètres</button>
+          <button data-view="models">VM Models</button>
+          <button data-view="classrooms">Classrooms</button>
+          <button data-view="admin-settings">Settings</button>
           <button data-view="admin-queues">Jobs</button>
         </div>
       </nav>
     </aside>
 
     <main class="main">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">builder</p>
-          <h2>Lab blueprint designer</h2>
-        </div>
-        <div id="globalStatus" class="status-message" hidden></div>
-      </header>
+      <div id="globalStatus" class="status-message" hidden></div>
 
       <section class="page" data-view="models" hidden>
         <div class="hero-grid">
@@ -96,12 +91,6 @@
             <div id="blueprintList" class="saved-list">
               <p class="placeholder">Loading blueprints...</p>
             </div>
-          </article>
-
-          <article class="panel">
-            <p class="eyebrow">usage</p>
-            <h3>How it works</h3>
-            <p class="muted">Create VM models in the dedicated page, then drag those models here to compose a lab blueprint with one or many VM instances.</p>
           </article>
         </div>
 
@@ -195,7 +184,7 @@
       <section class="page" data-view="lifecycle" hidden>
         <article class="panel">
           <p class="eyebrow">deployment</p>
-          <h3>Préparer un lab dans une salle de cours</h3>
+          <h3>Prepare a lab in a classroom</h3>
           <form id="deploymentForm" class="stack" style="margin-top:1rem;">
             <div class="split">
               <label class="field">
@@ -231,10 +220,10 @@
       <section class="page" data-view="admin-settings" hidden>
         <article class="panel">
           <p class="eyebrow">settings</p>
-          <h3>Paramètres</h3>
-          <p class="muted">Aucun paramètre n'est actuellement utilisé dans cette page.</p>
+          <h3>Settings</h3>
+          <p class="muted">No settings are currently used on this page.</p>
           <div class="inline-actions" style="margin-top: 1rem;">
-            <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Vider l'historique des jobs</button>
+            <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Clear job history</button>
             <div id="settingsStatus" class="status-message" hidden></div>
           </div>
         </article>
@@ -282,7 +271,7 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">jobs</p>
-              <h3>Historique des jobs</h3>
+              <h3>Job history</h3>
             </div>
           </div>
           <div class="table-wrap">
@@ -291,12 +280,12 @@
                 <tr>
                   <th>Job</th>
                   <th>Queue</th>
-                  <th>Etat</th>
+                  <th>Status</th>
                   <th>Lab</th>
                   <th>Action</th>
-                  <th>Durée</th>
-                  <th>Créé</th>
-                  <th>Détail</th>
+                  <th>Duration</th>
+                  <th>Created</th>
+                  <th>Detail</th>
                 </tr>
               </thead>
               <tbody id="jobsTableBody">
@@ -312,3 +301,5 @@
   <script type="module" src="/app.js"></script>
 </body>
 </html>
+
+

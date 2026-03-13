@@ -1,4 +1,4 @@
-const state = {
+﻿const state = {
   classrooms: [],
   templates: [],
   blueprints: [],
@@ -54,15 +54,22 @@ function createEmptyBlueprint() {
 }
 
 function showMessage(target, message, status = 'success', timeout = 3200) {
+  if (target === globalStatus && timeout === 3200) {
+    timeout = 3000;
+  }
   target.textContent = message;
   target.dataset.state = status;
   target.hidden = false;
+  target.classList.toggle('toast-message', target === globalStatus);
   const existingTimer = statusTimers.get(target);
   if (existingTimer) {
     clearTimeout(existingTimer);
   }
   const timer = window.setTimeout(() => {
     target.hidden = true;
+    if (target === globalStatus) {
+      target.classList.remove('toast-message');
+    }
   }, timeout);
   statusTimers.set(target, timer);
 }
@@ -389,7 +396,7 @@ function renderLifecycleLabs() {
               <span class="pill">${deployment.totalVmCount} VM</span>
               ${
                 canDeleteDeployment
-                  ? `<button class="icon-btn delete-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Supprimer le déploiement" title="Supprimer le déploiement">🗑</button>`
+                  ? `<button class="icon-btn delete-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Delete deployment" title="Delete deployment">🗑</button>`
                   : ''
               }
             </div>
@@ -957,7 +964,7 @@ clearJobHistoryButton?.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' }
     });
     await Promise.all([refreshQueues(), refreshJobs()]);
-    showMessage(settingsStatus, "Historique des jobs vidé.", 'success');
+    showMessage(settingsStatus, "Job history cleared.", 'success');
   } catch (error) {
     showMessage(settingsStatus, error.message, 'danger');
   } finally {
@@ -990,3 +997,4 @@ async function bootstrap() {
 bootstrap().catch(error => {
   showMessage(globalStatus, error.message || 'Unable to initialise dashboard', 'danger', 5000);
 });
+
