@@ -82,11 +82,27 @@ const blueprintSchema = z.object({
   vms: z.array(blueprintVmSchema).min(1)
 });
 
-const classroomSchema = z.object({
-  name: z.string().trim().min(1),
-  workstationCount: z.number().int().positive(),
-  startingVlan: z.number().int().positive()
-});
+const classroomSchema = z
+  .object({
+    name: z.string().trim().min(1),
+    workstationCount: z.number().int().positive(),
+    startingVlan: z.number().int().positive(),
+    startingSubnet: z.string().trim().min(1)
+  })
+  .refine(
+    data => {
+      const subnet = String(data.startingSubnet).trim();
+      const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.0)?$/.exec(subnet);
+      if (!match) return false;
+      const octets = match.slice(1).map(Number);
+      if (octets.some(part => part < 0 || part > 255)) return false;
+      return octets[2] + data.workstationCount - 1 <= 255;
+    },
+    {
+      message: 'startingSubnet must be like 10.0.200.0 and its third octet range must stay within 255',
+      path: ['startingSubnet']
+    }
+  );
 
 const deploymentCreateSchema = z.object({
   blueprintId: z.string().uuid(),
@@ -101,21 +117,60 @@ const parseVlanMaskBits = mask => {
   return bits;
 };
 
-const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask) => {
-  if (ipLastOctet == null) return true;
+const getSubnetSizeFromMask = mask => {
   const bits = parseVlanMaskBits(mask);
-  if (bits == null) return true;
-  const subnetSize = 2 ** (32 - bits);
+  if (bits == null) return null;
+  return 2 ** (32 - bits);
+};
+
+const getSubnetBaseOctet = (ipLastOctet, mask) => {
+  const subnetSize = getSubnetSizeFromMask(mask);
+  if (subnetSize == null || ipLastOctet == null) return null;
+  return Math.floor(ipLastOctet / subnetSize) * subnetSize;
+};
+
+const getGatewayOctet = (ipLastOctet, mask, gatewayHostOffset) => {
+  const subnetSize = getSubnetSizeFromMask(mask);
+  const subnetBase = getSubnetBaseOctet(ipLastOctet, mask);
+  const offset = Number(gatewayHostOffset);
+  if (subnetSize == null || subnetBase == null || !Number.isInteger(offset) || offset < 1 || offset >= subnetSize - 1) {
+    return null;
+  }
+  return subnetBase + offset;
+};
+
+const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask, gatewayHostOffset = 1) => {
+  if (ipLastOctet == null) return true;
+  const subnetSize = getSubnetSizeFromMask(mask);
+  if (subnetSize == null) return true;
   const offsetInSubnet = ipLastOctet % subnetSize;
-  return offsetInSubnet !== 0 && offsetInSubnet !== subnetSize - 1;
+  if (offsetInSubnet === 0 || offsetInSubnet === subnetSize - 1) return false;
+  const gatewayOctet = getGatewayOctet(ipLastOctet, mask, gatewayHostOffset);
+  return gatewayOctet == null ? true : ipLastOctet !== gatewayOctet;
 };
 
 const validateBlueprintVmIpLastOctets = async payload => {
   const settings = await readPublicTerraformSettings();
   const mask = settings.network_vlan_mask || '/24';
-  const invalidVm = payload.vms.find(vm => !isIpLastOctetCompatibleWithMask(vm.ipLastOctet, mask));
+  const gatewayHostOffset = settings.network_vlan_gateway_host_offset || 1;
+  const invalidVm = payload.vms.find(vm => !isIpLastOctetCompatibleWithMask(vm.ipLastOctet, mask, gatewayHostOffset));
   if (invalidVm) {
-    throw new Error(`VM "${invalidVm.name}" has an IP last octet incompatible with VLAN mask ${mask}`);
+    throw new Error(
+      `VM "${invalidVm.name}" has an IP last octet incompatible with VLAN mask ${mask} and gateway offset ${gatewayHostOffset}`
+    );
+  }
+};
+
+const validateTerraformNetworkSettings = settings => {
+  const mask = settings.network_vlan_mask || '/24';
+  const subnetSize = getSubnetSizeFromMask(mask);
+  if (subnetSize == null) {
+    throw new Error('network_vlan_mask must be between /24 and /30');
+  }
+
+  const gatewayHostOffset = Number(settings.network_vlan_gateway_host_offset);
+  if (!Number.isInteger(gatewayHostOffset) || gatewayHostOffset < 1 || gatewayHostOffset >= subnetSize - 1) {
+    throw new Error(`network_vlan_gateway_host_offset must be between 1 and ${subnetSize - 2} for mask ${mask}`);
   }
 };
 
@@ -275,7 +330,15 @@ const mapClassroom = row => ({
   name: row.name,
   workstationCount: Number(row.workstation_count),
   startingVlan: Number(row.starting_vlan),
+  startingSubnet: row.starting_subnet,
   vlans: Array.from({ length: Number(row.workstation_count) }, (_, index) => Number(row.starting_vlan) + index),
+  subnetOctets: Array.from({ length: Number(row.workstation_count) }, (_, index) => {
+    const [first, second, third] = String(row.starting_subnet)
+      .split('.')
+      .slice(0, 3)
+      .map(Number);
+    return `${first}.${second}.${third + index}.0`;
+  }),
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -297,7 +360,8 @@ const mapDeployment = row => ({
     id: row.classroom_id,
     name: row.classroom_name,
     workstationCount: Number(row.workstation_count ?? 0),
-    startingVlan: Number(row.starting_vlan ?? 0)
+    startingVlan: Number(row.starting_vlan ?? 0),
+    startingSubnet: row.starting_subnet ?? '10.0.200.0'
   },
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
@@ -412,6 +476,7 @@ const fetchDeploymentById = async deploymentId => {
        c.name AS classroom_name,
        c.workstation_count,
        c.starting_vlan,
+       c.starting_subnet,
        (
          SELECT COUNT(*)
          FROM lab_blueprint_vms v
@@ -448,10 +513,15 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
   const baseVmid = computeBlueprintBaseVmid(deploymentId);
   const labName = sanitizeVmName(blueprint.name);
   const vms = [];
+  const [subnetOctet1, subnetOctet2, startingSubnetOctet3] = String(classroom.startingSubnet)
+    .split('.')
+    .slice(0, 3)
+    .map(Number);
 
   for (let workstationIndex = 0; workstationIndex < classroom.workstationCount; workstationIndex += 1) {
     const workstationNumber = String(workstationIndex + 1).padStart(2, '0');
     const vlanTag = classroom.startingVlan + workstationIndex;
+    const subnetThirdOctet = startingSubnetOctet3 + workstationIndex;
 
     for (const vm of blueprint.vms) {
       vms.push({
@@ -461,6 +531,8 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
+        subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
+        subnetThirdOctet,
         vlanTag
       });
     }
@@ -484,6 +556,7 @@ const fetchDeploymentRows = async () => {
        c.name AS classroom_name,
        c.workstation_count,
        c.starting_vlan,
+       c.starting_subnet,
        (
          SELECT COUNT(*)
          FROM lab_blueprint_vms v
@@ -582,10 +655,10 @@ app.post(
 
     const result = await dbPool.query(
       `INSERT INTO classrooms
-        (id, name, workstation_count, starting_vlan, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
+        (id, name, workstation_count, starting_vlan, starting_subnet, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        RETURNING *`,
-      [uuidv4(), parsed.data.name, parsed.data.workstationCount, parsed.data.startingVlan]
+      [uuidv4(), parsed.data.name, parsed.data.workstationCount, parsed.data.startingVlan, parsed.data.startingSubnet]
     );
 
     res.status(201).json(mapClassroom(result.rows[0]));
@@ -1145,6 +1218,7 @@ app.post('/api/settings/terraform', async (req, res) => {
     }
     const existing = await readPublicTerraformSettings();
     const updated = { ...defaultTerraformSettings, ...existing, ...sanitized };
+    validateTerraformNetworkSettings(updated);
     await writeTerraformSettings(updated);
     res.json(updated);
   } catch (err) {

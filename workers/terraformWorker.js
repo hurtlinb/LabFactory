@@ -62,6 +62,61 @@ const proxmoxRequestOptions = envSettings => ({
   rejectUnauthorized: !envSettings.proxmox_tls_insecure
 });
 
+const fetchVmConfig = async (envSettings, node, vmid) => {
+  const apiUrl = new URL(
+    `nodes/${node}/qemu/${vmid}/config`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  const payload = await requestJson({
+    url: apiUrl,
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return payload?.data ?? {};
+};
+
+const extractTemplateDiskConfig = config => {
+  const diskKey = ['scsi', 'virtio', 'sata', 'ide']
+    .flatMap(prefix => Array.from({ length: 10 }, (_, index) => `${prefix}${index}`))
+    .find(key => {
+      const value = String(config?.[key] ?? '');
+      return value && !value.includes('media=cdrom') && !value.includes('cloudinit');
+    });
+
+  if (!diskKey) {
+    throw new Error('Unable to find a bootable template disk in Proxmox VM config');
+  }
+
+  const diskValue = String(config[diskKey] ?? '');
+  const diskStorage = diskValue.split(':')[0];
+  const diskSize = diskValue.match(/size=([^,]+)/)?.[1] ?? null;
+
+  return {
+    diskType: 'disk',
+    diskSlot: diskKey,
+    diskStorage,
+    diskSize
+  };
+};
+
+const extractTemplateCloudInitConfig = config => {
+  const cloudInitKey = ['scsi', 'virtio', 'sata', 'ide']
+    .flatMap(prefix => Array.from({ length: 10 }, (_, index) => `${prefix}${index}`))
+    .find(key => String(config?.[key] ?? '').includes('cloudinit'));
+
+  if (!cloudInitKey) {
+    return {
+      cloudinitSlot: null,
+      cloudinitStorage: null
+    };
+  }
+
+  return {
+    cloudinitSlot: cloudInitKey,
+    cloudinitStorage: String(config[cloudInitKey] ?? '').split(':')[0] || null
+  };
+};
+
 const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
   const apiUrl = new URL(
     'cluster/resources?type=vm',
@@ -79,11 +134,27 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
     if (!match?.name) {
       throw new Error(`Unable to resolve Proxmox template VMID ${vm.cloneSource} to a template name`);
     }
-    return {
-      ...vm,
-      cloneSource: match.name
-    };
-  });
+    return match;
+  }).reduce(async (promise, match, index) => {
+    const acc = await promise;
+    const vm = blueprintVms[index];
+    const config = await fetchVmConfig(envSettings, match.node, vm.cloneSource);
+    const diskConfig = extractTemplateDiskConfig(config);
+    const cloudInitConfig = extractTemplateCloudInitConfig(config);
+    return [
+      ...acc,
+      {
+        ...vm,
+        cloneSource: match.name,
+        diskType: diskConfig.diskType,
+        diskSlot: diskConfig.diskSlot,
+        diskStorage: diskConfig.diskStorage,
+        diskSize: diskConfig.diskSize,
+        cloudinitSlot: cloudInitConfig.cloudinitSlot,
+        cloudinitStorage: cloudInitConfig.cloudinitStorage
+      }
+    ];
+  }, Promise.resolve([]));
 };
 
 const updateLifecycleStatus = async (blueprintId, status, details = {}) => {
@@ -122,6 +193,62 @@ const safeUpdateLifecycleStatus = async (blueprintId, status, details = {}) => {
 };
 
 const workspaceNameFor = blueprintId => `blueprint-${String(blueprintId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+const parseVlanMaskBits = mask => {
+  const match = /^\/(\d{1,2})$/.exec(String(mask || '').trim());
+  if (!match) {
+    throw new Error(`Invalid VLAN mask "${mask}"`);
+  }
+  const bits = Number(match[1]);
+  if (bits < 24 || bits > 30) {
+    throw new Error(`Unsupported VLAN mask "${mask}". Expected /24 to /30.`);
+  }
+  return bits;
+};
+
+const parseSubnetBase = subnet => {
+  const parts = String(subnet || '')
+    .trim()
+    .split('.')
+    .map(part => Number(part));
+  if (
+    parts.length !== 4 ||
+    parts.some(part => !Number.isInteger(part) || part < 0 || part > 255) ||
+    parts[3] !== 0
+  ) {
+    throw new Error(`Invalid classroom subnet "${subnet}". Expected a network like 10.0.200.0.`);
+  }
+  return parts;
+};
+
+const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayHostOffset }) => {
+  if (ipLastOctet == null) {
+    return 'ip=dhcp';
+  }
+
+  const maskBits = parseVlanMaskBits(mask);
+  const subnetSize = 2 ** (32 - maskBits);
+  const offsetInSubnet = Number(ipLastOctet) % subnetSize;
+  if (offsetInSubnet === 0 || offsetInSubnet === subnetSize - 1) {
+    throw new Error(`IP last octet ${ipLastOctet} is reserved for VLAN mask ${mask}`);
+  }
+
+  const gatewayOffset = Number(gatewayHostOffset);
+  if (!Number.isInteger(gatewayOffset) || gatewayOffset < 1 || gatewayOffset >= subnetSize - 1) {
+    throw new Error(`Gateway host offset ${gatewayHostOffset} is invalid for VLAN mask ${mask}`);
+  }
+
+  const subnetBaseOctet = Math.floor(Number(ipLastOctet) / subnetSize) * subnetSize;
+  const gatewayOctet = subnetBaseOctet + gatewayOffset;
+  if (gatewayOctet === Number(ipLastOctet)) {
+    throw new Error(`IP last octet ${ipLastOctet} conflicts with gateway host offset ${gatewayHostOffset}`);
+  }
+
+  const [octet1, octet2, thirdOctet] = parseSubnetBase(subnetBase);
+  const address = `${octet1}.${octet2}.${thirdOctet}.${Number(ipLastOctet)}`;
+  const gateway = `${octet1}.${octet2}.${thirdOctet}.${gatewayOctet}`;
+  return `ip=${address}${mask},gw=${gateway}`;
+};
 
 export const terraformQueueName = 'terraform-workflows';
 
@@ -177,6 +304,18 @@ export function startTerraformWorker(connection) {
               clone_source: String(vm.cloneSource),
               full_clone: Boolean(vm.fullClone),
               ip_last_octet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
+              ipconfig0: buildCloudInitIpConfig({
+                subnetBase: vm.subnetBase,
+                mask: merged.network_vlan_mask,
+                ipLastOctet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
+                gatewayHostOffset: merged.network_vlan_gateway_host_offset
+              }),
+              disk_type: vm.diskType ?? null,
+              disk_slot: vm.diskSlot ?? null,
+              disk_storage: vm.diskStorage ?? null,
+              disk_size: vm.diskSize ?? null,
+              cloudinit_slot: vm.cloudinitSlot ?? null,
+              cloudinit_storage: vm.cloudinitStorage ?? null,
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
           }

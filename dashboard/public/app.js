@@ -279,9 +279,11 @@ function renderClassrooms() {
           </div>
           <div class="template-meta">
             <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
+            <span class="mini-pill">Subnet start: ${classroom.startingSubnet}</span>
             <span class="mini-pill">VLAN end: ${classroom.vlans[classroom.vlans.length - 1]}</span>
           </div>
           <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
+          <p class="muted">Assigned subnets: ${classroom.subnetOctets.join(', ')}</p>
         </article>
       `
     )
@@ -559,25 +561,51 @@ function parseVlanMaskBits(mask) {
   return bits;
 }
 
-function isIpLastOctetCompatibleWithMask(ipLastOctet, mask) {
-  if (ipLastOctet == null) return true;
+function getSubnetSizeFromMask(mask) {
   const bits = parseVlanMaskBits(mask);
-  if (bits == null) return true;
-  const subnetSize = 2 ** (32 - bits);
-  const offsetInSubnet = ipLastOctet % subnetSize;
-  return offsetInSubnet !== 0 && offsetInSubnet !== subnetSize - 1;
+  if (bits == null) return null;
+  return 2 ** (32 - bits);
 }
 
-function getIpLastOctetMaskMessage(mask) {
-  return `IP last octet is not compatible with VLAN mask ${mask}.`;
+function getSubnetBaseOctet(ipLastOctet, mask) {
+  const subnetSize = getSubnetSizeFromMask(mask);
+  if (subnetSize == null || ipLastOctet == null) return null;
+  return Math.floor(ipLastOctet / subnetSize) * subnetSize;
+}
+
+function getGatewayOctet(ipLastOctet, mask, gatewayHostOffset) {
+  const subnetSize = getSubnetSizeFromMask(mask);
+  const subnetBase = getSubnetBaseOctet(ipLastOctet, mask);
+  const offset = Number(gatewayHostOffset);
+  if (subnetSize == null || subnetBase == null || !Number.isInteger(offset) || offset < 1 || offset >= subnetSize - 1) {
+    return null;
+  }
+  return subnetBase + offset;
+}
+
+function isIpLastOctetCompatibleWithMask(ipLastOctet, mask, gatewayHostOffset = 1) {
+  if (ipLastOctet == null) return true;
+  const subnetSize = getSubnetSizeFromMask(mask);
+  if (subnetSize == null) return true;
+  const offsetInSubnet = ipLastOctet % subnetSize;
+  if (offsetInSubnet === 0 || offsetInSubnet === subnetSize - 1) return false;
+  const gatewayOctet = getGatewayOctet(ipLastOctet, mask, gatewayHostOffset);
+  return gatewayOctet == null ? true : ipLastOctet !== gatewayOctet;
+}
+
+function getIpLastOctetMaskMessage(mask, gatewayHostOffset = 1) {
+  return `IP last octet is not compatible with VLAN mask ${mask} and gateway offset ${gatewayHostOffset}.`;
 }
 
 function syncVmIpLastOctetValidity(input) {
   if (!input) return;
   const ipLastOctet = parseIpLastOctet(input.value);
   const mask = state.terraformSettings.network_vlan_mask || '/24';
+  const gatewayHostOffset = state.terraformSettings.network_vlan_gateway_host_offset || 1;
   input.setCustomValidity(
-    isIpLastOctetCompatibleWithMask(ipLastOctet, mask) ? '' : getIpLastOctetMaskMessage(mask)
+    isIpLastOctetCompatibleWithMask(ipLastOctet, mask, gatewayHostOffset)
+      ? ''
+      : getIpLastOctetMaskMessage(mask, gatewayHostOffset)
   );
 }
 
@@ -676,8 +704,19 @@ async function saveBlueprint() {
     if (vm.ipLastOctet != null && (vm.ipLastOctet < 1 || vm.ipLastOctet > 254)) {
       throw new Error('IP last octet must be between 1 and 254');
     }
-    if (!isIpLastOctetCompatibleWithMask(vm.ipLastOctet, state.terraformSettings.network_vlan_mask || '/24')) {
-      throw new Error(getIpLastOctetMaskMessage(state.terraformSettings.network_vlan_mask || '/24'));
+    if (
+      !isIpLastOctetCompatibleWithMask(
+        vm.ipLastOctet,
+        state.terraformSettings.network_vlan_mask || '/24',
+        state.terraformSettings.network_vlan_gateway_host_offset || 1
+      )
+    ) {
+      throw new Error(
+        getIpLastOctetMaskMessage(
+          state.terraformSettings.network_vlan_mask || '/24',
+          state.terraformSettings.network_vlan_gateway_host_offset || 1
+        )
+      );
     }
   });
 
@@ -973,7 +1012,8 @@ classroomForm?.addEventListener('submit', async event => {
   const payload = {
     name: String(form.get('name') || '').trim(),
     workstationCount: Number(form.get('workstationCount') || 0),
-    startingVlan: Number(form.get('startingVlan') || 0)
+    startingVlan: Number(form.get('startingVlan') || 0),
+    startingSubnet: String(form.get('startingSubnet') || '').trim()
   };
 
   try {

@@ -11,6 +11,7 @@
   "vm_scsi_hw": "virtio-scsi-pci",
   "vm_full_clone": false,
   "network_bridge": "vmbr0",
+  "network_vlan_gateway_host_offset": 1,
   "network_model": "virtio",
   "network_firewall": false,
   "network_vlan_tag": 0,

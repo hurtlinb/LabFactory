@@ -24,6 +24,13 @@ locals {
       clone_source = var.vm_template_name
       full_clone   = var.vm_full_clone
       ip_last_octet = null
+      ipconfig0    = "ip=dhcp"
+      disk_type    = null
+      disk_slot    = null
+      disk_storage = null
+      disk_size    = null
+      cloudinit_slot = null
+      cloudinit_storage = null
       vlan_tag     = var.network_vlan_tag
     }
   ]
@@ -39,6 +46,7 @@ resource "proxmox_vm_qemu" "lab_vm" {
   name        = each.value.name
   target_node = var.proxmox_node
   vmid        = each.value.vmid
+  os_type     = "cloud-init"
 
   cpu {
     cores   = var.vm_cores
@@ -51,10 +59,30 @@ resource "proxmox_vm_qemu" "lab_vm" {
 
   clone      = each.value.clone_source
   full_clone = each.value.full_clone
+  ipconfig0  = try(each.value.ipconfig0, "ip=dhcp")
+  bios       = var.vm_bios
 
-  bootdisk = "scsi0"
-  scsihw   = var.vm_scsi_hw
-  agent    = 1
+  scsihw = var.vm_scsi_hw
+  agent = 1
+
+  dynamic "disk" {
+    for_each = try(each.value.disk_type, null) == null ? [] : [1]
+    content {
+      type    = each.value.disk_type
+      slot    = each.value.disk_slot
+      storage = each.value.disk_storage
+      size    = each.value.disk_size
+    }
+  }
+
+  dynamic "disk" {
+    for_each = try(each.value.cloudinit_slot, null) == null ? [] : [1]
+    content {
+      type    = "cloudinit"
+      slot    = each.value.cloudinit_slot
+      storage = each.value.cloudinit_storage
+    }
+  }
 
   network {
     id       = 0

@@ -80,6 +80,13 @@ variable "vm_definitions" {
     clone_source = string
     full_clone   = bool
     ip_last_octet = optional(number)
+    ipconfig0    = optional(string)
+    disk_type    = optional(string)
+    disk_slot    = optional(string)
+    disk_storage = optional(string)
+    disk_size    = optional(string)
+    cloudinit_slot = optional(string)
+    cloudinit_storage = optional(string)
     vlan_tag     = number
   }))
   default = []
@@ -133,10 +140,22 @@ variable "vm_scsi_hw" {
   default     = "virtio-scsi-pci"
 }
 
+variable "vm_bios" {
+  description = "BIOS type for the cloned VM."
+  type        = string
+  default     = "ovmf"
+}
+
 variable "network_bridge" {
   description = "Bridge the VM should attach to."
   type        = string
   default     = "vmbr0"
+}
+
+variable "network_vlan_gateway_host_offset" {
+  description = "Gateway host offset within each VLAN subnet."
+  type        = number
+  default     = 1
 }
 
 variable "network_model" {

@@ -1,0 +1,2 @@
+ALTER TABLE classrooms
+  ADD COLUMN IF NOT EXISTS starting_subnet_octet INTEGER NOT NULL DEFAULT 200;
