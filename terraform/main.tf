@@ -23,6 +23,7 @@ locals {
       name         = var.vm_name
       clone_source = var.vm_template_name
       full_clone   = var.vm_full_clone
+      ip_last_octet = null
       vlan_tag     = var.network_vlan_tag
     }
   ]

@@ -134,7 +134,6 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">workspace</p>
-                <h3>Blueprint</h3>
               </div>
               <div class="inline-actions">
                 <span id="vmCount" class="pill">0 VM</span>
@@ -204,46 +203,67 @@
       </section>
 
       <section class="page" data-view="lifecycle" hidden>
-        <article class="panel">
-          <p class="eyebrow">deployment</p>
-          <h3>Prepare a lab in a classroom</h3>
-          <form id="deploymentForm" class="stack section-form">
-            <div class="split">
-              <label class="field">
-                <span>Blueprint</span>
-                <select id="deploymentBlueprintSelect" name="blueprintId" required>
-                  <option value="">Select a blueprint</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Classroom</span>
-                <select id="deploymentClassroomSelect" name="classroomId" required>
-                  <option value="">Select a classroom</option>
-                </select>
-              </label>
+        <div class="stack">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Prepare a lab</p>
+              </div>
             </div>
-            <button class="btn btn-primary" type="submit">Prepare</button>
-          </form>
-        </article>
+            <form id="deploymentForm" class="stack section-form">
+              <div class="split">
+                <label class="field">
+                  <select id="deploymentBlueprintSelect" name="blueprintId" required>
+                    <option value="">Select a blueprint</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <select id="deploymentClassroomSelect" name="classroomId" required>
+                    <option value="">Select a classroom</option>
+                  </select>
+                </label>
+              </div>
+              <button class="btn btn-primary" type="submit">Prepare</button>
+            </form>
+          </article>
 
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">operations</p>
-              <h3>Deployments</h3>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Operations</p>
+              </div>
             </div>
-          </div>
-          <div id="lifecycleList" class="saved-list">
-            <p class="placeholder">Loading deployments...</p>
-          </div>
-        </article>
+            <div id="lifecycleList" class="saved-list">
+              <p class="placeholder">Loading deployments...</p>
+            </div>
+          </article>
+        </div>
       </section>
 
       <section class="page" data-view="admin-settings" hidden>
         <article class="panel">
           <p class="eyebrow">settings</p>
           <h3>Settings</h3>
-          <p class="muted">No settings are currently used on this page.</p>
+          <p class="muted">Configure the default network parameters used by Terraform jobs.</p>
+          <form id="terraformSettingsForm" class="stack section-form">
+            <label class="field">
+              <span>VLAN mask</span>
+              <select name="network_vlan_mask">
+                <option value="/24">/24</option>
+                <option value="/25">/25</option>
+                <option value="/26">/26</option>
+                <option value="/27">/27</option>
+                <option value="/28">/28</option>
+                <option value="/29">/29</option>
+                <option value="/30">/30</option>
+              </select>
+            </label>
+            <div class="inline-actions">
+              <button type="submit" class="btn btn-primary">Save settings</button>
+              <button type="button" id="resetSettingsButton" class="btn btn-ghost">Reset form</button>
+              <div id="terraformSettingsStatus" class="status-message" hidden></div>
+            </div>
+          </form>
           <div class="inline-actions section-actions">
             <button type="button" id="refreshLabsStateButton" class="btn btn-ghost">Refresh labs state</button>
             <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Clear job history</button>

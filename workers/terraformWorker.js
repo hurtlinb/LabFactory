@@ -176,6 +176,7 @@ export function startTerraformWorker(connection) {
               name: vm.name,
               clone_source: String(vm.cloneSource),
               full_clone: Boolean(vm.fullClone),
+              ip_last_octet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
           }

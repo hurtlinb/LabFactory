@@ -71,6 +71,7 @@ const blueprintVmSchema = z.object({
   id: z.string().uuid().optional(),
   templateId: z.string().uuid(),
   name: z.string().trim().min(1),
+  ipLastOctet: z.number().int().min(1).max(254).nullable().optional(),
   config: z.record(z.string(), z.unknown()).optional().default({})
 });
 
@@ -91,6 +92,32 @@ const deploymentCreateSchema = z.object({
   blueprintId: z.string().uuid(),
   classroomId: z.string().uuid()
 });
+
+const parseVlanMaskBits = mask => {
+  const match = /^\/(\d{1,2})$/.exec(String(mask || '').trim());
+  if (!match) return null;
+  const bits = Number(match[1]);
+  if (bits < 24 || bits > 30) return null;
+  return bits;
+};
+
+const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask) => {
+  if (ipLastOctet == null) return true;
+  const bits = parseVlanMaskBits(mask);
+  if (bits == null) return true;
+  const subnetSize = 2 ** (32 - bits);
+  const offsetInSubnet = ipLastOctet % subnetSize;
+  return offsetInSubnet !== 0 && offsetInSubnet !== subnetSize - 1;
+};
+
+const validateBlueprintVmIpLastOctets = async payload => {
+  const settings = await readPublicTerraformSettings();
+  const mask = settings.network_vlan_mask || '/24';
+  const invalidVm = payload.vms.find(vm => !isIpLastOctetCompatibleWithMask(vm.ipLastOctet, mask));
+  if (invalidVm) {
+    throw new Error(`VM "${invalidVm.name}" has an IP last octet incompatible with VLAN mask ${mask}`);
+  }
+};
 
 const ensureTerraformSettingsFile = async () => {
   try {
@@ -321,6 +348,7 @@ const fetchBlueprintById = async blueprintId => {
       id: row.id,
       name: row.name,
       order: row.vm_order,
+      ipLastOctet: Number.isInteger(row.config?.ipLastOctet) ? row.config.ipLastOctet : null,
       config: row.config ?? {},
       template: {
         id: row.template_id,
@@ -363,7 +391,8 @@ const buildTerraformBlueprintPayload = blueprint => {
       name: sanitizeVmName(`${labName}-${vm.name}`),
       vmid: baseVmid + index,
       cloneSource: String(vm.template.proxmoxTemplateVmid),
-      fullClone: Boolean(vm.template.fullClone)
+      fullClone: Boolean(vm.template.fullClone),
+      ipLastOctet: vm.ipLastOctet ?? null
     }))
   };
 };
@@ -431,6 +460,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
         vmid: baseVmid + vms.length,
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
+        ipLastOctet: vm.ipLastOctet ?? null,
         vlanTag
       });
     }
@@ -507,11 +537,15 @@ const persistBlueprint = async (blueprintId, payload) => {
     await client.query('DELETE FROM lab_blueprint_vms WHERE blueprint_id = $1', [blueprintId]);
 
     for (const [index, vm] of payload.vms.entries()) {
+      const config = {
+        ...(vm.config ?? {}),
+        ...(vm.ipLastOctet == null ? {} : { ipLastOctet: vm.ipLastOctet })
+      };
       await client.query(
         `INSERT INTO lab_blueprint_vms
           (id, blueprint_id, template_id, name, vm_order, config, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`,
-        [vm.id ?? uuidv4(), blueprintId, vm.templateId, vm.name, index, vm.config ?? {}]
+        [vm.id ?? uuidv4(), blueprintId, vm.templateId, vm.name, index, config]
       );
     }
 
@@ -841,6 +875,7 @@ app.post(
       return;
     }
 
+    await validateBlueprintVmIpLastOctets(parsed.data);
     const blueprint = await persistBlueprint(uuidv4(), parsed.data);
     res.status(201).json(blueprint);
   })
@@ -855,6 +890,7 @@ app.put(
       return;
     }
 
+    await validateBlueprintVmIpLastOctets(parsed.data);
     const existing = await fetchBlueprintById(req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'blueprint not found' });

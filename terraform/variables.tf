@@ -79,6 +79,7 @@ variable "vm_definitions" {
     name         = string
     clone_source = string
     full_clone   = bool
+    ip_last_octet = optional(number)
     vlan_tag     = number
   }))
   default = []
@@ -154,4 +155,10 @@ variable "network_vlan_tag" {
   description = "VLAN tag applied to the NIC (0 = none)."
   type        = number
   default     = 0
+}
+
+variable "network_vlan_mask" {
+  description = "CIDR mask associated with the VLAN subnet."
+  type        = string
+  default     = "/24"
 }

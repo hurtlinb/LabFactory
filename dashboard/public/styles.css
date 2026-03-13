@@ -591,6 +591,10 @@ select:focus {
   flex: 1 1 auto;
 }
 
+.vm-controls .vm-ip-field {
+  flex: 0 0 150px;
+}
+
 .vm-controls input {
   min-width: 0;
 }

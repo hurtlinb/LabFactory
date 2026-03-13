@@ -3,6 +3,7 @@
   templates: [],
   blueprints: [],
   deployments: [],
+  terraformSettings: {},
   currentBlueprint: createEmptyBlueprint()
 };
 
@@ -335,8 +336,21 @@ function renderCanvas() {
           </div>
           <div class="vm-controls">
             <label class="field">
-              <span>Instance name</span>
+              <span>Name</span>
               <input type="text" data-field="name" value="${escapeHtmlAttr(vm.name)}">
+            </label>
+            <label class="field vm-ip-field">
+              <span>IP last octet</span>
+              <input
+                type="number"
+                data-field="ipLastOctet"
+                min="1"
+                max="254"
+                step="1"
+                inputmode="numeric"
+                value="${vm.ipLastOctet ?? ''}"
+                placeholder="42"
+              >
             </label>
             <div class="vm-actions">
               <button class="icon-btn" type="button" data-action="remove" aria-label="Remove VM">×</button>
@@ -349,10 +363,18 @@ function renderCanvas() {
 
   canvasVmList.querySelectorAll('.vm-card').forEach(card => {
     const vmId = card.dataset.vmId;
+    const ipLastOctetInput = card.querySelector('[data-field="ipLastOctet"]');
     card.querySelector('[data-field="name"]').addEventListener('input', event => {
       updateVm(vmId, vm => {
         vm.name = event.target.value;
       });
+    });
+    syncVmIpLastOctetValidity(ipLastOctetInput);
+    ipLastOctetInput.addEventListener('input', event => {
+      updateVm(vmId, vm => {
+        vm.ipLastOctet = parseIpLastOctet(event.target.value);
+      });
+      syncVmIpLastOctetValidity(event.target);
     });
     card.querySelector('[data-action="remove"]').addEventListener('click', () => {
       state.currentBlueprint.vms = state.currentBlueprint.vms.filter(vm => vm.id !== vmId);
@@ -514,9 +536,49 @@ function addVmFromTemplate(templateId) {
     id: crypto.randomUUID(),
     templateId,
     name: `${template.name} ${instanceCount}`,
+    ipLastOctet: null,
     config: {}
   });
   renderCanvas();
+}
+
+function parseIpLastOctet(value) {
+  if (value === '' || value == null) return null;
+  const numeric = Number(value);
+  if (!Number.isInteger(numeric) || numeric < 1 || numeric > 254) {
+    return null;
+  }
+  return numeric;
+}
+
+function parseVlanMaskBits(mask) {
+  const match = /^\/(\d{1,2})$/.exec(String(mask || '').trim());
+  if (!match) return null;
+  const bits = Number(match[1]);
+  if (bits < 24 || bits > 30) return null;
+  return bits;
+}
+
+function isIpLastOctetCompatibleWithMask(ipLastOctet, mask) {
+  if (ipLastOctet == null) return true;
+  const bits = parseVlanMaskBits(mask);
+  if (bits == null) return true;
+  const subnetSize = 2 ** (32 - bits);
+  const offsetInSubnet = ipLastOctet % subnetSize;
+  return offsetInSubnet !== 0 && offsetInSubnet !== subnetSize - 1;
+}
+
+function getIpLastOctetMaskMessage(mask) {
+  return `IP last octet is not compatible with VLAN mask ${mask}.`;
+}
+
+function syncVmIpLastOctetValidity(input) {
+  if (!input) return;
+  const ipLastOctet = parseIpLastOctet(input.value);
+  const mask = state.terraformSettings.network_vlan_mask || '/24';
+  input.setCustomValidity(
+    isIpLastOctetCompatibleWithMask(ipLastOctet, mask) ? '' : getIpLastOctetMaskMessage(mask)
+  );
 }
 
 async function fetchJson(url, options = {}) {
@@ -565,6 +627,7 @@ async function loadBlueprint(blueprintId) {
       id: vm.id,
       templateId: vm.template.id,
       name: vm.name,
+      ipLastOctet: vm.ipLastOctet ?? null,
       config: { ...(vm.config || {}) }
     }))
   };
@@ -601,9 +664,22 @@ async function saveBlueprint() {
       id: state.currentBlueprint.id ? vm.id : undefined,
       templateId: vm.templateId,
       name: vm.name.trim(),
+      ipLastOctet: vm.ipLastOctet,
       config: sanitizeConfig(vm.config)
     }))
   };
+
+  payload.vms.forEach(vm => {
+    if (!vm.name) {
+      throw new Error('Each VM must have an instance name');
+    }
+    if (vm.ipLastOctet != null && (vm.ipLastOctet < 1 || vm.ipLastOctet > 254)) {
+      throw new Error('IP last octet must be between 1 and 254');
+    }
+    if (!isIpLastOctetCompatibleWithMask(vm.ipLastOctet, state.terraformSettings.network_vlan_mask || '/24')) {
+      throw new Error(getIpLastOctetMaskMessage(state.terraformSettings.network_vlan_mask || '/24'));
+    }
+  });
 
   const url = state.currentBlueprint.id
     ? `/api/blueprints/${state.currentBlueprint.id}`
@@ -625,6 +701,7 @@ async function saveBlueprint() {
       id: vm.id,
       templateId: vm.template.id,
       name: vm.name,
+      ipLastOctet: vm.ipLastOctet ?? null,
       config: { ...(vm.config || {}) }
     }))
   };
@@ -714,7 +791,9 @@ async function loadTerraformSettings() {
   if (!terraformSettingsForm || !terraformSettingsStatus) return;
   try {
     const settings = await fetchJson('/api/settings/terraform');
+    state.terraformSettings = settings;
     fillSettingsForm(settings);
+    canvasVmList?.querySelectorAll('[data-field="ipLastOctet"]').forEach(syncVmIpLastOctetValidity);
   } catch (error) {
     showMessage(terraformSettingsStatus, error.message, 'danger');
   }
