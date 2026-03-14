@@ -29,6 +29,11 @@ const classroomForm = document.getElementById('classroomForm');
 const deploymentForm = document.getElementById('deploymentForm');
 const deploymentBlueprintSelect = document.getElementById('deploymentBlueprintSelect');
 const deploymentClassroomSelect = document.getElementById('deploymentClassroomSelect');
+const deploymentDetailsDialog = document.getElementById('deploymentDetailsDialog');
+const deploymentDetailsTitle = document.getElementById('deploymentDetailsTitle');
+const deploymentVmDetailsList = document.getElementById('deploymentVmDetailsList');
+const deploymentDetailsStatus = document.getElementById('deploymentDetailsStatus');
+const closeDeploymentDetailsButton = document.getElementById('closeDeploymentDetailsButton');
 
 const queueTableBody = document.getElementById('queueTableBody');
 const jobsTableBody = document.getElementById('jobsTableBody');
@@ -409,7 +414,7 @@ function renderLifecycleLabs() {
               .join('');
 
         return `
-        <article class="blueprint-item">
+        <article class="blueprint-item deployment-card" data-deployment-id="${deployment.id}">
           <div class="panel-head">
             <div>
               <strong style="display:inline-flex; align-items:center; gap:8px;">
@@ -435,7 +440,8 @@ function renderLifecycleLabs() {
     .join('');
 
   lifecycleList.querySelectorAll('.lifecycle-action').forEach(button => {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
       button.disabled = true;
       try {
         const result = await fetchJson(
@@ -458,7 +464,8 @@ function renderLifecycleLabs() {
   });
 
   lifecycleList.querySelectorAll('.delete-deployment-button').forEach(button => {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
       button.disabled = true;
       try {
         await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, {
@@ -473,6 +480,78 @@ function renderLifecycleLabs() {
       }
     });
   });
+
+  lifecycleList.querySelectorAll('.deployment-card').forEach(card => {
+    card.addEventListener('click', async () => {
+      await openDeploymentDetails(card.dataset.deploymentId);
+    });
+  });
+}
+
+function renderDeploymentVmDetails(payload) {
+  if (!deploymentVmDetailsList) return;
+  const vms = Array.isArray(payload?.vms) ? payload.vms : [];
+  if (!vms.length) {
+    deploymentVmDetailsList.innerHTML = '<p class="placeholder">No VMs found for this deployment.</p>';
+    return;
+  }
+
+  deploymentVmDetailsList.innerHTML = `
+    <div class="table-wrap vm-state-table-wrap">
+      <table class="queue-table vm-state-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>VM</th>
+            <th>VMID</th>
+            <th>OS</th>
+            <th>VLAN</th>
+            <th>IP</th>
+            <th>State</th>
+            <th>Proxmox</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${vms
+            .map(
+              vm => `
+                <tr>
+                  <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
+                  <td class="vm-state-name-cell">
+                    <strong>${escapeHtml(vm.name)}</strong>
+                    <span class="muted">${vm.node ? escapeHtml(vm.node) : ''}</span>
+                  </td>
+                  <td>${vm.vmid}</td>
+                  <td>${escapeHtml(getOsLabel(vm.osType))}</td>
+                  <td>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</td>
+                  <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
+                  <td>${escapeHtml(vm.state || 'unknown')}</td>
+                  <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
+                </tr>
+              `
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+async function openDeploymentDetails(deploymentId) {
+  if (!deploymentDetailsDialog || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) return;
+  deploymentDetailsTitle.textContent = 'Deployment';
+  deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs...</p>';
+  deploymentDetailsStatus.hidden = true;
+  deploymentDetailsDialog.showModal();
+
+  try {
+    const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
+    deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
+    renderDeploymentVmDetails(payload);
+  } catch (error) {
+    deploymentVmDetailsList.innerHTML = '<p class="placeholder">Unable to load deployment VMs.</p>';
+    showMessage(deploymentDetailsStatus, error.message, 'danger', 5000);
+  }
 }
 
 function resolveLifecycleActions(status) {
@@ -1137,6 +1216,22 @@ clearJobHistoryButton?.addEventListener('click', async () => {
     showMessage(globalStatus, error.message, 'danger');
   } finally {
     clearJobHistoryButton.disabled = false;
+  }
+});
+
+closeDeploymentDetailsButton?.addEventListener('click', () => {
+  deploymentDetailsDialog?.close();
+});
+
+deploymentDetailsDialog?.addEventListener('click', event => {
+  const rect = deploymentDetailsDialog.getBoundingClientRect();
+  const isOutside =
+    event.clientX < rect.left
+    || event.clientX > rect.right
+    || event.clientY < rect.top
+    || event.clientY > rect.bottom;
+  if (isOutside) {
+    deploymentDetailsDialog.close();
   }
 });
 

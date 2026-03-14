@@ -152,6 +152,8 @@ const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask, gatewayHostOffset = 
   return gatewayOctet == null ? true : ipLastOctet !== gatewayOctet;
 };
 
+const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
+
 const validateBlueprintVmIpLastOctets = async payload => {
   const settings = await readPublicTerraformSettings();
   const mask = settings.network_vlan_mask || '/24';
@@ -554,6 +556,55 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
   };
 };
 
+const fetchClusterVmResources = async () => {
+  const envSettings = readTerraformEnvSettings();
+  assertRequiredTerraformEnvSettings(envSettings);
+  const payload = await requestJson({
+    url: new URL('cluster/resources?type=vm', `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource }) => {
+  if (!resource) {
+    if (['queued', 'deploying'].includes(deploymentStatus)) return 'cloning';
+    if (deploymentStatus === 'destroying') return 'destroying';
+    if (deploymentStatus === 'destroyed') return 'destroyed';
+    return 'missing';
+  }
+
+  if (resource.status === 'stopped') {
+    return 'stopped';
+  }
+
+  if (resource.status === 'running') {
+    if (['queued', 'deploying'].includes(deploymentStatus) && isWindowsOsType(vm.osType)) {
+      return 'waiting for cloudbase-init';
+    }
+    if (deploymentStatus === 'starting') {
+      return 'starting';
+    }
+    return 'ready';
+  }
+
+  return resource.status ?? 'unknown';
+};
+
+const buildDeploymentVmIpAddress = vm => {
+  if (vm.ipLastOctet == null || !vm.subnetBase) {
+    return 'dhcp';
+  }
+
+  const parts = String(vm.subnetBase).split('.');
+  if (parts.length !== 4) {
+    return 'n/a';
+  }
+
+  return `${parts[0]}.${parts[1]}.${parts[2]}.${Number(vm.ipLastOctet)}`;
+};
+
 const fetchDeploymentRows = async () => {
   const result = await dbPool.query(
     `SELECT
@@ -784,6 +835,56 @@ app.post(
     res.status(201).json({
       ok: true,
       deployment
+    });
+  })
+);
+
+app.get(
+  '/api/lifecycle/deployments/:id/vms',
+  wrapAsync(async (req, res) => {
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom });
+
+    let resourceByVmid = new Map();
+    try {
+      const resources = await fetchClusterVmResources();
+      resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
+    } catch (error) {
+      console.error(`Unable to fetch Proxmox VM resources for deployment ${deployment.id}`, error);
+    }
+
+    res.json({
+      deployment: {
+        id: deployment.id,
+        status: deployment.status,
+        blueprintName: deployment.blueprint.name,
+        classroomName: deployment.classroom.name
+      },
+      vms: vmPlan.vms.map(vm => {
+        const resource = resourceByVmid.get(Number(vm.vmid)) ?? null;
+        return {
+          id: vm.id,
+          name: vm.name,
+          vmid: vm.vmid,
+          osType: vm.osType,
+          vlanTag: vm.vlanTag,
+          ipAddress: buildDeploymentVmIpAddress(vm),
+          state: inferDeploymentVmStatus({
+            deploymentStatus: deployment.status,
+            vm,
+            resource
+          }),
+          proxmoxStatus: resource?.status ?? null,
+          node: resource?.node ?? null
+        };
+      })
     });
   })
 );

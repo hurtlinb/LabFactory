@@ -698,6 +698,90 @@ select:focus {
   gap: 10px;
 }
 
+.deployment-card {
+  cursor: pointer;
+  transition: transform 140ms ease, box-shadow 140ms ease, border-color 140ms ease;
+}
+
+.deployment-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(78, 147, 170, 0.24);
+  box-shadow: 0 16px 30px rgba(23, 49, 90, 0.08);
+}
+
+.vm-state-table-wrap {
+  max-height: min(60vh, 640px);
+}
+
+.vm-state-table td:first-child,
+.vm-state-table th:first-child {
+  width: 28px;
+}
+
+.vm-state-table td {
+  white-space: nowrap;
+}
+
+.vm-state-name-cell {
+  text-align: left;
+}
+
+.vm-state-name-cell strong,
+.vm-state-name-cell span {
+  display: block;
+}
+
+.vm-state-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #7d8e7f;
+  box-shadow: 0 0 0 4px rgba(125, 142, 127, 0.12);
+}
+
+.vm-state-dot[data-state='ready'] {
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(115, 167, 95, 0.14);
+}
+
+.vm-state-dot[data-state='waiting for cloudbase-init'],
+.vm-state-dot[data-state='cloning'],
+.vm-state-dot[data-state='starting'],
+.vm-state-dot[data-state='destroying'] {
+  background: var(--brand-deep);
+  box-shadow: 0 0 0 4px rgba(78, 147, 170, 0.14);
+}
+
+.vm-state-dot[data-state='stopped'],
+.vm-state-dot[data-state='destroyed'],
+.vm-state-dot[data-state='missing'] {
+  background: var(--muted);
+  box-shadow: 0 0 0 4px rgba(95, 114, 144, 0.12);
+}
+
+.details-dialog {
+  width: min(1120px, calc(100vw - 24px));
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.details-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.38);
+  backdrop-filter: blur(6px);
+}
+
+.details-card {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border-radius: 28px;
+  background: var(--surface-strong);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+
 .worker-top {
   display: flex;
   justify-content: space-between;

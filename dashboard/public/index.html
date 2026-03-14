@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <title>LabFactory</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="icon" type="image/png" href="/assets/labfactory-logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
@@ -247,6 +248,22 @@
           </article>
         </div>
       </section>
+
+      <dialog id="deploymentDetailsDialog" class="details-dialog">
+        <article class="details-card">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">Deployment details</p>
+              <h3 id="deploymentDetailsTitle">Deployment</h3>
+            </div>
+            <button id="closeDeploymentDetailsButton" class="icon-btn" type="button" aria-label="Close deployment details">×</button>
+          </div>
+          <div id="deploymentDetailsStatus" class="status-message" hidden></div>
+          <div id="deploymentVmDetailsList" class="saved-list">
+            <p class="placeholder">Loading deployment VMs...</p>
+          </div>
+        </article>
+      </dialog>
 
       <section class="page" data-view="admin-settings" hidden>
         <article class="panel">

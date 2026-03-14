@@ -18,6 +18,10 @@ provider "proxmox" {
 
 locals {
   windows_os_types = toset(["windows11", "windows-server"])
+  cloudbase_wait_command = textencodebase64(
+    "while (-not (Test-Path -LiteralPath 'C:\\ProgramData\\cloudbase-init\\done.flag')) { Start-Sleep -Seconds 5 }",
+    "UTF-16LE"
+  )
 
   vm_definitions = length(var.vm_definitions) > 0 ? var.vm_definitions : [
     {
@@ -138,7 +142,7 @@ resource "terraform_data" "wait_for_cloudbase_init" {
 
   provisioner "remote-exec" {
     inline = [
-      "powershell -NoProfile -NonInteractive -Command \"while (-not (Test-Path 'C:\\ProgramData\\cloudbase-init\\done.flag')) { Start-Sleep -Seconds 5 }\""
+      "powershell -NoProfile -NonInteractive -EncodedCommand ${local.cloudbase_wait_command}"
     ]
   }
 }
