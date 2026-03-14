@@ -128,14 +128,33 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
     ...proxmoxRequestOptions(envSettings)
   });
   const resources = Array.isArray(payload?.data) ? payload.data : [];
-
-  return blueprintVms.map(vm => {
+  const matches = blueprintVms.map(vm => {
     const match = resources.find(resource => Number(resource.vmid) === Number(vm.cloneSource));
     if (!match?.name) {
       throw new Error(`Unable to resolve Proxmox template VMID ${vm.cloneSource} to a template name`);
     }
+    if (!match.template) {
+      throw new Error(`Proxmox VMID ${vm.cloneSource} is not marked as a template`);
+    }
     return match;
-  }).reduce(async (promise, match, index) => {
+  });
+  const vmidsByTemplateName = matches.reduce((acc, match) => {
+    if (!acc.has(match.name)) {
+      acc.set(match.name, new Set());
+    }
+    acc.get(match.name).add(Number(match.vmid));
+    return acc;
+  }, new Map());
+  const ambiguousTemplate = Array.from(vmidsByTemplateName.entries()).find(([, vmids]) => vmids.size > 1);
+
+  if (ambiguousTemplate) {
+    const [templateName, vmids] = ambiguousTemplate;
+    throw new Error(
+      `Ambiguous Proxmox template name "${templateName}" for VMIDs ${Array.from(vmids).join(', ')}. Rename the source templates in Proxmox so each template has a unique name.`
+    );
+  }
+
+  return matches.reduce(async (promise, match, index) => {
     const acc = await promise;
     const vm = blueprintVms[index];
     const config = await fetchVmConfig(envSettings, match.node, vm.cloneSource);

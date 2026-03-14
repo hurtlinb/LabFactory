@@ -42,8 +42,11 @@
       <section class="page" data-view="models" hidden>
         <div class="hero-grid">
           <article class="panel">
-            <p class="eyebrow">catalogue</p>
-            <h3>VM models</h3>
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">VM Templates</p>
+              </div>
+            </div>
             <p class="muted">Each model represents a Terraform clone operation for an existing Proxmox template.</p>
             <form id="templateForm" class="stack">
               <label class="field">
@@ -95,7 +98,6 @@
 
           <article class="panel">
             <p class="eyebrow">inventory</p>
-            <h3>Registered models</h3>
             <div id="modelList" class="saved-list">
               <p class="placeholder">Loading models...</p>
             </div>
@@ -167,7 +169,6 @@
         <div class="hero-grid">
           <article class="panel">
             <p class="eyebrow">classrooms</p>
-            <h3>Create a classroom</h3>
             <p class="muted">Each workstation gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
             <form id="classroomForm" class="stack">
               <label class="field">
@@ -196,7 +197,6 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">inventory</p>
-                <h3>Registered classrooms</h3>
               </div>
             </div>
             <div id="classroomList" class="saved-list">
@@ -247,7 +247,6 @@
       <section class="page" data-view="admin-settings" hidden>
         <article class="panel">
           <p class="eyebrow">settings</p>
-          <h3>Settings</h3>
           <p class="muted">Configure the default network parameters used by Terraform jobs.</p>
           <form id="terraformSettingsForm" class="stack section-form">
             <label class="field">
@@ -286,7 +285,6 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">queues</p>
-                <h3>Terraform and Ansible</h3>
               </div>
             </div>
             <div class="table-wrap">
@@ -311,7 +309,6 @@
 
           <article class="panel">
             <p class="eyebrow">workers</p>
-            <h3>Worker state</h3>
             <div id="workers" class="workers-grid">
               <p class="placeholder">Loading workers...</p>
             </div>
@@ -322,7 +319,6 @@
           <div class="panel-head">
             <div>
               <p class="eyebrow">jobs</p>
-              <h3>Job history</h3>
             </div>
           </div>
           <div class="table-wrap">
