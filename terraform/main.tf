@@ -134,8 +134,8 @@ resource "terraform_data" "wait_for_cloudbase_init" {
     host     = local.cloudbase_wait_hosts[each.key]
     user     = "Administrator"
     password = var.windows_admin_password
-    port     = 5985
-    https    = false
+    port     = 5986
+    https    = true
     insecure = true
     timeout  = "30m"
   }

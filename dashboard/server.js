@@ -628,7 +628,19 @@ const fetchDeploymentRows = async () => {
   return result.rows;
 };
 
+const TRANSIENT_DEPLOYMENT_STATUSES = new Set([
+  'queued',
+  'deploying',
+  'starting',
+  'stopping',
+  'destroying'
+]);
+
 const deriveDeploymentStatusFromResources = (currentStatus, expectedVmids, resourceByVmid) => {
+  if (TRANSIENT_DEPLOYMENT_STATUSES.has(currentStatus)) {
+    return currentStatus;
+  }
+
   const states = expectedVmids
     .map(vmid => resourceByVmid.get(Number(vmid))?.status ?? null)
     .filter(Boolean);

@@ -11,8 +11,8 @@ resource "terraform_data" "wait_for_cloudbase_init" {
     host     = proxmox_virtual_environment_vm.winvm.ipv4_addresses[0][0]
     user     = "Administrator"
     password = var.admin_password
-    port     = 5985
-    https    = false
+    port     = 5986
+    https    = true
     insecure = true
     timeout  = "30m"
   }
