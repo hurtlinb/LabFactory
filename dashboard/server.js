@@ -21,6 +21,7 @@ import {
 const require = createRequire(import.meta.url);
 const { Queue } = require('bullmq');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const packageJson = require(path.resolve(__dirname, '../package.json'));
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -58,6 +59,8 @@ const wrapAsync =
       console.error('Unhandled request error', err);
       res.status(500).json({ error: 'internal server error' });
     });
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const templateSchema = z.object({
   name: z.string().trim().min(1),
@@ -389,13 +392,14 @@ const fetchBlueprintById = async blueprintId => {
 
   const vmResult = await dbPool.query(
     `SELECT
-       v.id,
-       v.name,
-       v.vm_order,
-       v.config,
+      v.id,
+      v.name,
+      v.vm_order,
+      v.config,
         t.id AS template_id,
         t.name AS template_name,
         t.description AS template_description,
+        t.os_type,
         t.proxmox_template_vmid,
         t.full_clone
       FROM lab_blueprint_vms v
@@ -418,6 +422,7 @@ const fetchBlueprintById = async blueprintId => {
         id: row.template_id,
         name: row.template_name,
         description: row.template_description ?? '',
+        osType: row.os_type,
         proxmoxTemplateVmid: row.proxmox_template_vmid,
         fullClone: Boolean(row.full_clone)
       }
@@ -454,6 +459,7 @@ const buildTerraformBlueprintPayload = blueprint => {
       id: vm.id,
       name: sanitizeVmName(`${labName}-${vm.name}`),
       vmid: baseVmid + index,
+      osType: vm.template.osType,
       cloneSource: String(vm.template.proxmoxTemplateVmid),
       fullClone: Boolean(vm.template.fullClone),
       ipLastOctet: vm.ipLastOctet ?? null
@@ -528,6 +534,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
         id: `${workstationNumber}-${vm.id}`,
         name: sanitizeVmName(`${labName}-${workstationNumber}-${vm.name}`),
         vmid: baseVmid + vms.length,
+        osType: vm.template.osType,
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
@@ -635,6 +642,13 @@ const persistBlueprint = async (blueprintId, payload) => {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/api/app-info', (req, res) => {
+  res.json({
+    name: packageJson.name ?? 'LabFactory',
+    version: packageJson.version ?? '0.0.0'
+  });
+});
 
 app.get(
   '/api/classrooms',
@@ -1162,20 +1176,70 @@ app.get('/api/jobs', async (req, res) => {
 
 app.post('/api/jobs/clear-history', async (req, res) => {
   try {
-    const summary = {};
-    for (const [name, queue] of Object.entries(queues)) {
-      let removed = 0;
-      for (const status of ['completed', 'failed']) {
-        while (true) {
-          const deleted = await queue.clean(0, 1000, status);
-          removed += deleted.length;
-          if (!deleted.length) break;
+    const workerStates = Object.fromEntries(
+      await Promise.all(
+        Object.keys(queueNames).map(async workerName => {
+          const state = await redisClient.hGetAll(`worker:${workerName}`);
+          return [workerName, state.status || 'unknown'];
+        })
+      )
+    );
+
+    try {
+      for (const [workerName, queue] of Object.entries(queues)) {
+        await queue.pause();
+        if (workerStates[workerName] === 'running') {
+          await redisClient.publish(`control:${workerName}`, 'pause');
         }
       }
-      summary[name] = removed;
-    }
 
-    res.json({ ok: true, removed: summary });
+      await Promise.all(
+        Object.keys(queueNames).map(workerName => redisClient.publish(`control:${workerName}`, 'cancel-active'))
+      );
+
+      const summary = {};
+      for (const [name, queue] of Object.entries(queues)) {
+        let removed = 0;
+        const activeJobsBeforeStop = await queue.getJobs(['active'], 0, 99, true);
+        const stopped = activeJobsBeforeStop.length;
+
+        for (let attempt = 0; attempt < 20; attempt += 1) {
+          const activeJobs = await queue.getJobs(['active'], 0, 0, true);
+          if (!activeJobs.length) break;
+          await sleep(250);
+        }
+
+        while (true) {
+          const pendingJobs = await queue.getJobs(['paused', 'waiting', 'delayed'], 0, 99, true);
+          if (!pendingJobs.length) break;
+          await Promise.all(
+            pendingJobs.map(async job => {
+              await job.remove();
+              removed += 1;
+            })
+          );
+        }
+
+        for (const status of ['completed', 'failed']) {
+          while (true) {
+            const deleted = await queue.clean(0, 1000, status);
+            removed += deleted.length;
+            if (!deleted.length) break;
+          }
+        }
+
+        summary[name] = { removed, stopped };
+      }
+
+      res.json({ ok: true, queues: summary });
+    } finally {
+      for (const [workerName, queue] of Object.entries(queues)) {
+        await queue.resume();
+        if (workerStates[workerName] === 'running') {
+          await redisClient.publish(`control:${workerName}`, 'resume');
+        }
+      }
+    }
   } catch (err) {
     console.error('Unable to clear job history', err);
     res.status(500).json({ error: 'unable to clear job history' });

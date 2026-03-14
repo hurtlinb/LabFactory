@@ -212,6 +212,7 @@ const safeUpdateLifecycleStatus = async (blueprintId, status, details = {}) => {
 };
 
 const workspaceNameFor = blueprintId => `blueprint-${String(blueprintId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 
 const parseVlanMaskBits = mask => {
   const match = /^\/(\d{1,2})$/.exec(String(mask || '').trim());
@@ -272,9 +273,13 @@ const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayHostOffs
 export const terraformQueueName = 'terraform-workflows';
 
 export function startTerraformWorker(connection) {
-  return new Worker(
+  const activeAbortControllers = new Map();
+
+  const worker = new Worker(
     terraformQueueName,
     async job => {
+      const abortController = new AbortController();
+      activeAbortControllers.set(String(job.id), abortController);
       const env = {
         ...process.env,
         TF_IN_AUTOMATION: '1',
@@ -320,6 +325,7 @@ export function startTerraformWorker(connection) {
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
               vmid: Number(vm.vmid),
               name: vm.name,
+              os_type: vm.osType ?? 'other',
               clone_source: String(vm.cloneSource),
               full_clone: Boolean(vm.fullClone),
               ip_last_octet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
@@ -337,6 +343,13 @@ export function startTerraformWorker(connection) {
               cloudinit_storage: vm.cloudinitStorage ?? null,
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
+          }
+          const hasWindowsVm = Array.isArray(merged.vm_definitions)
+            && merged.vm_definitions.some(vm => isWindowsOsType(vm.os_type));
+          if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim()) {
+            throw new Error(
+              'windows_admin_password must be set in Terraform settings before deploying a Windows template with Cloudbase-Init wait'
+            );
           }
           assertRequiredTerraformEnvSettings(merged);
           await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2));
@@ -372,11 +385,23 @@ export function startTerraformWorker(connection) {
           );
         }
 
-        await runCommand('terraform', ['init', '-input=false'], { cwd: terraformDir, env });
+        await runCommand('terraform', ['init', '-input=false'], {
+          cwd: terraformDir,
+          env,
+          signal: abortController.signal
+        });
         try {
-          await runCommand('terraform', ['workspace', 'select', workspaceName], { cwd: terraformDir, env });
+          await runCommand('terraform', ['workspace', 'select', workspaceName], {
+            cwd: terraformDir,
+            env,
+            signal: abortController.signal
+          });
         } catch {
-          await runCommand('terraform', ['workspace', 'new', workspaceName], { cwd: terraformDir, env });
+          await runCommand('terraform', ['workspace', 'new', workspaceName], {
+            cwd: terraformDir,
+            env,
+            signal: abortController.signal
+          });
         }
 
         let planOutput = '';
@@ -384,18 +409,18 @@ export function startTerraformWorker(connection) {
           planOutput = await runCommand(
             'terraform',
             ['destroy', '-auto-approve', '-input=false', `-var-file=${preparedVarFile}`],
-            { cwd: terraformDir, env }
+            { cwd: terraformDir, env, signal: abortController.signal }
           );
         } else {
           planOutput = await runCommand(
             'terraform',
             ['plan', '-out=tfplan', '-input=false', `-var-file=${preparedVarFile}`],
-            { cwd: terraformDir, env }
+            { cwd: terraformDir, env, signal: abortController.signal }
           );
           await runCommand(
             'terraform',
             ['apply', '-auto-approve', 'tfplan'],
-            { cwd: terraformDir, env }
+            { cwd: terraformDir, env, signal: abortController.signal }
           );
         }
 
@@ -420,8 +445,18 @@ export function startTerraformWorker(connection) {
           runId: job.data.runId
         });
         throw error;
+      } finally {
+        activeAbortControllers.delete(String(job.id));
       }
     },
     { connection, concurrency: 1 }
   );
+
+  worker.cancelActiveJobs = async () => {
+    for (const controller of activeAbortControllers.values()) {
+      controller.abort(new Error('Job cancelled from dashboard clear history action'));
+    }
+  };
+
+  return worker;
 }

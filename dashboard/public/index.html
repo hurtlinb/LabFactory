@@ -34,6 +34,10 @@
           <button data-view="admin-queues">Jobs</button>
         </div>
       </nav>
+
+      <div class="sidebar-footer">
+        <span id="appVersion">Version --</span>
+      </div>
     </aside>
 
     <main class="main">
@@ -264,6 +268,10 @@
                 <option value="/29">/29</option>
                 <option value="/30">/30</option>
               </select>
+            </label>
+            <label class="field">
+              <span>Windows admin password</span>
+              <input type="password" name="windows_admin_password" placeholder="Used for Cloudbase-Init wait via WinRM">
             </label>
             <div class="inline-actions">
               <button type="submit" class="btn btn-primary">Save settings</button>

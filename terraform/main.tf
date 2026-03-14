@@ -17,10 +17,13 @@ provider "proxmox" {
 }
 
 locals {
+  windows_os_types = toset(["windows11", "windows-server"])
+
   vm_definitions = length(var.vm_definitions) > 0 ? var.vm_definitions : [
     {
       vmid         = var.vm_id
       name         = var.vm_name
+      os_type      = null
       clone_source = var.vm_template_name
       full_clone   = var.vm_full_clone
       ip_last_octet = null
@@ -37,6 +40,19 @@ locals {
 
   vm_definitions_by_id = {
     for vm in local.vm_definitions : tostring(vm.vmid) => vm
+  }
+
+  windows_vm_definitions = {
+    for key, vm in local.vm_definitions_by_id : key => vm
+    if contains(local.windows_os_types, try(vm.os_type, ""))
+  }
+
+  cloudbase_wait_hosts = {
+    for key, vm in local.windows_vm_definitions : key => (
+      length(regexall("^ip=([0-9.]+)", trimspace(try(vm.ipconfig0, "")))) > 0
+      ? regexall("^ip=([0-9.]+)", trimspace(vm.ipconfig0))[0][0]
+      : trimspace(proxmox_vm_qemu.lab_vm[key].default_ipv4_address)
+    )
   }
 }
 
@@ -60,6 +76,8 @@ resource "proxmox_vm_qemu" "lab_vm" {
   clone      = each.value.clone_source
   full_clone = each.value.full_clone
   ipconfig0  = try(each.value.ipconfig0, "ip=dhcp")
+  ciuser     = contains(local.windows_os_types, try(each.value.os_type, "")) ? "Administrator" : null
+  cipassword = contains(local.windows_os_types, try(each.value.os_type, "")) ? var.windows_admin_password : null
   bios       = var.vm_bios
 
   scsihw = var.vm_scsi_hw
@@ -90,5 +108,37 @@ resource "proxmox_vm_qemu" "lab_vm" {
     bridge   = var.network_bridge
     firewall = var.network_firewall
     tag      = each.value.vlan_tag == 0 ? null : each.value.vlan_tag
+  }
+}
+
+resource "terraform_data" "wait_for_cloudbase_init" {
+  for_each = trimspace(var.windows_admin_password) == "" ? {} : local.windows_vm_definitions
+
+  triggers_replace = [
+    proxmox_vm_qemu.lab_vm[each.key].id
+  ]
+
+  lifecycle {
+    precondition {
+      condition     = trimspace(local.cloudbase_wait_hosts[each.key]) != ""
+      error_message = "Unable to determine a reachable IPv4 address for Windows VM ${each.value.name}. Set a static cloud-init IP or ensure the Proxmox agent reports default_ipv4_address."
+    }
+  }
+
+  connection {
+    type     = "winrm"
+    host     = local.cloudbase_wait_hosts[each.key]
+    user     = "Administrator"
+    password = var.windows_admin_password
+    port     = 5985
+    https    = false
+    insecure = true
+    timeout  = "30m"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "powershell -NoProfile -NonInteractive -Command \"while (-not (Test-Path 'C:\\ProgramData\\cloudbase-init\\done.flag')) { Start-Sleep -Seconds 5 }\""
+    ]
   }
 }

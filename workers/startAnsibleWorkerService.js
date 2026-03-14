@@ -43,6 +43,9 @@ const STATUS_KEY = `worker:${WORKER_NAME}`;
       await worker.resume();
       await updateStatus('running');
       console.log('Ansible worker resumed by dashboard');
+    } else if (message === 'cancel-active') {
+      await worker.cancelActiveJobs?.();
+      console.log('Ansible active jobs cancelled by dashboard');
     }
   });
 

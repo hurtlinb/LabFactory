@@ -40,6 +40,7 @@ const resetSettingsButton = document.getElementById('resetSettingsButton');
 const refreshLabsStateButton = document.getElementById('refreshLabsStateButton');
 const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
 const settingsStatus = document.getElementById('settingsStatus');
+const appVersion = document.getElementById('appVersion');
 
 const statusTimers = new WeakMap();
 
@@ -628,6 +629,12 @@ async function loadTemplates() {
   renderTemplates();
 }
 
+async function loadAppInfo() {
+  if (!appVersion) return;
+  const info = await fetchJson('/api/app-info');
+  appVersion.textContent = `Version ${info.version ?? '--'}`;
+}
+
 async function loadClassrooms() {
   state.classrooms = await fetchJson('/api/classrooms');
   renderClassrooms();
@@ -1125,7 +1132,7 @@ clearJobHistoryButton?.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' }
     });
     await Promise.all([refreshQueues(), refreshJobs()]);
-    showMessage(globalStatus, "Job history cleared.", 'success');
+    showMessage(globalStatus, 'Jobs in progress stopped and job history cleared.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   } finally {
@@ -1138,6 +1145,7 @@ async function bootstrap() {
   syncBlueprintFields();
   renderCanvas();
   await Promise.all([
+    loadAppInfo(),
     loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),

@@ -131,9 +131,13 @@ select {
 
 .sidebar-footer {
   margin-top: auto;
-  color: rgba(226, 232, 240, 0.64);
+  padding: 12px 8px 0;
+  border-top: 1px solid rgba(34, 63, 115, 0.08);
+  color: rgba(34, 63, 115, 0.62);
   line-height: 1.5;
-  font-size: 0.95rem;
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .main {

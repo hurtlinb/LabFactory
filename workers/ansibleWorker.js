@@ -10,34 +10,51 @@ const playbookPath = path.join(ansibleDir, 'playbook.yml');
 export const ansibleQueueName = 'ansible-workflows';
 
 export function startAnsibleWorker(connection) {
-  return new Worker(
+  const activeAbortControllers = new Map();
+
+  const worker = new Worker(
     ansibleQueueName,
     async job => {
+      const abortController = new AbortController();
+      activeAbortControllers.set(String(job.id), abortController);
       const extraVars = {
         lab_instance_id: job.data.labInstanceId ?? 'lab-demo',
         run_id: job.data.runId,
         terraform_status: job.data.planOutput ? 'apply-complete' : 'unknown'
       };
 
-      await runCommand(
-        'ansible-playbook',
-        [
-          playbookPath,
-          '--inventory',
-          'localhost,',
-          '--connection',
-          'local',
-          '--extra-vars',
-          JSON.stringify(extraVars)
-        ],
-        {
-          cwd: ansibleDir,
-          env: { ...process.env }
-        }
-      );
+      try {
+        await runCommand(
+          'ansible-playbook',
+          [
+            playbookPath,
+            '--inventory',
+            'localhost,',
+            '--connection',
+            'local',
+            '--extra-vars',
+            JSON.stringify(extraVars)
+          ],
+          {
+            cwd: ansibleDir,
+            env: { ...process.env },
+            signal: abortController.signal
+          }
+        );
 
-      return { status: 'ansible-done', extraVars };
+        return { status: 'ansible-done', extraVars };
+      } finally {
+        activeAbortControllers.delete(String(job.id));
+      }
     },
     { connection, concurrency: 1 }
   );
+
+  worker.cancelActiveJobs = async () => {
+    for (const controller of activeAbortControllers.values()) {
+      controller.abort(new Error('Job cancelled from dashboard clear history action'));
+    }
+  };
+
+  return worker;
 }

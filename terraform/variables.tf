@@ -77,6 +77,7 @@ variable "vm_definitions" {
   type = list(object({
     vmid         = number
     name         = string
+    os_type      = optional(string)
     clone_source = string
     full_clone   = bool
     ip_last_octet = optional(number)
@@ -96,6 +97,13 @@ variable "vm_full_clone" {
   description = "Whether the clone should be a full copy."
   type        = bool
   default     = false
+}
+
+variable "windows_admin_password" {
+  description = "Administrator password used for Windows cloud-init and WinRM readiness checks."
+  type        = string
+  default     = ""
+  sensitive   = true
 }
 
 variable "vm_cores" {

@@ -43,6 +43,9 @@ const STATUS_KEY = `worker:${WORKER_NAME}`;
       await worker.resume();
       await updateStatus('running');
       console.log('Terraform worker resumed by dashboard');
+    } else if (message === 'cancel-active') {
+      await worker.cancelActiveJobs?.();
+      console.log('Terraform active jobs cancelled by dashboard');
     }
   });
 
