@@ -27,6 +27,7 @@ locals {
     {
       vmid         = var.vm_id
       name         = var.vm_name
+      hostname     = null
       os_type      = null
       clone_source = var.vm_template_name
       full_clone   = var.vm_full_clone
@@ -49,6 +50,11 @@ locals {
   windows_vm_definitions = {
     for key, vm in local.vm_definitions_by_id : key => vm
     if contains(local.windows_os_types, try(vm.os_type, ""))
+  }
+
+  windows_vm_hostnames = {
+    for key, vm in local.windows_vm_definitions : key => try(trimspace(vm.hostname), "")
+    if try(trimspace(vm.hostname), "") != ""
   }
 
   cloudbase_wait_hosts = {
@@ -143,6 +149,43 @@ resource "terraform_data" "wait_for_cloudbase_init" {
   provisioner "remote-exec" {
     inline = [
       "powershell -NoProfile -NonInteractive -EncodedCommand ${local.cloudbase_wait_command}"
+    ]
+  }
+}
+
+resource "terraform_data" "set_windows_hostname" {
+  for_each = trimspace(var.windows_admin_password) == "" ? {} : local.windows_vm_hostnames
+
+  triggers_replace = [
+    proxmox_vm_qemu.lab_vm[each.key].id,
+    each.value
+  ]
+
+  depends_on = [
+    terraform_data.wait_for_cloudbase_init
+  ]
+
+  lifecycle {
+    precondition {
+      condition     = trimspace(local.cloudbase_wait_hosts[each.key]) != ""
+      error_message = "Unable to determine a reachable IPv4 address for Windows VM ${local.windows_vm_definitions[each.key].name}. Set a static cloud-init IP or ensure the Proxmox agent reports default_ipv4_address."
+    }
+  }
+
+  connection {
+    type     = "winrm"
+    host     = local.cloudbase_wait_hosts[each.key]
+    user     = "Administrator"
+    password = var.windows_admin_password
+    port     = 5986
+    https    = true
+    insecure = true
+    timeout  = "30m"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "powershell -NoProfile -NonInteractive -Command \"$target='${each.value}'; if ([System.Environment]::MachineName -ieq $target) { exit 0 }; Rename-Computer -NewName $target -Force; shutdown.exe /r /t 1 /f /c 'Applying LabFactory hostname'\""
     ]
   }
 }

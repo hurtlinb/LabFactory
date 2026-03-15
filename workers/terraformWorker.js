@@ -325,6 +325,7 @@ export function startTerraformWorker(connection) {
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
               vmid: Number(vm.vmid),
               name: vm.name,
+              hostname: vm.customNameEnabled ? String(vm.hostname ?? '').trim() || null : null,
               os_type: vm.osType ?? 'other',
               clone_source: String(vm.cloneSource),
               full_clone: Boolean(vm.fullClone),
@@ -346,9 +347,12 @@ export function startTerraformWorker(connection) {
           }
           const hasWindowsVm = Array.isArray(merged.vm_definitions)
             && merged.vm_definitions.some(vm => isWindowsOsType(vm.os_type));
+          merged.windows_admin_password = String(
+            job.data?.blueprint?.windowsAdminPassword ?? merged.windows_admin_password ?? ''
+          ).trim();
           if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim()) {
             throw new Error(
-              'windows_admin_password must be set in Terraform settings before deploying a Windows template with Cloudbase-Init wait'
+              'windows_admin_password must be set on the blueprint before deploying a Windows template with Cloudbase-Init wait'
             );
           }
           assertRequiredTerraformEnvSettings(merged);

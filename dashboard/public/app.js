@@ -22,6 +22,7 @@ const dropzone = document.getElementById('dropzone');
 
 const blueprintNameInput = document.getElementById('blueprintName');
 const blueprintDescriptionInput = document.getElementById('blueprintDescription');
+const blueprintWindowsAdminPasswordInput = document.getElementById('blueprintWindowsAdminPassword');
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
 const newBlueprintButton = document.getElementById('newBlueprintButton');
 const templateForm = document.getElementById('templateForm');
@@ -55,6 +56,7 @@ function createEmptyBlueprint() {
     name: '',
     description: '',
     status: 'draft',
+    windowsAdminPassword: '',
     vms: []
   };
 }
@@ -92,6 +94,9 @@ function setActiveView(view) {
 function syncBlueprintFields() {
   blueprintNameInput.value = state.currentBlueprint.name;
   blueprintDescriptionInput.value = state.currentBlueprint.description;
+  if (blueprintWindowsAdminPasswordInput) {
+    blueprintWindowsAdminPasswordInput.value = state.currentBlueprint.windowsAdminPassword || '';
+  }
 }
 
 function renderBlueprintList() {
@@ -172,33 +177,70 @@ function renderDeploymentSelectors() {
 function renderTemplates() {
   renderModelList();
 
-  if (!state.templates.length) {
-    templatePalette.innerHTML = '<p class="placeholder">No VM models yet.</p>';
-    return;
-  }
+  const templateCards = state.templates.length
+    ? state.templates
+        .map(
+          template => `
+            <article class="template-card" draggable="true" data-template-id="${template.id}">
+              <div class="template-top">
+                <div class="template-badge template-badge-image">
+                  <img src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
+                </div>
+                <div class="template-meta">
+                  <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
+                  <span class="mini-pill">VMID ${template.proxmoxTemplateVmid}</span>
+                  <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
+                </div>
+              </div>
+              <div>
+                <strong>${escapeHtml(template.name)}</strong>
+                <p class="muted">${escapeHtml(template.description || 'Reusable VM model')}</p>
+              </div>
+            </article>
+          `
+        )
+        .join('')
+    : '<p class="placeholder">No VM models yet.</p>';
 
-  templatePalette.innerHTML = state.templates
-    .map(
-      template => `
-        <article class="template-card" draggable="true" data-template-id="${template.id}">
-          <div class="template-top">
-            <div class="template-badge template-badge-image">
-              <img src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
-            </div>
-            <div class="template-meta">
-              <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
-              <span class="mini-pill">VMID ${template.proxmoxTemplateVmid}</span>
-              <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
-            </div>
-          </div>
-          <div>
-            <strong>${escapeHtml(template.name)}</strong>
-            <p class="muted">${escapeHtml(template.description || 'Reusable VM model')}</p>
-          </div>
-        </article>
-      `
-    )
-    .join('');
+  if (!state.templates.length) {
+    templatePalette.innerHTML = `
+      <section class="palette-group">
+        <div class="palette-group-head">
+          <p class="eyebrow">VM models</p>
+        </div>
+        <div class="palette-group-grid">
+          ${templateCards}
+        </div>
+      </section>
+      <section class="palette-group">
+        <div class="palette-group-head">
+          <p class="eyebrow">Customization</p>
+        </div>
+        <div class="palette-group-empty">
+          <p class="placeholder">No customization options yet.</p>
+        </div>
+      </section>
+    `;
+  } else {
+    templatePalette.innerHTML = `
+      <section class="palette-group">
+        <div class="palette-group-head">
+          <p class="eyebrow">VM models</p>
+        </div>
+        <div class="palette-group-grid">
+          ${templateCards}
+        </div>
+      </section>
+      <section class="palette-group">
+        <div class="palette-group-head">
+          <p class="eyebrow">Customization</p>
+        </div>
+        <div class="palette-group-empty">
+          <p class="placeholder">No customization options yet.</p>
+        </div>
+      </section>
+    `;
+  }
 
   templatePalette.querySelectorAll('.template-card').forEach(card => {
     card.addEventListener('dragstart', event => {
@@ -287,6 +329,7 @@ function renderClassrooms() {
             <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
             <span class="mini-pill">Subnet start: ${classroom.startingSubnet}</span>
             <span class="mini-pill">VLAN end: ${classroom.vlans[classroom.vlans.length - 1]}</span>
+            <span class="mini-pill">Increment VLAN: ${classroom.incrementVlan ? 'on' : 'off'}</span>
           </div>
           <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
           <p class="muted">Assigned subnets: ${classroom.subnetOctets.join(', ')}</p>
@@ -343,10 +386,26 @@ function renderCanvas() {
             <span class="pill">VM ${index + 1}</span>
           </div>
           <div class="vm-controls">
-            <label class="field">
+            <div class="field vm-switch-field">
+              <span>Set VM name</span>
+              <label class="switch" aria-label="Set VM name">
+                <input type="checkbox" data-field="customNameEnabled" ${vm.config?.customNameEnabled ? 'checked' : ''}>
+                <span class="switch-track" aria-hidden="true">
+                  <span class="switch-thumb"></span>
+                </span>
+                <span class="switch-label">${vm.config?.customNameEnabled ? 'Oui' : 'Non'}</span>
+              </label>
+            </div>
+            ${
+              vm.config?.customNameEnabled
+                ? `
+            <label class="field vm-name-field">
               <span>Name</span>
               <input type="text" data-field="name" value="${escapeHtmlAttr(vm.name)}">
             </label>
+            `
+                : ''
+            }
             <label class="field vm-ip-field">
               <span>IP last octet</span>
               <input
@@ -372,11 +431,31 @@ function renderCanvas() {
   canvasVmList.querySelectorAll('.vm-card').forEach(card => {
     const vmId = card.dataset.vmId;
     const ipLastOctetInput = card.querySelector('[data-field="ipLastOctet"]');
-    card.querySelector('[data-field="name"]').addEventListener('input', event => {
+    const customNameEnabledInput = card.querySelector('[data-field="customNameEnabled"]');
+    const customNameEnabledLabel = card.querySelector('.switch-label');
+    const nameInput = card.querySelector('[data-field="name"]');
+    customNameEnabledInput.addEventListener('change', event => {
+      if (customNameEnabledLabel) {
+        customNameEnabledLabel.textContent = event.target.checked ? 'Oui' : 'Non';
+      }
       updateVm(vmId, vm => {
-        vm.name = event.target.value;
+        vm.config.customNameEnabled = event.target.checked;
+        if (!event.target.checked) {
+          vm.name = '';
+        } else if (!String(vm.name || '').trim()) {
+          const template = state.templates.find(item => item.id === vm.templateId);
+          vm.name = template?.name || 'VM';
+        }
       });
+      renderCanvas();
     });
+    if (nameInput) {
+      nameInput.addEventListener('input', event => {
+        updateVm(vmId, vm => {
+          vm.name = event.target.value;
+        });
+      });
+    }
     syncVmIpLastOctetValidity(ipLastOctetInput);
     ipLastOctetInput.addEventListener('input', event => {
       updateVm(vmId, vm => {
@@ -617,9 +696,9 @@ function addVmFromTemplate(templateId) {
   state.currentBlueprint.vms.push({
     id: crypto.randomUUID(),
     templateId,
-    name: `${template.name} ${instanceCount}`,
+    name: '',
     ipLastOctet: null,
-    config: {}
+    config: { customNameEnabled: false }
   });
   renderCanvas();
 }
@@ -737,12 +816,13 @@ async function loadBlueprint(blueprintId) {
     name: blueprint.name,
     description: blueprint.description || '',
     status: blueprint.status,
+    windowsAdminPassword: blueprint.windowsAdminPassword || '',
     vms: blueprint.vms.map(vm => ({
       id: vm.id,
       templateId: vm.template.id,
       name: vm.name,
       ipLastOctet: vm.ipLastOctet ?? null,
-      config: { ...(vm.config || {}) }
+      config: { customNameEnabled: true, ...(vm.config || {}) }
     }))
   };
   syncBlueprintFields();
@@ -761,6 +841,7 @@ function resetBlueprintEditor() {
 async function saveBlueprint() {
   state.currentBlueprint.name = blueprintNameInput.value.trim();
   state.currentBlueprint.description = blueprintDescriptionInput.value.trim();
+  state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
   state.currentBlueprint.status = 'draft';
 
   if (!state.currentBlueprint.name) {
@@ -774,6 +855,7 @@ async function saveBlueprint() {
     name: state.currentBlueprint.name,
     description: state.currentBlueprint.description,
     status: state.currentBlueprint.status,
+    windowsAdminPassword: state.currentBlueprint.windowsAdminPassword,
     vms: state.currentBlueprint.vms.map(vm => ({
       id: state.currentBlueprint.id ? vm.id : undefined,
       templateId: vm.templateId,
@@ -784,8 +866,8 @@ async function saveBlueprint() {
   };
 
   payload.vms.forEach(vm => {
-    if (!vm.name) {
-      throw new Error('Each VM must have an instance name');
+    if (vm.config.customNameEnabled && !vm.name) {
+      throw new Error('Each VM with custom naming enabled must have a name');
     }
     if (vm.ipLastOctet != null && (vm.ipLastOctet < 1 || vm.ipLastOctet > 254)) {
       throw new Error('IP last octet must be between 1 and 254');
@@ -822,12 +904,13 @@ async function saveBlueprint() {
     name: blueprint.name,
     description: blueprint.description || '',
     status: blueprint.status,
+    windowsAdminPassword: blueprint.windowsAdminPassword || '',
     vms: blueprint.vms.map(vm => ({
       id: vm.id,
       templateId: vm.template.id,
       name: vm.name,
       ipLastOctet: vm.ipLastOctet ?? null,
-      config: { ...(vm.config || {}) }
+      config: { customNameEnabled: true, ...(vm.config || {}) }
     }))
   };
 
@@ -1061,6 +1144,7 @@ navButtons.forEach(button => {
   input.addEventListener('input', () => {
     state.currentBlueprint.name = blueprintNameInput.value;
     state.currentBlueprint.description = blueprintDescriptionInput.value;
+    state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
     state.currentBlueprint.status = 'draft';
     syncBlueprintFields();
     renderBlueprintList();
@@ -1095,11 +1179,13 @@ templateForm.addEventListener('submit', async event => {
 classroomForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const form = new FormData(classroomForm);
+  const incrementVlan = classroomForm.querySelector('[name="incrementVlan"]');
   const payload = {
     name: String(form.get('name') || '').trim(),
     workstationCount: Number(form.get('workstationCount') || 0),
     startingVlan: Number(form.get('startingVlan') || 0),
-    startingSubnet: String(form.get('startingSubnet') || '').trim()
+    startingSubnet: String(form.get('startingSubnet') || '').trim(),
+    incrementVlan: Boolean(incrementVlan?.checked)
   };
 
   try {
@@ -1109,10 +1195,24 @@ classroomForm?.addEventListener('submit', async event => {
       body: JSON.stringify(payload)
     });
     classroomForm.reset();
+    if (incrementVlan) {
+      incrementVlan.checked = true;
+      const label = classroomForm.querySelector('.switch-label');
+      if (label) label.textContent = 'On';
+    }
     await loadClassrooms();
     showMessage(globalStatus, 'Classroom created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
+  }
+});
+
+const classroomIncrementVlanInput = classroomForm?.querySelector('[name="incrementVlan"]');
+const classroomIncrementVlanLabel = classroomForm?.querySelector('.switch-label');
+
+classroomIncrementVlanInput?.addEventListener('change', event => {
+  if (classroomIncrementVlanLabel) {
+    classroomIncrementVlanLabel.textContent = event.target.checked ? 'On' : 'Off';
   }
 });
 

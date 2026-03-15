@@ -10,7 +10,6 @@
   "vm_description": "Clone du template LabFactory.",
   "vm_scsi_hw": "virtio-scsi-pci",
   "vm_full_clone": false,
-  "windows_admin_password": "",
   "network_bridge": "vmbr0",
   "network_vlan_gateway_host_offset": 1,
   "network_model": "virtio",

@@ -70,18 +70,29 @@ const templateSchema = z.object({
   fullClone: z.boolean().optional().default(false),
 });
 
-const blueprintVmSchema = z.object({
-  id: z.string().uuid().optional(),
-  templateId: z.string().uuid(),
-  name: z.string().trim().min(1),
-  ipLastOctet: z.number().int().min(1).max(254).nullable().optional(),
-  config: z.record(z.string(), z.unknown()).optional().default({})
-});
+const blueprintVmSchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    templateId: z.string().uuid(),
+    name: z.string().trim().optional().default(''),
+    ipLastOctet: z.number().int().min(1).max(254).nullable().optional(),
+    config: z.record(z.string(), z.unknown()).optional().default({})
+  })
+  .superRefine((vm, ctx) => {
+    if (vm.config?.customNameEnabled === true && !String(vm.name ?? '').trim()) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['name'],
+        message: 'name is required when custom naming is enabled'
+      });
+    }
+  });
 
 const blueprintSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().optional().default(''),
   status: z.enum(['draft', 'ready', 'archived']).optional().default('draft'),
+  windowsAdminPassword: z.string().optional().default(''),
   vms: z.array(blueprintVmSchema).min(1)
 });
 
@@ -90,7 +101,8 @@ const classroomSchema = z
     name: z.string().trim().min(1),
     workstationCount: z.number().int().positive(),
     startingVlan: z.number().int().positive(),
-    startingSubnet: z.string().trim().min(1)
+    startingSubnet: z.string().trim().min(1),
+    incrementVlan: z.boolean().optional().default(true)
   })
   .refine(
     data => {
@@ -154,6 +166,27 @@ const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask, gatewayHostOffset = 
 
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 
+const isVmCustomNameEnabled = vm => {
+  if (typeof vm?.config?.customNameEnabled === 'boolean') {
+    return vm.config.customNameEnabled;
+  }
+  return String(vm?.name ?? '').trim().length > 0;
+};
+
+const resolveVmCustomHostname = vm => {
+  if (isVmCustomNameEnabled(vm) && String(vm?.name ?? '').trim()) {
+    return String(vm.name).trim();
+  }
+  return null;
+};
+
+const resolveVmHostnameToken = (vm, fallbackToken) => {
+  if (isVmCustomNameEnabled(vm) && String(vm?.name ?? '').trim()) {
+    return sanitizeVmName(vm.name);
+  }
+  return sanitizeVmName(fallbackToken);
+};
+
 const validateBlueprintVmIpLastOctets = async payload => {
   const settings = await readPublicTerraformSettings();
   const mask = settings.network_vlan_mask || '/24';
@@ -163,6 +196,26 @@ const validateBlueprintVmIpLastOctets = async payload => {
     throw new Error(
       `VM "${invalidVm.name}" has an IP last octet incompatible with VLAN mask ${mask} and gateway offset ${gatewayHostOffset}`
     );
+  }
+};
+
+const validateBlueprintWindowsPassword = async payload => {
+  const templateIds = [...new Set(payload.vms.map(vm => vm.templateId))];
+  if (!templateIds.length) {
+    return;
+  }
+
+  const result = await dbPool.query(
+    `SELECT id, os_type
+       FROM vm_templates
+      WHERE id = ANY($1::uuid[])`,
+    [templateIds]
+  );
+
+  const osTypesById = new Map(result.rows.map(row => [row.id, row.os_type]));
+  const hasWindowsVm = payload.vms.some(vm => isWindowsOsType(osTypesById.get(vm.templateId)));
+  if (hasWindowsVm && !String(payload.windowsAdminPassword ?? '').trim()) {
+    throw new Error('Windows admin password is required for a blueprint containing Windows VMs');
   }
 };
 
@@ -336,7 +389,10 @@ const mapClassroom = row => ({
   workstationCount: Number(row.workstation_count),
   startingVlan: Number(row.starting_vlan),
   startingSubnet: row.starting_subnet,
-  vlans: Array.from({ length: Number(row.workstation_count) }, (_, index) => Number(row.starting_vlan) + index),
+  incrementVlan: row.increment_vlan !== false,
+  vlans: Array.from({ length: Number(row.workstation_count) }, (_, index) =>
+    row.increment_vlan === false ? Number(row.starting_vlan) : Number(row.starting_vlan) + index
+  ),
   subnetOctets: Array.from({ length: Number(row.workstation_count) }, (_, index) => {
     const [first, second, third] = String(row.starting_subnet)
       .split('.')
@@ -366,7 +422,8 @@ const mapDeployment = row => ({
     name: row.classroom_name,
     workstationCount: Number(row.workstation_count ?? 0),
     startingVlan: Number(row.starting_vlan ?? 0),
-    startingSubnet: row.starting_subnet ?? '10.0.200.0'
+    startingSubnet: row.starting_subnet ?? '10.0.200.0',
+    incrementVlan: row.increment_vlan !== false
   },
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
@@ -374,12 +431,13 @@ const mapDeployment = row => ({
 const fetchBlueprintById = async blueprintId => {
   const blueprintResult = await dbPool.query(
     `SELECT
-       b.id,
-       b.name,
-       b.description,
-       b.status,
-       b.created_at,
-       b.updated_at,
+      b.id,
+      b.name,
+      b.description,
+      b.windows_admin_password,
+      b.status,
+      b.created_at,
+      b.updated_at,
        COUNT(v.id) AS vm_count
      FROM lab_blueprints b
      LEFT JOIN lab_blueprint_vms v ON v.blueprint_id = b.id
@@ -414,6 +472,7 @@ const fetchBlueprintById = async blueprintId => {
   const blueprint = mapBlueprintSummary(blueprintResult.rows[0]);
   return {
     ...blueprint,
+    windowsAdminPassword: blueprintResult.rows[0].windows_admin_password ?? '',
     vms: vmResult.rows.map(row => ({
       id: row.id,
       name: row.name,
@@ -457,15 +516,21 @@ const buildTerraformBlueprintPayload = blueprint => {
     id: blueprint.id,
     name: blueprint.name,
     description: blueprint.description ?? '',
-    vms: blueprint.vms.map((vm, index) => ({
-      id: vm.id,
-      name: sanitizeVmName(`${labName}-${vm.name}`),
-      vmid: baseVmid + index,
-      osType: vm.template.osType,
-      cloneSource: String(vm.template.proxmoxTemplateVmid),
-      fullClone: Boolean(vm.template.fullClone),
-      ipLastOctet: vm.ipLastOctet ?? null
-    }))
+    windowsAdminPassword: blueprint.windowsAdminPassword ?? '',
+    vms: blueprint.vms.map((vm, index) => {
+      const hostnameToken = resolveVmHostnameToken(vm, `vm-${String(index + 1).padStart(2, '0')}`);
+      return {
+        id: vm.id,
+        name: sanitizeVmName(`${labName}-${hostnameToken}`),
+        hostname: resolveVmCustomHostname(vm),
+        vmid: baseVmid + index,
+        osType: vm.template.osType,
+        cloneSource: String(vm.template.proxmoxTemplateVmid),
+        fullClone: Boolean(vm.template.fullClone),
+        ipLastOctet: vm.ipLastOctet ?? null,
+        customNameEnabled: isVmCustomNameEnabled(vm)
+      };
+    })
   };
 };
 
@@ -484,6 +549,7 @@ const fetchDeploymentById = async deploymentId => {
        c.name AS classroom_name,
        c.workstation_count,
        c.starting_vlan,
+       c.increment_vlan,
        c.starting_subnet,
        (
          SELECT COUNT(*)
@@ -528,18 +594,23 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
 
   for (let workstationIndex = 0; workstationIndex < classroom.workstationCount; workstationIndex += 1) {
     const workstationNumber = String(workstationIndex + 1).padStart(2, '0');
-    const vlanTag = classroom.startingVlan + workstationIndex;
+    const vlanTag = classroom.incrementVlan === false
+      ? classroom.startingVlan
+      : classroom.startingVlan + workstationIndex;
     const subnetThirdOctet = startingSubnetOctet3 + workstationIndex;
 
-    for (const vm of blueprint.vms) {
+    for (const [vmIndex, vm] of blueprint.vms.entries()) {
+      const hostnameToken = resolveVmHostnameToken(vm, `vm-${String(vmIndex + 1).padStart(2, '0')}`);
       vms.push({
         id: `${workstationNumber}-${vm.id}`,
-        name: sanitizeVmName(`${labName}-${workstationNumber}-${vm.name}`),
+        name: sanitizeVmName(`${labName}-${workstationNumber}-${hostnameToken}`),
+        hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + vms.length,
         osType: vm.template.osType,
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
+        customNameEnabled: isVmCustomNameEnabled(vm),
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
         vlanTag
@@ -552,6 +623,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
     name: blueprint.name,
     classroomName: classroom.name,
     description: blueprint.description ?? '',
+    windowsAdminPassword: blueprint.windowsAdminPassword ?? '',
     vms
   };
 };
@@ -614,6 +686,7 @@ const fetchDeploymentRows = async () => {
        c.name AS classroom_name,
        c.workstation_count,
        c.starting_vlan,
+       c.increment_vlan,
        c.starting_subnet,
        (
          SELECT COUNT(*)
@@ -635,6 +708,30 @@ const TRANSIENT_DEPLOYMENT_STATUSES = new Set([
   'stopping',
   'destroying'
 ]);
+
+const resetTransientLifecycleStates = async () => {
+  const transientStatuses = Array.from(TRANSIENT_DEPLOYMENT_STATUSES);
+
+  await dbPool.query(
+    `UPDATE lab_deployments
+     SET
+       status = 'failed',
+       last_action = 'cancelled',
+       updated_at = NOW()
+     WHERE status = ANY($1::text[])`,
+    [transientStatuses]
+  );
+
+  await dbPool.query(
+    `UPDATE lab_blueprint_lifecycle
+     SET
+       status = 'failed',
+       last_action = 'cancelled',
+       updated_at = NOW()
+     WHERE status = ANY($1::text[])`,
+    [transientStatuses]
+  );
+};
 
 const deriveDeploymentStatusFromResources = (currentStatus, expectedVmids, resourceByVmid) => {
   if (TRANSIENT_DEPLOYMENT_STATUSES.has(currentStatus)) {
@@ -666,15 +763,22 @@ const persistBlueprint = async (blueprintId, payload) => {
   try {
     await client.query('BEGIN');
     await client.query(
-      `INSERT INTO lab_blueprints (id, name, description, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, NOW(), NOW())
+      `INSERT INTO lab_blueprints (id, name, description, status, windows_admin_password, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
        ON CONFLICT (id)
        DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
+         windows_admin_password = EXCLUDED.windows_admin_password,
          status = EXCLUDED.status,
          updated_at = NOW()`,
-      [blueprintId, payload.name, payload.description, payload.status]
+      [
+        blueprintId,
+        payload.name,
+        payload.description,
+        payload.status,
+        String(payload.windowsAdminPassword ?? '').trim()
+      ]
     );
 
     await client.query('DELETE FROM lab_blueprint_vms WHERE blueprint_id = $1', [blueprintId]);
@@ -732,10 +836,17 @@ app.post(
 
     const result = await dbPool.query(
       `INSERT INTO classrooms
-        (id, name, workstation_count, starting_vlan, starting_subnet, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+        (id, name, workstation_count, starting_vlan, increment_vlan, starting_subnet, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
        RETURNING *`,
-      [uuidv4(), parsed.data.name, parsed.data.workstationCount, parsed.data.startingVlan, parsed.data.startingSubnet]
+      [
+        uuidv4(),
+        parsed.data.name,
+        parsed.data.workstationCount,
+        parsed.data.startingVlan,
+        parsed.data.incrementVlan ?? true,
+        parsed.data.startingSubnet
+      ]
     );
 
     res.status(201).json(mapClassroom(result.rows[0]));
@@ -1076,6 +1187,7 @@ app.post(
     }
 
     await validateBlueprintVmIpLastOctets(parsed.data);
+    await validateBlueprintWindowsPassword(parsed.data);
     const blueprint = await persistBlueprint(uuidv4(), parsed.data);
     res.status(201).json(blueprint);
   })
@@ -1091,6 +1203,7 @@ app.put(
     }
 
     await validateBlueprintVmIpLastOctets(parsed.data);
+    await validateBlueprintWindowsPassword(parsed.data);
     const existing = await fetchBlueprintById(req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'blueprint not found' });
@@ -1344,6 +1457,8 @@ app.post('/api/jobs/clear-history', async (req, res) => {
         summary[name] = { removed, stopped };
       }
 
+      await resetTransientLifecycleStates();
+
       res.json({ ok: true, queues: summary });
     } finally {
       for (const [workerName, queue] of Object.entries(queues)) {
@@ -1380,6 +1495,7 @@ app.get('/api/workers', async (req, res) => {
 app.get('/api/settings/terraform', async (req, res) => {
   try {
     const settings = await readPublicTerraformSettings();
+    delete settings.windows_admin_password;
     res.json(settings);
   } catch (err) {
     console.error('Unable to fetch terraform settings', err);
@@ -1390,11 +1506,13 @@ app.get('/api/settings/terraform', async (req, res) => {
 app.post('/api/settings/terraform', async (req, res) => {
   try {
     const sanitized = sanitizeSettingsInput(req.body);
+    delete sanitized.windows_admin_password;
     if (!Object.keys(sanitized).length) {
       return res.status(400).json({ error: 'no valid settings provided' });
     }
     const existing = await readPublicTerraformSettings();
     const updated = { ...defaultTerraformSettings, ...existing, ...sanitized };
+    delete updated.windows_admin_password;
     validateTerraformNetworkSettings(updated);
     await writeTerraformSettings(updated);
     res.json(updated);

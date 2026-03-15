@@ -15,11 +15,12 @@ terraform_wait.tf
 
 Workflow:
 
-1. Cloudbase-Init runs hostname/network/password plugins.
-2. LocalScriptsPlugin executes scripts in LocalScripts.
-3. 99-finish.ps1 writes:
+1. Cloudbase-Init runs network/password plugins and writes the completion flag.
+2. If LabFactory custom naming is enabled for a Windows VM, Terraform renames the guest over WinRM and reboots it.
+3. LocalScriptsPlugin executes scripts in LocalScripts.
+4. 99-finish.ps1 writes:
    C:\ProgramData\cloudbase-init\done.flag
-4. Terraform waits until the file exists using WinRM.
+5. Terraform waits until the file exists using WinRM.
 
 Important:
 Run Sysprep AFTER placing the config and script.

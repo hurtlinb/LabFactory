@@ -77,6 +77,7 @@ variable "vm_definitions" {
   type = list(object({
     vmid         = number
     name         = string
+    hostname     = optional(string)
     os_type      = optional(string)
     clone_source = string
     full_clone   = bool

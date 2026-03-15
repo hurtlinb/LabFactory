@@ -157,6 +157,10 @@
                 <span>Description</span>
                 <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
               </label>
+              <label class="field">
+                <span>Mot de passe Windows</span>
+                <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Utilise pour cloud-init et le check WinRM">
+              </label>
             </form>
 
             <div id="dropzone" class="dropzone">
@@ -192,6 +196,16 @@
                 <label class="field">
                   <span>Starting subnet</span>
                   <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
+                </label>
+              </div>
+              <div class="field">
+                <span>Increment VLAN</span>
+                <label class="switch" aria-label="Increment VLAN">
+                  <input type="checkbox" name="incrementVlan" checked>
+                  <span class="switch-track" aria-hidden="true">
+                    <span class="switch-thumb"></span>
+                  </span>
+                  <span class="switch-label">On</span>
                 </label>
               </div>
               <button class="btn btn-secondary" type="submit">Add classroom</button>
@@ -285,10 +299,6 @@
                 <option value="/29">/29</option>
                 <option value="/30">/30</option>
               </select>
-            </label>
-            <label class="field">
-              <span>Windows admin password</span>
-              <input type="password" name="windows_admin_password" placeholder="Used for Cloudbase-Init wait via WinRM">
             </label>
             <div class="inline-actions">
               <button type="submit" class="btn btn-primary">Save settings</button>
