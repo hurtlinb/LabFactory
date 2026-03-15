@@ -1017,6 +1017,7 @@ select:focus {
 
 .vm-state-dot[data-state='waiting for cloudbase-init'],
 .vm-state-dot[data-state='cloning'],
+.vm-state-dot[data-state='customizing'],
 .vm-state-dot[data-state='starting'],
 .vm-state-dot[data-state='destroying'] {
   background: var(--brand-deep);

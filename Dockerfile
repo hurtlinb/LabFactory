@@ -2,9 +2,11 @@ FROM node:20-bullseye
 
 # Install Terraform and Ansible so the demo runner has the binaries available.
 RUN apt-get update \
-  && apt-get install -y wget unzip ansible \
+  && apt-get install -y wget unzip ansible python3-pip \
   && wget -q -O /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.5.4/terraform_1.5.4_linux_amd64.zip \
   && unzip /tmp/terraform.zip -d /usr/local/bin \
+  && pip3 install --no-cache-dir pywinrm \
+  && ansible-galaxy collection install ansible.windows \
   && rm /tmp/terraform.zip \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*

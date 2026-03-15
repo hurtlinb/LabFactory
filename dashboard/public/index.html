@@ -419,6 +419,25 @@
     </form>
   </dialog>
 
+  <dialog id="vmTimezoneDialog" class="modal-dialog">
+    <form id="vmTimezoneForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Customization</p>
+          <h3>Set Timezone</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Timezone</span>
+        <select id="vmTimezoneValue"></select>
+      </label>
+      <div class="inline-actions">
+        <button id="vmTimezoneCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>

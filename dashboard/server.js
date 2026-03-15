@@ -6,6 +6,8 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { promises as fs } from 'node:fs';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { createClient } from 'redis';
 import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
@@ -50,7 +52,15 @@ const dbPool = new Pool({
 const settingsDir = path.resolve(__dirname, '../config');
 const terraformSettingsPath = path.join(settingsDir, 'terraform-settings.json');
 const terraformSettingsSamplePath = path.join(settingsDir, 'terraform-settings.sample.json');
+const windowsTimezonesPath = path.join(settingsDir, 'windows-timezones.json');
 const migrationsDir = path.resolve(__dirname, '../db/migrations');
+const execFileAsync = promisify(execFile);
+const fallbackWindowsTimezones = [
+  {
+    id: 'W. Europe Standard Time',
+    label: '(UTC+01:00) Amsterdam, Berlin, Berne, Rome, Stockholm, Vienna'
+  }
+];
 
 const wrapAsync =
   handler =>
@@ -61,6 +71,44 @@ const wrapAsync =
     });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const parseWindowsTimezoneList = rawOutput => {
+  const lines = String(rawOutput ?? '')
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+  const result = [];
+
+  for (let index = 0; index < lines.length; index += 2) {
+    const label = lines[index];
+    const id = lines[index + 1] ?? '';
+    if (label && id) {
+      result.push({ id, label });
+    }
+  }
+
+  return result;
+};
+
+const loadWindowsTimezones = async () => {
+  try {
+    const { stdout } = await execFileAsync('tzutil.exe', ['/l']);
+    const parsed = parseWindowsTimezoneList(stdout);
+    if (parsed.length) {
+      return parsed;
+    }
+  } catch {
+    // Fallback to the cached tzutil output below.
+  }
+
+  try {
+    const raw = await fs.readFile(windowsTimezonesPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : fallbackWindowsTimezones;
+  } catch {
+    return fallbackWindowsTimezones;
+  }
+};
 
 const templateSchema = z.object({
   name: z.string().trim().min(1),
@@ -528,7 +576,8 @@ const buildTerraformBlueprintPayload = blueprint => {
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
-        customNameEnabled: isVmCustomNameEnabled(vm)
+        customNameEnabled: isVmCustomNameEnabled(vm),
+        timezone: String(vm.config?.timezone ?? '').trim() || null
       };
     })
   };
@@ -611,6 +660,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
         customNameEnabled: isVmCustomNameEnabled(vm),
+        timezone: String(vm.config?.timezone ?? '').trim() || null,
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
         vlanTag
@@ -654,6 +704,9 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource }) => {
   if (resource.status === 'running') {
     if (['queued', 'deploying'].includes(deploymentStatus) && isWindowsOsType(vm.osType)) {
       return 'waiting for cloudbase-init';
+    }
+    if (deploymentStatus === 'customizing') {
+      return 'customizing';
     }
     if (deploymentStatus === 'starting') {
       return 'starting';
@@ -704,6 +757,7 @@ const fetchDeploymentRows = async () => {
 const TRANSIENT_DEPLOYMENT_STATUSES = new Set([
   'queued',
   'deploying',
+  'customizing',
   'starting',
   'stopping',
   'destroying'
@@ -816,6 +870,14 @@ app.get('/api/app-info', (req, res) => {
     version: packageJson.version ?? '0.0.0'
   });
 });
+
+app.get(
+  '/api/timezones/windows',
+  wrapAsync(async (req, res) => {
+    const timezones = await loadWindowsTimezones();
+    res.json({ timezones });
+  })
+);
 
 app.get(
   '/api/classrooms',

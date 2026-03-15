@@ -43,11 +43,13 @@ services:
     restart: on-failure
     depends_on:
       - redis
+      - postgres
     env_file:
       - .env
     volumes:
       - ./ansible:/usr/src/app/ansible:cached
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - REDIS_HOST=redis
       - REDIS_PORT=6379
     command: npm run ansible-worker

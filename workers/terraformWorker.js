@@ -2,10 +2,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import http from 'node:http';
 import https from 'node:https';
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { runCommand } from '../lib/runCommand.js';
 import { readFile, writeFile } from 'node:fs/promises';
+import { ansibleQueueName } from './ansibleWorker.js';
 import {
   assertRequiredTerraformEnvSettings,
   defaultTerraformSettings,
@@ -274,6 +275,7 @@ export const terraformQueueName = 'terraform-workflows';
 
 export function startTerraformWorker(connection) {
   const activeAbortControllers = new Map();
+  const ansibleQueue = new Queue(ansibleQueueName, { connection });
 
   const worker = new Worker(
     terraformQueueName,
@@ -428,11 +430,48 @@ export function startTerraformWorker(connection) {
           );
         }
 
-        await safeUpdateLifecycleStatus(job.data.labInstanceId, action === 'destroy' ? 'destroyed' : 'deployed', {
-          action,
-          jobId: String(job.id),
-          runId: job.data.runId
-        });
+        const timezoneTargets = Array.isArray(job.data?.blueprint?.vms)
+          ? job.data.blueprint.vms
+              .filter(vm => String(vm.timezone ?? '').trim() && isWindowsOsType(vm.osType))
+              .map(vm => ({
+                id: vm.id,
+                name: vm.name,
+                hostname: String(vm.hostname ?? '').trim() || null,
+                ipAddress:
+                  vm.ipLastOctet != null && vm.subnetBase
+                    ? `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
+                    : null,
+                timezone: String(vm.timezone).trim(),
+                osType: vm.osType ?? 'other'
+              }))
+          : [];
+
+        if (action === 'deploy' && job.data?.deploymentId && timezoneTargets.length > 0) {
+          const ansibleJob = await ansibleQueue.add(
+            'customize-timezone',
+            {
+              action: 'customize',
+              labInstanceId: job.data.labInstanceId,
+              deploymentId: job.data.deploymentId,
+              runId: job.data.runId,
+              windowsAdminPassword: String(job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
+              timezoneTargets
+            },
+            { attempts: 1 }
+          );
+
+          await safeUpdateLifecycleStatus(job.data.labInstanceId, 'customizing', {
+            action: 'customize',
+            jobId: String(ansibleJob.id),
+            runId: job.data.runId
+          });
+        } else {
+          await safeUpdateLifecycleStatus(job.data.labInstanceId, action === 'destroy' ? 'destroyed' : 'deployed', {
+            action,
+            jobId: String(job.id),
+            runId: job.data.runId
+          });
+        }
 
         console.log(`Terraform job ${job.id} finished for ${job.data.labInstanceId} (${action})`);
 

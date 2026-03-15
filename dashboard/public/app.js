@@ -3,6 +3,7 @@
   templates: [],
   blueprints: [],
   deployments: [],
+  timezoneOptions: [],
   terraformSettings: {},
   currentBlueprint: createEmptyBlueprint()
 };
@@ -46,6 +47,10 @@ const vmIpValueInput = document.getElementById('vmIpValue');
 const vmIpCancelButton = document.getElementById('vmIpCancelButton');
 const vmIpHelp = document.getElementById('vmIpHelp');
 const vmIpSubmitButton = document.getElementById('vmIpSubmitButton');
+const vmTimezoneDialog = document.getElementById('vmTimezoneDialog');
+const vmTimezoneForm = document.getElementById('vmTimezoneForm');
+const vmTimezoneValueSelect = document.getElementById('vmTimezoneValue');
+const vmTimezoneCancelButton = document.getElementById('vmTimezoneCancelButton');
 
 const queueTableBody = document.getElementById('queueTableBody');
 const jobsTableBody = document.getElementById('jobsTableBody');
@@ -62,7 +67,16 @@ const appVersion = document.getElementById('appVersion');
 const statusTimers = new WeakMap();
 let pendingVmCustomization = null;
 let pendingVmIpPrompt = null;
+let pendingVmTimezonePrompt = null;
 let activeDragItem = null;
+
+const DEFAULT_WINDOWS_TIMEZONE = 'W. Europe Standard Time';
+const FALLBACK_TIMEZONE_OPTIONS = [
+  {
+    id: 'W. Europe Standard Time',
+    label: '(UTC+01:00) Amsterdam, Berlin, Berne, Rome, Stockholm, Vienna'
+  }
+];
 
 function getDragItemType(dataTransfer) {
   if (activeDragItem?.type) {
@@ -240,6 +254,10 @@ function renderTemplates() {
             <span class="palette-label-tag">Aa</span>
             <strong>Name</strong>
           </article>
+          <article class="palette-label-card" draggable="true" data-customization-key="timezone">
+            <span class="palette-label-tag">TZ</span>
+            <strong>Timezone</strong>
+          </article>
         </div>
       </section>
     `;
@@ -261,6 +279,10 @@ function renderTemplates() {
           <article class="palette-label-card" draggable="true" data-customization-key="name">
             <span class="palette-label-tag">Aa</span>
             <strong>Name</strong>
+          </article>
+          <article class="palette-label-card" draggable="true" data-customization-key="timezone">
+            <span class="palette-label-tag">TZ</span>
+            <strong>Timezone</strong>
           </article>
         </div>
       </section>
@@ -430,6 +452,14 @@ function renderCanvas() {
           </span>
         `);
       }
+      if (String(vm.config?.timezone || '').trim()) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill">
+            <span>Timezone: ${escapeHtml(String(vm.config.timezone).trim())}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="timezone" aria-label="Remove Timezone customization" title="Remove Timezone customization">×</button>
+          </span>
+        `);
+      }
       return `
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
@@ -480,6 +510,9 @@ function renderCanvas() {
       if (customizationKey === 'name') {
         await promptVmName(vmId);
       }
+      if (customizationKey === 'timezone') {
+        await promptVmTimezone(vmId);
+      }
     });
     card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
       button.addEventListener('click', event => {
@@ -488,6 +521,12 @@ function renderCanvas() {
           updateVm(vmId, vm => {
             vm.config.customNameEnabled = false;
             vm.name = '';
+          });
+          renderCanvas();
+        }
+        if (button.dataset.customizationKey === 'timezone') {
+          updateVm(vmId, vm => {
+            delete vm.config.timezone;
           });
           renderCanvas();
         }
@@ -679,7 +718,7 @@ async function openDeploymentDetails(deploymentId) {
 }
 
 function resolveLifecycleActions(status) {
-  if (['queued', 'deploying', 'starting', 'stopping', 'destroying'].includes(status)) {
+  if (['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying'].includes(status)) {
     return { busy: true, items: [] };
   }
   if (status === 'destroyed') {
@@ -789,6 +828,44 @@ async function promptVmName(vmId) {
   });
   if (!submitted) {
     renderCanvas();
+  }
+}
+
+async function promptVmTimezone(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm || !vmTimezoneDialog || !vmTimezoneForm || !vmTimezoneValueSelect) return;
+
+  if (pendingVmTimezonePrompt?.resolve) {
+    pendingVmTimezonePrompt.resolve(false);
+  }
+
+  const timezoneOptions = state.timezoneOptions.length ? state.timezoneOptions : FALLBACK_TIMEZONE_OPTIONS;
+  vmTimezoneValueSelect.innerHTML = timezoneOptions
+    .map(option => `<option value="${escapeHtmlAttr(option.id)}">${escapeHtml(option.label)}</option>`)
+    .join('');
+  vmTimezoneValueSelect.value = String(vm.config?.timezone || DEFAULT_WINDOWS_TIMEZONE).trim() || DEFAULT_WINDOWS_TIMEZONE;
+
+  const submitted = await new Promise(resolve => {
+    pendingVmTimezonePrompt = { resolve, vmId };
+    vmTimezoneDialog.showModal();
+    window.setTimeout(() => {
+      vmTimezoneValueSelect.focus();
+    }, 0);
+  });
+
+  if (!submitted) {
+    renderCanvas();
+  }
+}
+
+async function loadTimezoneOptions() {
+  try {
+    const payload = await fetchJson('/api/timezones/windows');
+    state.timezoneOptions = Array.isArray(payload?.timezones) && payload.timezones.length
+      ? payload.timezones
+      : FALLBACK_TIMEZONE_OPTIONS;
+  } catch {
+    state.timezoneOptions = FALLBACK_TIMEZONE_OPTIONS;
   }
 }
 
@@ -1523,6 +1600,35 @@ vmIpDialog?.addEventListener('close', () => {
   pendingVmIpPrompt = null;
 });
 
+vmTimezoneForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  if (!pendingVmTimezonePrompt || !vmTimezoneValueSelect) return;
+
+  const timezone = String(vmTimezoneValueSelect.value || DEFAULT_WINDOWS_TIMEZONE).trim() || DEFAULT_WINDOWS_TIMEZONE;
+  updateVm(pendingVmTimezonePrompt.vmId, vm => {
+    vm.config.timezone = timezone;
+  });
+  renderCanvas();
+  pendingVmTimezonePrompt.resolve(true);
+  pendingVmTimezonePrompt = null;
+  vmTimezoneDialog?.close();
+});
+
+vmTimezoneCancelButton?.addEventListener('click', () => {
+  if (pendingVmTimezonePrompt?.resolve) {
+    pendingVmTimezonePrompt.resolve(false);
+  }
+  pendingVmTimezonePrompt = null;
+  vmTimezoneDialog?.close();
+});
+
+vmTimezoneDialog?.addEventListener('close', () => {
+  if (pendingVmTimezonePrompt?.resolve) {
+    pendingVmTimezonePrompt.resolve(false);
+  }
+  pendingVmTimezonePrompt = null;
+});
+
 async function bootstrap() {
   setActiveView('blueprint');
   syncBlueprintFields();
@@ -1532,6 +1638,7 @@ async function bootstrap() {
     loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),
+    loadTimezoneOptions(),
     refreshLifecycleLabs(),
     loadTerraformSettings(),
     refreshQueues(),
