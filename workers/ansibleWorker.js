@@ -37,30 +37,65 @@ const safeUpdateDeploymentStatus = async (deploymentId, status, details = {}) =>
   }
 };
 
-const buildWindowsInventory = ({ windowsAdminPassword, timezoneTargets }) => {
+const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) => {
   const hosts = timezoneTargets
     .map((target, index) => {
       const hostName = `vm_${index + 1}`;
-      return `        ${hostName}:
-          ansible_host: ${target.ipAddress}
-          ansible_user: Administrator
-          ansible_password: ${JSON.stringify(windowsAdminPassword)}
-          ansible_connection: winrm
-          ansible_port: 5986
-          ansible_winrm_scheme: https
-          ansible_winrm_transport: basic
-          ansible_winrm_server_cert_validation: ignore
-          target_timezone: ${JSON.stringify(target.timezone)}
-          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`;
+      const lines = [
+        `        ${hostName}:`,
+        `          ansible_host: ${target.ipAddress}`,
+        '          ansible_user: Administrator',
+        `          ansible_password: ${JSON.stringify(windowsAdminPassword)}`,
+        '          ansible_connection: winrm',
+        '          ansible_port: 5986',
+        '          ansible_winrm_scheme: https',
+        '          ansible_winrm_transport: basic',
+        '          ansible_winrm_server_cert_validation: ignore',
+        `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
+      ];
+      if (String(target.timezone ?? '').trim()) {
+        lines.push(`          target_timezone: ${JSON.stringify(target.timezone)}`);
+      }
+      if (String(target.hostname ?? '').trim()) {
+        lines.push(`          target_hostname: ${JSON.stringify(target.hostname)}`);
+      }
+      return lines.join('\n');
     })
     .join('\n');
 
-  return `all:
-  children:
-    windows_timezone_targets:
+  return `    windows_timezone_targets:
       hosts:
-${hosts}
-`;
+${hosts}`;
+};
+
+const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets }) => {
+  const hosts = timezoneTargets
+    .map((target, index) => {
+      const hostName = `linux_vm_${index + 1}`;
+      const lines = [
+        `        ${hostName}:`,
+        `          ansible_host: ${target.ipAddress}`,
+        `          ansible_user: ${JSON.stringify(linuxUser)}`,
+        '          ansible_connection: ssh',
+        '          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"',
+        '          ansible_become: true',
+        `          ansible_password: ${JSON.stringify(linuxPassword)}`,
+        `          ansible_become_password: ${JSON.stringify(linuxPassword)}`,
+        `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
+      ];
+      if (String(target.timezone ?? '').trim()) {
+        lines.push(`          target_timezone: ${JSON.stringify(target.timezone)}`);
+      }
+      if (String(target.hostname ?? '').trim()) {
+        lines.push(`          target_hostname: ${JSON.stringify(target.hostname)}`);
+      }
+      return lines.join('\n');
+    })
+    .join('\n');
+
+  return `    linux_timezone_targets:
+      hosts:
+${hosts}`;
 };
 
 export function startAnsibleWorker(connection) {
@@ -77,18 +112,26 @@ export function startAnsibleWorker(connection) {
         run_id: job.data.runId,
         terraform_status: 'apply-complete',
         timezone_targets: Array.isArray(job.data.timezoneTargets) ? job.data.timezoneTargets : [],
+        linux_default_username: String(job.data.linuxDefaultUsername ?? '').trim() || 'ubuntu',
         windows_admin_password: String(job.data.windowsAdminPassword ?? '').trim() || null
       };
 
       try {
-        if (!extraVars.windows_admin_password) {
-          throw new Error('windows_admin_password is required for timezone customization');
-        }
-
-        const timezoneTargets = extraVars.timezone_targets.filter(
-          target => target && target.ipAddress && target.timezone && ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
+        const windowsTimezoneTargets = extraVars.timezone_targets.filter(
+          target =>
+            target &&
+            target.ipAddress &&
+            (target.timezone || target.hostname) &&
+            ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
-        if (!timezoneTargets.length) {
+        const linuxTimezoneTargets = extraVars.timezone_targets.filter(
+          target =>
+            target &&
+            target.ipAddress &&
+            (target.timezone || target.hostname) &&
+            String(target.osType ?? '') === 'ubuntu'
+        );
+        if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
           await safeUpdateDeploymentStatus(job.data.deploymentId, 'deployed', {
             action: 'customize',
             jobId: String(job.id),
@@ -98,12 +141,43 @@ export function startAnsibleWorker(connection) {
         }
 
         const inventoryPath = path.join(ansibleDir, `.inventory-${job.id}.yml`);
+        const inventoryParts = [];
+
+        if (windowsTimezoneTargets.length) {
+          if (!extraVars.windows_admin_password) {
+            throw new Error('windows_admin_password is required for Windows timezone customization');
+          }
+          inventoryParts.push(
+            buildWindowsInventoryHosts({
+              windowsAdminPassword: extraVars.windows_admin_password,
+              timezoneTargets: windowsTimezoneTargets
+            })
+          );
+        }
+
+        if (linuxTimezoneTargets.length) {
+          const linuxUser = extraVars.linux_default_username;
+          const linuxPassword = extraVars.windows_admin_password;
+
+          if (!linuxUser) {
+            throw new Error('linux_default_username is required for Linux guest customization');
+          }
+          if (!linuxPassword) {
+            throw new Error('A lab password is required for Linux guest customization');
+          }
+
+          inventoryParts.push(
+            buildLinuxInventoryHosts({
+              linuxUser,
+              linuxPassword,
+              timezoneTargets: linuxTimezoneTargets
+            })
+          );
+        }
+
         await fs.writeFile(
           inventoryPath,
-          buildWindowsInventory({
-            windowsAdminPassword: extraVars.windows_admin_password,
-            timezoneTargets
-          }),
+          `all:\n  children:\n${inventoryParts.join('\n')}\n`,
           'utf8'
         );
 

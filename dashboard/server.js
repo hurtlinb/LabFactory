@@ -53,12 +53,19 @@ const settingsDir = path.resolve(__dirname, '../config');
 const terraformSettingsPath = path.join(settingsDir, 'terraform-settings.json');
 const terraformSettingsSamplePath = path.join(settingsDir, 'terraform-settings.sample.json');
 const windowsTimezonesPath = path.join(settingsDir, 'windows-timezones.json');
+const linuxTimezonesPath = path.join(settingsDir, 'linux-timezones.json');
 const migrationsDir = path.resolve(__dirname, '../db/migrations');
 const execFileAsync = promisify(execFile);
 const fallbackWindowsTimezones = [
   {
     id: 'W. Europe Standard Time',
     label: '(UTC+01:00) Amsterdam, Berlin, Berne, Rome, Stockholm, Vienna'
+  }
+];
+const fallbackLinuxTimezones = [
+  {
+    id: 'Europe/Bern',
+    label: 'Europe/Bern'
   }
 ];
 
@@ -107,6 +114,16 @@ const loadWindowsTimezones = async () => {
     return Array.isArray(parsed) && parsed.length ? parsed : fallbackWindowsTimezones;
   } catch {
     return fallbackWindowsTimezones;
+  }
+};
+
+const loadLinuxTimezones = async () => {
+  try {
+    const raw = await fs.readFile(linuxTimezonesPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.length ? parsed : fallbackLinuxTimezones;
+  } catch {
+    return fallbackLinuxTimezones;
   }
 };
 
@@ -247,7 +264,7 @@ const validateBlueprintVmIpLastOctets = async payload => {
   }
 };
 
-const validateBlueprintWindowsPassword = async payload => {
+const validateBlueprintGuestPassword = async payload => {
   const templateIds = [...new Set(payload.vms.map(vm => vm.templateId))];
   if (!templateIds.length) {
     return;
@@ -262,8 +279,16 @@ const validateBlueprintWindowsPassword = async payload => {
 
   const osTypesById = new Map(result.rows.map(row => [row.id, row.os_type]));
   const hasWindowsVm = payload.vms.some(vm => isWindowsOsType(osTypesById.get(vm.templateId)));
-  if (hasWindowsVm && !String(payload.windowsAdminPassword ?? '').trim()) {
-    throw new Error('Windows admin password is required for a blueprint containing Windows VMs');
+  const hasLinuxCustomization = payload.vms.some(vm => {
+    const osType = String(osTypesById.get(vm.templateId) ?? '').trim();
+    if (osType !== 'ubuntu') {
+      return false;
+    }
+    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim());
+  });
+
+  if ((hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
+    throw new Error('A lab guest password is required for Windows VMs and Linux customizations');
   }
 };
 
@@ -872,10 +897,13 @@ app.get('/api/app-info', (req, res) => {
 });
 
 app.get(
-  '/api/timezones/windows',
+  '/api/timezones',
   wrapAsync(async (req, res) => {
-    const timezones = await loadWindowsTimezones();
-    res.json({ timezones });
+    const [windows, linux] = await Promise.all([
+      loadWindowsTimezones(),
+      loadLinuxTimezones()
+    ]);
+    res.json({ windows, linux });
   })
 );
 
@@ -1249,7 +1277,7 @@ app.post(
     }
 
     await validateBlueprintVmIpLastOctets(parsed.data);
-    await validateBlueprintWindowsPassword(parsed.data);
+    await validateBlueprintGuestPassword(parsed.data);
     const blueprint = await persistBlueprint(uuidv4(), parsed.data);
     res.status(201).json(blueprint);
   })
@@ -1265,7 +1293,7 @@ app.put(
     }
 
     await validateBlueprintVmIpLastOctets(parsed.data);
-    await validateBlueprintWindowsPassword(parsed.data);
+    await validateBlueprintGuestPassword(parsed.data);
     const existing = await fetchBlueprintById(req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'blueprint not found' });

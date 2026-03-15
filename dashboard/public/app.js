@@ -3,7 +3,10 @@
   templates: [],
   blueprints: [],
   deployments: [],
-  timezoneOptions: [],
+  timezoneOptions: {
+    windows: [],
+    linux: []
+  },
   terraformSettings: {},
   currentBlueprint: createEmptyBlueprint()
 };
@@ -71,10 +74,17 @@ let pendingVmTimezonePrompt = null;
 let activeDragItem = null;
 
 const DEFAULT_WINDOWS_TIMEZONE = 'W. Europe Standard Time';
-const FALLBACK_TIMEZONE_OPTIONS = [
+const DEFAULT_LINUX_TIMEZONE = 'Europe/Bern';
+const FALLBACK_WINDOWS_TIMEZONE_OPTIONS = [
   {
     id: 'W. Europe Standard Time',
     label: '(UTC+01:00) Amsterdam, Berlin, Berne, Rome, Stockholm, Vienna'
+  }
+];
+const FALLBACK_LINUX_TIMEZONE_OPTIONS = [
+  {
+    id: DEFAULT_LINUX_TIMEZONE,
+    label: DEFAULT_LINUX_TIMEZONE
   }
 ];
 
@@ -834,16 +844,21 @@ async function promptVmName(vmId) {
 async function promptVmTimezone(vmId) {
   const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
   if (!vm || !vmTimezoneDialog || !vmTimezoneForm || !vmTimezoneValueSelect) return;
+  const template = state.templates.find(item => item.id === vm.templateId);
+  const isWindows = ['windows11', 'windows-server'].includes(String(template?.osType || ''));
+  const timezoneOptions = isWindows
+    ? (state.timezoneOptions.windows.length ? state.timezoneOptions.windows : FALLBACK_WINDOWS_TIMEZONE_OPTIONS)
+    : (state.timezoneOptions.linux.length ? state.timezoneOptions.linux : FALLBACK_LINUX_TIMEZONE_OPTIONS);
+  const defaultTimezone = isWindows ? DEFAULT_WINDOWS_TIMEZONE : DEFAULT_LINUX_TIMEZONE;
 
   if (pendingVmTimezonePrompt?.resolve) {
     pendingVmTimezonePrompt.resolve(false);
   }
 
-  const timezoneOptions = state.timezoneOptions.length ? state.timezoneOptions : FALLBACK_TIMEZONE_OPTIONS;
   vmTimezoneValueSelect.innerHTML = timezoneOptions
     .map(option => `<option value="${escapeHtmlAttr(option.id)}">${escapeHtml(option.label)}</option>`)
     .join('');
-  vmTimezoneValueSelect.value = String(vm.config?.timezone || DEFAULT_WINDOWS_TIMEZONE).trim() || DEFAULT_WINDOWS_TIMEZONE;
+  vmTimezoneValueSelect.value = String(vm.config?.timezone || defaultTimezone).trim() || defaultTimezone;
 
   const submitted = await new Promise(resolve => {
     pendingVmTimezonePrompt = { resolve, vmId };
@@ -860,12 +875,16 @@ async function promptVmTimezone(vmId) {
 
 async function loadTimezoneOptions() {
   try {
-    const payload = await fetchJson('/api/timezones/windows');
-    state.timezoneOptions = Array.isArray(payload?.timezones) && payload.timezones.length
-      ? payload.timezones
-      : FALLBACK_TIMEZONE_OPTIONS;
+    const payload = await fetchJson('/api/timezones');
+    state.timezoneOptions = {
+      windows: Array.isArray(payload?.windows) && payload.windows.length ? payload.windows : FALLBACK_WINDOWS_TIMEZONE_OPTIONS,
+      linux: Array.isArray(payload?.linux) && payload.linux.length ? payload.linux : FALLBACK_LINUX_TIMEZONE_OPTIONS
+    };
   } catch {
-    state.timezoneOptions = FALLBACK_TIMEZONE_OPTIONS;
+    state.timezoneOptions = {
+      windows: FALLBACK_WINDOWS_TIMEZONE_OPTIONS,
+      linux: FALLBACK_LINUX_TIMEZONE_OPTIONS
+    };
   }
 }
 
@@ -1604,7 +1623,12 @@ vmTimezoneForm?.addEventListener('submit', event => {
   event.preventDefault();
   if (!pendingVmTimezonePrompt || !vmTimezoneValueSelect) return;
 
-  const timezone = String(vmTimezoneValueSelect.value || DEFAULT_WINDOWS_TIMEZONE).trim() || DEFAULT_WINDOWS_TIMEZONE;
+  const vm = state.currentBlueprint.vms.find(item => item.id === pendingVmTimezonePrompt.vmId);
+  const template = state.templates.find(item => item.id === vm?.templateId);
+  const fallbackTimezone = ['windows11', 'windows-server'].includes(String(template?.osType || ''))
+    ? DEFAULT_WINDOWS_TIMEZONE
+    : DEFAULT_LINUX_TIMEZONE;
+  const timezone = String(vmTimezoneValueSelect.value || fallbackTimezone).trim() || fallbackTimezone;
   updateVm(pendingVmTimezonePrompt.vmId, vm => {
     vm.config.timezone = timezone;
   });

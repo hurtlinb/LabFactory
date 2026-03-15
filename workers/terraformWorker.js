@@ -430,9 +430,16 @@ export function startTerraformWorker(connection) {
           );
         }
 
-        const timezoneTargets = Array.isArray(job.data?.blueprint?.vms)
+        const customizationTargets = Array.isArray(job.data?.blueprint?.vms)
           ? job.data.blueprint.vms
-              .filter(vm => String(vm.timezone ?? '').trim() && isWindowsOsType(vm.osType))
+              .filter(
+                vm =>
+                  (
+                    String(vm.timezone ?? '').trim() ||
+                    String(vm.hostname ?? '').trim()
+                  ) &&
+                  [isWindowsOsType(vm.osType), String(vm.osType ?? '').trim() === 'ubuntu'].some(Boolean)
+              )
               .map(vm => ({
                 id: vm.id,
                 name: vm.name,
@@ -446,7 +453,7 @@ export function startTerraformWorker(connection) {
               }))
           : [];
 
-        if (action === 'deploy' && job.data?.deploymentId && timezoneTargets.length > 0) {
+        if (action === 'deploy' && job.data?.deploymentId && customizationTargets.length > 0) {
           const ansibleJob = await ansibleQueue.add(
             'customize-timezone',
             {
@@ -454,8 +461,13 @@ export function startTerraformWorker(connection) {
               labInstanceId: job.data.labInstanceId,
               deploymentId: job.data.deploymentId,
               runId: job.data.runId,
+              blueprint: {
+                name: job.data?.blueprint?.name ?? null,
+                classroomName: job.data?.blueprint?.classroomName ?? null
+              },
+              linuxDefaultUsername: String(merged.linux_default_username ?? '').trim() || 'ubuntu',
               windowsAdminPassword: String(job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
-              timezoneTargets
+              timezoneTargets: customizationTargets
             },
             { attempts: 1 }
           );
