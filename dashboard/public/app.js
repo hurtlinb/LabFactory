@@ -35,6 +35,17 @@ const deploymentDetailsTitle = document.getElementById('deploymentDetailsTitle')
 const deploymentVmDetailsList = document.getElementById('deploymentVmDetailsList');
 const deploymentDetailsStatus = document.getElementById('deploymentDetailsStatus');
 const closeDeploymentDetailsButton = document.getElementById('closeDeploymentDetailsButton');
+const vmCustomizationDialog = document.getElementById('vmCustomizationDialog');
+const vmCustomizationTitle = document.getElementById('vmCustomizationTitle');
+const vmCustomizationForm = document.getElementById('vmCustomizationForm');
+const vmCustomizationValueInput = document.getElementById('vmCustomizationValue');
+const vmCustomizationCancelButton = document.getElementById('vmCustomizationCancelButton');
+const vmIpDialog = document.getElementById('vmIpDialog');
+const vmIpForm = document.getElementById('vmIpForm');
+const vmIpValueInput = document.getElementById('vmIpValue');
+const vmIpCancelButton = document.getElementById('vmIpCancelButton');
+const vmIpHelp = document.getElementById('vmIpHelp');
+const vmIpSubmitButton = document.getElementById('vmIpSubmitButton');
 
 const queueTableBody = document.getElementById('queueTableBody');
 const jobsTableBody = document.getElementById('jobsTableBody');
@@ -49,6 +60,24 @@ const settingsStatus = document.getElementById('settingsStatus');
 const appVersion = document.getElementById('appVersion');
 
 const statusTimers = new WeakMap();
+let pendingVmCustomization = null;
+let pendingVmIpPrompt = null;
+let activeDragItem = null;
+
+function getDragItemType(dataTransfer) {
+  if (activeDragItem?.type) {
+    return activeDragItem.type;
+  }
+  if (!dataTransfer) return '';
+  const types = Array.from(dataTransfer.types || []);
+  if (types.includes('application/x-labfactory-customization-key')) {
+    return 'customization';
+  }
+  if (types.includes('application/x-labfactory-item-type')) {
+    return dataTransfer.getData('application/x-labfactory-item-type') || '';
+  }
+  return '';
+}
 
 function createEmptyBlueprint() {
   return {
@@ -182,20 +211,10 @@ function renderTemplates() {
         .map(
           template => `
             <article class="template-card" draggable="true" data-template-id="${template.id}">
-              <div class="template-top">
-                <div class="template-badge template-badge-image">
-                  <img src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
-                </div>
-                <div class="template-meta">
-                  <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
-                  <span class="mini-pill">VMID ${template.proxmoxTemplateVmid}</span>
-                  <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
-                </div>
+              <div class="template-badge template-badge-image">
+                <img src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
               </div>
-              <div>
-                <strong>${escapeHtml(template.name)}</strong>
-                <p class="muted">${escapeHtml(template.description || 'Reusable VM model')}</p>
-              </div>
+              <strong>${escapeHtml(template.name)}</strong>
             </article>
           `
         )
@@ -216,8 +235,11 @@ function renderTemplates() {
         <div class="palette-group-head">
           <p class="eyebrow">Customization</p>
         </div>
-        <div class="palette-group-empty">
-          <p class="placeholder">No customization options yet.</p>
+        <div class="palette-group-grid">
+          <article class="palette-label-card" draggable="true" data-customization-key="name">
+            <span class="palette-label-tag">Aa</span>
+            <strong>Name</strong>
+          </article>
         </div>
       </section>
     `;
@@ -235,8 +257,11 @@ function renderTemplates() {
         <div class="palette-group-head">
           <p class="eyebrow">Customization</p>
         </div>
-        <div class="palette-group-empty">
-          <p class="placeholder">No customization options yet.</p>
+        <div class="palette-group-grid">
+          <article class="palette-label-card" draggable="true" data-customization-key="name">
+            <span class="palette-label-tag">Aa</span>
+            <strong>Name</strong>
+          </article>
         </div>
       </section>
     `;
@@ -245,10 +270,33 @@ function renderTemplates() {
   templatePalette.querySelectorAll('.template-card').forEach(card => {
     card.addEventListener('dragstart', event => {
       card.classList.add('dragging');
+      activeDragItem = {
+        type: 'template',
+        value: card.dataset.templateId
+      };
+      event.dataTransfer.setData('application/x-labfactory-item-type', 'template');
       event.dataTransfer.setData('text/plain', card.dataset.templateId);
     });
     card.addEventListener('dragend', () => {
       card.classList.remove('dragging');
+      activeDragItem = null;
+    });
+  });
+
+  templatePalette.querySelectorAll('.palette-label-card').forEach(card => {
+    card.addEventListener('dragstart', event => {
+      card.classList.add('dragging');
+      activeDragItem = {
+        type: 'customization',
+        value: card.dataset.customizationKey
+      };
+      event.dataTransfer.setData('application/x-labfactory-item-type', 'customization');
+      event.dataTransfer.setData('application/x-labfactory-customization-key', card.dataset.customizationKey);
+      event.dataTransfer.setData('text/plain', card.dataset.customizationKey);
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      activeDragItem = null;
     });
   });
 }
@@ -365,8 +413,23 @@ function renderCanvas() {
   }
 
   canvasVmList.innerHTML = state.currentBlueprint.vms
-    .map((vm, index) => {
+    .map(vm => {
       const template = state.templates.find(item => item.id === vm.templateId);
+      const vmPills = [];
+      vmPills.push(`
+        <span class="mini-pill vm-ip-pill">
+          <span>IP: x.x.x.${escapeHtml(String(vm.ipLastOctet ?? '?'))}</span>
+          <button class="pill-action-button" type="button" data-action="edit-ip" aria-label="Edit IP last octet" title="Edit IP last octet">✎</button>
+        </span>
+      `);
+      if (vm.config?.customNameEnabled && String(vm.name || '').trim()) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill">
+            <span>Name: ${escapeHtml(vm.name.trim())}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="name" aria-label="Remove Name customization" title="Remove Name customization">×</button>
+          </span>
+        `);
+      }
       return `
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
@@ -376,49 +439,11 @@ function renderCanvas() {
               </div>
               <div>
                 <strong>${escapeHtml(template?.name || 'Unknown template')}</strong>
-                <p class="muted">${escapeHtml(template?.description || '')}</p>
-                <div class="template-meta">
-                  <span class="mini-pill">VMID ${template?.proxmoxTemplateVmid ?? 'n/a'}</span>
-                  <span class="mini-pill">${template?.fullClone ? 'full clone' : 'linked clone'}</span>
-                </div>
               </div>
             </div>
-            <span class="pill">VM ${index + 1}</span>
           </div>
           <div class="vm-controls">
-            <div class="field vm-switch-field">
-              <span>Set VM name</span>
-              <label class="switch" aria-label="Set VM name">
-                <input type="checkbox" data-field="customNameEnabled" ${vm.config?.customNameEnabled ? 'checked' : ''}>
-                <span class="switch-track" aria-hidden="true">
-                  <span class="switch-thumb"></span>
-                </span>
-                <span class="switch-label">${vm.config?.customNameEnabled ? 'Oui' : 'Non'}</span>
-              </label>
-            </div>
-            ${
-              vm.config?.customNameEnabled
-                ? `
-            <label class="field vm-name-field">
-              <span>Name</span>
-              <input type="text" data-field="name" value="${escapeHtmlAttr(vm.name)}">
-            </label>
-            `
-                : ''
-            }
-            <label class="field vm-ip-field">
-              <span>IP last octet</span>
-              <input
-                type="number"
-                data-field="ipLastOctet"
-                min="1"
-                max="254"
-                step="1"
-                inputmode="numeric"
-                value="${vm.ipLastOctet ?? ''}"
-                placeholder="42"
-              >
-            </label>
+            <div class="vm-pills">${vmPills.join('')}</div>
             <div class="vm-actions">
               <button class="icon-btn" type="button" data-action="remove" aria-label="Remove VM">×</button>
             </div>
@@ -430,38 +455,58 @@ function renderCanvas() {
 
   canvasVmList.querySelectorAll('.vm-card').forEach(card => {
     const vmId = card.dataset.vmId;
-    const ipLastOctetInput = card.querySelector('[data-field="ipLastOctet"]');
-    const customNameEnabledInput = card.querySelector('[data-field="customNameEnabled"]');
-    const customNameEnabledLabel = card.querySelector('.switch-label');
-    const nameInput = card.querySelector('[data-field="name"]');
-    customNameEnabledInput.addEventListener('change', event => {
-      if (customNameEnabledLabel) {
-        customNameEnabledLabel.textContent = event.target.checked ? 'Oui' : 'Non';
+    card.addEventListener('dragover', event => {
+      if (getDragItemType(event.dataTransfer) !== 'customization') {
+        return;
       }
-      updateVm(vmId, vm => {
-        vm.config.customNameEnabled = event.target.checked;
-        if (!event.target.checked) {
-          vm.name = '';
-        } else if (!String(vm.name || '').trim()) {
-          const template = state.templates.find(item => item.id === vm.templateId);
-          vm.name = template?.name || 'VM';
+      event.preventDefault();
+      card.classList.add('dragover');
+    });
+    card.addEventListener('dragleave', () => {
+      card.classList.remove('dragover');
+    });
+    card.addEventListener('drop', async event => {
+      const itemType = getDragItemType(event.dataTransfer);
+      if (itemType !== 'customization') {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      card.classList.remove('dragover');
+      const customizationKey =
+        activeDragItem?.type === 'customization'
+          ? activeDragItem.value
+          : event.dataTransfer.getData('application/x-labfactory-customization-key');
+      if (customizationKey === 'name') {
+        await promptVmName(vmId);
+      }
+    });
+    card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        if (button.dataset.customizationKey === 'name') {
+          updateVm(vmId, vm => {
+            vm.config.customNameEnabled = false;
+            vm.name = '';
+          });
+          renderCanvas();
         }
       });
-      renderCanvas();
     });
-    if (nameInput) {
-      nameInput.addEventListener('input', event => {
-        updateVm(vmId, vm => {
-          vm.name = event.target.value;
-        });
+    card.querySelector('[data-action="edit-ip"]')?.addEventListener('click', async event => {
+      event.stopPropagation();
+      const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+      if (!vm) return;
+      const ipLastOctet = await promptVmIpLastOctet({
+        initialValue: vm.ipLastOctet,
+        title: 'Edit IP last octet',
+        submitLabel: 'Apply'
       });
-    }
-    syncVmIpLastOctetValidity(ipLastOctetInput);
-    ipLastOctetInput.addEventListener('input', event => {
-      updateVm(vmId, vm => {
-        vm.ipLastOctet = parseIpLastOctet(event.target.value);
+      if (ipLastOctet == null) return;
+      updateVm(vmId, nextVm => {
+        nextVm.ipLastOctet = ipLastOctet;
       });
-      syncVmIpLastOctetValidity(event.target);
+      renderCanvas();
     });
     card.querySelector('[data-action="remove"]').addEventListener('click', () => {
       state.currentBlueprint.vms = state.currentBlueprint.vms.filter(vm => vm.id !== vmId);
@@ -692,15 +737,90 @@ function addVmFromTemplate(templateId) {
   const template = state.templates.find(item => item.id === templateId);
   if (!template) return;
 
-  const instanceCount = state.currentBlueprint.vms.filter(vm => vm.templateId === templateId).length + 1;
-  state.currentBlueprint.vms.push({
-    id: crypto.randomUUID(),
-    templateId,
-    name: '',
-    ipLastOctet: null,
-    config: { customNameEnabled: false }
+  return promptVmIpLastOctet().then(ipLastOctet => {
+    if (ipLastOctet == null) return;
+
+    state.currentBlueprint.vms.push({
+      id: crypto.randomUUID(),
+      templateId,
+      name: '',
+      ipLastOctet,
+      config: { customNameEnabled: false }
+    });
+    renderCanvas();
   });
-  renderCanvas();
+}
+
+function promptVmCustomization({ title, initialValue = '', onSubmit }) {
+  if (!vmCustomizationDialog || !vmCustomizationForm || !vmCustomizationValueInput || !vmCustomizationTitle) {
+    return Promise.resolve(false);
+  }
+
+  if (pendingVmCustomization?.resolve) {
+    pendingVmCustomization.resolve(false);
+  }
+
+  vmCustomizationTitle.textContent = title;
+  vmCustomizationValueInput.value = initialValue;
+
+  return new Promise(resolve => {
+    pendingVmCustomization = { resolve, onSubmit };
+    vmCustomizationDialog.showModal();
+    window.setTimeout(() => {
+      vmCustomizationValueInput.focus();
+      vmCustomizationValueInput.select();
+    }, 0);
+  });
+}
+
+async function promptVmName(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+  const submitted = await promptVmCustomization({
+    title: 'Set Name',
+    initialValue: vm.name || '',
+    onSubmit: value => {
+      updateVm(vmId, nextVm => {
+        nextVm.config.customNameEnabled = true;
+        nextVm.name = value.trim();
+      });
+      renderCanvas();
+    }
+  });
+  if (!submitted) {
+    renderCanvas();
+  }
+}
+
+function promptVmIpLastOctet({ initialValue = null, title = 'Set IP last octet', submitLabel = 'Add VM' } = {}) {
+  if (!vmIpDialog || !vmIpForm || !vmIpValueInput) {
+    return Promise.resolve(null);
+  }
+
+  if (pendingVmIpPrompt?.resolve) {
+    pendingVmIpPrompt.resolve(null);
+  }
+
+  const dialogTitle = vmIpDialog.querySelector('h3');
+  if (dialogTitle) {
+    dialogTitle.textContent = title;
+  }
+  if (vmIpSubmitButton) {
+    vmIpSubmitButton.textContent = submitLabel;
+  }
+  vmIpValueInput.value = initialValue == null ? '' : String(initialValue);
+  if (vmIpHelp) {
+    vmIpHelp.textContent = 'Enter the last IPv4 octet for this VM.';
+  }
+
+  return new Promise(resolve => {
+    pendingVmIpPrompt = { resolve };
+    vmIpDialog.showModal();
+    window.setTimeout(() => {
+      vmIpValueInput.focus();
+      vmIpValueInput.select();
+    }, 0);
+  });
 }
 
 function parseIpLastOctet(value) {
@@ -754,18 +874,6 @@ function isIpLastOctetCompatibleWithMask(ipLastOctet, mask, gatewayHostOffset = 
 
 function getIpLastOctetMaskMessage(mask, gatewayHostOffset = 1) {
   return `IP last octet is not compatible with VLAN mask ${mask} and gateway offset ${gatewayHostOffset}.`;
-}
-
-function syncVmIpLastOctetValidity(input) {
-  if (!input) return;
-  const ipLastOctet = parseIpLastOctet(input.value);
-  const mask = state.terraformSettings.network_vlan_mask || '/24';
-  const gatewayHostOffset = state.terraformSettings.network_vlan_gateway_host_offset || 1;
-  input.setCustomValidity(
-    isIpLastOctetCompatibleWithMask(ipLastOctet, mask, gatewayHostOffset)
-      ? ''
-      : getIpLastOctetMaskMessage(mask, gatewayHostOffset)
-  );
 }
 
 async function fetchJson(url, options = {}) {
@@ -1001,7 +1109,6 @@ async function loadTerraformSettings() {
     const settings = await fetchJson('/api/settings/terraform');
     state.terraformSettings = settings;
     fillSettingsForm(settings);
-    canvasVmList?.querySelectorAll('[data-field="ipLastOctet"]').forEach(syncVmIpLastOctetValidity);
   } catch (error) {
     showMessage(terraformSettingsStatus, error.message, 'danger');
   }
@@ -1254,7 +1361,7 @@ saveBlueprintButton.addEventListener('click', async () => {
 
 dropzone.addEventListener('dragover', event => {
   event.preventDefault();
-  dropzone.classList.add('dragover');
+  dropzone.classList.toggle('dragover', getDragItemType(event.dataTransfer) === 'template');
 });
 
 dropzone.addEventListener('dragleave', () => {
@@ -1264,7 +1371,15 @@ dropzone.addEventListener('dragleave', () => {
 dropzone.addEventListener('drop', event => {
   event.preventDefault();
   dropzone.classList.remove('dragover');
-  const templateId = event.dataTransfer.getData('text/plain');
+  const itemType = getDragItemType(event.dataTransfer);
+  if (itemType !== 'template') {
+    return;
+  }
+  const templateId =
+    activeDragItem?.type === 'template'
+      ? activeDragItem.value
+      : event.dataTransfer.getData('text/plain');
+  activeDragItem = null;
   addVmFromTemplate(templateId);
 });
 
@@ -1333,6 +1448,79 @@ deploymentDetailsDialog?.addEventListener('click', event => {
   if (isOutside) {
     deploymentDetailsDialog.close();
   }
+});
+
+vmCustomizationForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  if (!pendingVmCustomization) return;
+  const value = String(vmCustomizationValueInput?.value ?? '').trim();
+  if (!value) {
+    vmCustomizationValueInput?.focus();
+    return;
+  }
+  pendingVmCustomization.onSubmit(value);
+  pendingVmCustomization.resolve(true);
+  pendingVmCustomization = null;
+  vmCustomizationDialog?.close();
+});
+
+vmCustomizationCancelButton?.addEventListener('click', () => {
+  if (pendingVmCustomization?.resolve) {
+    pendingVmCustomization.resolve(false);
+  }
+  pendingVmCustomization = null;
+  vmCustomizationDialog?.close();
+});
+
+vmCustomizationDialog?.addEventListener('close', () => {
+  if (pendingVmCustomization?.resolve) {
+    pendingVmCustomization.resolve(false);
+  }
+  pendingVmCustomization = null;
+});
+
+vmIpForm?.addEventListener('submit', event => {
+  event.preventDefault();
+  if (!pendingVmIpPrompt || !vmIpValueInput) return;
+
+  const ipLastOctet = parseIpLastOctet(vmIpValueInput.value);
+  const mask = state.terraformSettings.network_vlan_mask || '/24';
+  const gatewayHostOffset = state.terraformSettings.network_vlan_gateway_host_offset || 1;
+
+  if (ipLastOctet == null) {
+    if (vmIpHelp) {
+      vmIpHelp.textContent = 'Enter a number between 1 and 254.';
+    }
+    vmIpValueInput.focus();
+    return;
+  }
+
+  if (!isIpLastOctetCompatibleWithMask(ipLastOctet, mask, gatewayHostOffset)) {
+    if (vmIpHelp) {
+      vmIpHelp.textContent = getIpLastOctetMaskMessage(mask, gatewayHostOffset);
+    }
+    vmIpValueInput.focus();
+    return;
+  }
+
+  pendingVmIpPrompt.resolve(ipLastOctet);
+  pendingVmIpPrompt = null;
+  vmIpDialog?.close();
+});
+
+vmIpCancelButton?.addEventListener('click', () => {
+  if (pendingVmIpPrompt?.resolve) {
+    pendingVmIpPrompt.resolve(null);
+  }
+  pendingVmIpPrompt = null;
+  vmIpDialog?.close();
+});
+
+vmIpDialog?.addEventListener('close', () => {
+  if (pendingVmIpPrompt?.resolve) {
+    pendingVmIpPrompt.resolve(null);
+  }
+  pendingVmIpPrompt = null;
 });
 
 async function bootstrap() {

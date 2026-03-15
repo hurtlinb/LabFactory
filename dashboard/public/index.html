@@ -148,6 +148,14 @@
               </div>
             </div>
 
+            <div id="dropzone" class="dropzone">
+              <div class="dropzone-copy">
+                <p>Drop VM templates here</p>
+                <span>Each drop creates a VM instance inside the lab blueprint.</span>
+              </div>
+              <div id="canvasVmList" class="canvas-vm-list"></div>
+            </div>
+
             <form id="blueprintForm" class="stack">
               <label class="field">
                 <span>Blueprint name</span>
@@ -162,14 +170,6 @@
                 <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Utilise pour cloud-init et le check WinRM">
               </label>
             </form>
-
-            <div id="dropzone" class="dropzone">
-              <div class="dropzone-copy">
-                <p>Drop VM templates here</p>
-                <span>Each drop creates a VM instance inside the lab blueprint.</span>
-              </div>
-              <div id="canvasVmList" class="canvas-vm-list"></div>
-            </div>
           </article>
         </div>
       </section>
@@ -379,6 +379,45 @@
       </section>
     </main>
   </div>
+
+  <dialog id="vmCustomizationDialog" class="modal-dialog">
+    <form id="vmCustomizationForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Customization</p>
+          <h3 id="vmCustomizationTitle">Set Value</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Value</span>
+        <input id="vmCustomizationValue" type="text" autocomplete="off" required>
+      </label>
+      <div class="inline-actions">
+        <button id="vmCustomizationCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="vmIpDialog" class="modal-dialog">
+    <form id="vmIpForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">VM Model</p>
+          <h3>Set IP last octet</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Last octet</span>
+        <input id="vmIpValue" type="number" min="1" max="254" step="1" inputmode="numeric" required>
+      </label>
+      <p id="vmIpHelp" class="muted modal-help">Enter the last IPv4 octet for this VM.</p>
+      <div class="inline-actions">
+        <button id="vmIpCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button id="vmIpSubmitButton" class="btn btn-primary" type="submit">Add VM</button>
+      </div>
+    </form>
+  </dialog>
 
   <script type="module" src="/app.js"></script>
 </body>

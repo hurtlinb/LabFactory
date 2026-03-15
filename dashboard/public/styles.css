@@ -235,6 +235,41 @@ select {
   gap: 12px;
 }
 
+.palette-label-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px dashed rgba(78, 147, 170, 0.34);
+  border-radius: 16px;
+  background: rgba(246, 250, 251, 0.9);
+  cursor: grab;
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
+}
+
+.palette-label-card:hover {
+  border-color: rgba(78, 147, 170, 0.5);
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.palette-label-card.dragging {
+  opacity: 0.55;
+}
+
+.palette-label-tag {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, rgba(34, 63, 115, 0.12), rgba(78, 147, 170, 0.16));
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
 .palette-group-empty {
   min-height: 96px;
   display: grid;
@@ -571,13 +606,31 @@ select:focus {
 }
 
 .template-card {
-  display: grid;
+  display: flex;
+  align-items: center;
   gap: 12px;
+  min-height: 72px;
+  padding: 12px 14px;
   cursor: grab;
+  border-radius: 18px;
+  box-shadow: none;
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
 }
 
 .template-card.dragging {
   opacity: 0.55;
+}
+
+.template-card:hover {
+  border-color: rgba(78, 147, 170, 0.4);
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.template-card strong {
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.35;
 }
 
 .template-top,
@@ -651,10 +704,10 @@ select:focus {
   border: 2px dashed rgba(78, 147, 170, 0.34);
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(234, 243, 239, 0.95));
-  padding: 20px;
-  min-height: 460px;
+  padding: 16px;
+  min-height: 240px;
   display: grid;
-  gap: 24px;
+  gap: 16px;
   align-content: start;
 }
 
@@ -665,36 +718,94 @@ select:focus {
 }
 
 .dropzone-copy {
-  padding: 10px 4px 0;
+  padding: 2px 2px 0;
 }
 
 .dropzone-copy p {
   margin: 0 0 6px;
-  font-size: 1.05rem;
+  font-size: 0.96rem;
   font-weight: 500;
 }
 
 .dropzone-copy span {
   color: var(--muted);
+  font-size: 0.88rem;
 }
 
 .canvas-vm-list {
   grid-template-columns: 1fr;
-  gap: 18px;
+  gap: 10px;
 }
 
 .vm-card {
   display: grid;
-  gap: 18px;
-  padding: 26px 28px;
-  min-height: 280px;
+  gap: 12px;
+  padding: 14px 16px;
+  min-height: 0;
+  border-radius: 18px;
+  box-shadow: none;
+}
+
+.vm-card.dragover {
+  border-color: rgba(78, 147, 170, 0.46);
+  background: rgba(242, 249, 251, 0.98);
 }
 
 .vm-controls {
   display: grid;
-  grid-template-columns: minmax(260px, 0.9fr) minmax(320px, 1.4fr) minmax(180px, 0.7fr) auto;
-  gap: 18px;
-  align-items: end;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: start;
+}
+
+.vm-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-start;
+}
+
+.vm-customization-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0 12px;
+}
+
+.vm-ip-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 34px;
+  padding: 0 12px;
+  justify-self: start;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.84rem;
+}
+
+.pill-action-button {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  display: inline-grid;
+  place-items: center;
+  border: none;
+  border-radius: 999px;
+  background: rgba(23, 49, 90, 0.08);
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.78rem;
+}
+
+.pill-action-button:hover {
+  background: rgba(23, 49, 90, 0.14);
 }
 
 .vm-actions {
@@ -708,19 +819,28 @@ select:focus {
 }
 
 .vm-controls .vm-ip-field {
-  min-width: 140px;
+  min-width: 110px;
 }
 
 .vm-controls input {
   min-width: 0;
 }
 
-.vm-switch-field {
-  align-self: start;
+.vm-top strong {
+  display: block;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.3;
 }
 
-.vm-name-field {
-  min-width: 0;
+.vm-badge {
+  width: 40px;
+  height: 40px;
+  border-radius: 14px;
+}
+
+.vm-card .pill {
+  align-self: start;
 }
 
 .icon-btn {
@@ -740,6 +860,36 @@ select:focus {
   border: 1px solid var(--line);
   padding: 12px 16px;
   background: var(--surface-soft);
+}
+
+.modal-dialog {
+  width: min(460px, calc(100vw - 32px));
+  padding: 0;
+  border: none;
+  background: transparent;
+}
+
+.modal-dialog::backdrop {
+  background: rgba(23, 49, 90, 0.24);
+  backdrop-filter: blur(4px);
+}
+
+.modal-card {
+  display: grid;
+  gap: 18px;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.modal-card h3 {
+  margin: 0;
+}
+
+.modal-help {
+  margin: 0;
 }
 
 .toast-message {
