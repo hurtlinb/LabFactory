@@ -109,6 +109,7 @@ export function startAnsibleWorker(connection) {
     async job => {
       const abortController = new AbortController();
       activeAbortControllers.set(String(job.id), abortController);
+      const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.deploymentId ?? job.id);
       const extraVars = {
         lab_instance_id: job.data.labInstanceId ?? 'lab-demo',
         deployment_id: job.data.deploymentId ?? null,
@@ -120,6 +121,7 @@ export function startAnsibleWorker(connection) {
       };
 
       try {
+        console.log(`Ansible job ${job.id} started for deployment ${deploymentLabel} (customize)`);
         const windowsTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&
@@ -226,8 +228,10 @@ export function startAnsibleWorker(connection) {
           runId: job.data.runId
         });
 
+        console.log(`Ansible job ${job.id} finished for deployment ${deploymentLabel} (customize)`);
         return { status: 'ansible-done', extraVars };
       } catch (error) {
+        console.error(`Ansible job ${job.id} failed for deployment ${deploymentLabel} (customize)`, error);
         await safeUpdateDeploymentStatus(job.data.deploymentId, 'failed', {
           action: 'customize',
           jobId: String(job.id),

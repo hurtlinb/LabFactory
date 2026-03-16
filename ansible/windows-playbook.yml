@@ -8,7 +8,7 @@
 
     - name: Set Windows hostname
       ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "$current = (Get-CimInstance Win32_ComputerSystem).Name; if ($current -ne '{{ target_hostname }}') { Rename-Computer -NewName '{{ target_hostname }}' -Force -PassThru | Out-Null; Write-Output 'changed' }"
+        powershell -NoProfile -NonInteractive -Command "if ((Get-CimInstance Win32_ComputerSystem).Name -ne '{{ target_hostname }}') { Rename-Computer -NewName '{{ target_hostname }}' -Force -PassThru | Out-Null; Write-Output 'changed' }"
       register: windows_hostname_result
       changed_when: "'changed' in (windows_hostname_result.stdout | default(''))"
       when:
@@ -17,19 +17,24 @@
         - target_hostname | string | trim != ""
         - target_hostname | string | lower != "null"
 
-    - name: Reboot Windows after hostname change
-      ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
-      when:
-        - windows_hostname_result is defined
-        - "'changed' in (windows_hostname_result.stdout | default(''))"
-
     - name: Set Windows timezone
       ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "$current = (Get-TimeZone).Id; if ($current -ne '{{ target_timezone }}') { Set-TimeZone -Id '{{ target_timezone }}'; Write-Output 'changed' }"
-      changed_when: true
+        powershell -NoProfile -NonInteractive -Command "if ((Get-TimeZone).Id -ne '{{ target_timezone }}') { Set-TimeZone -Id '{{ target_timezone }}'; Write-Output 'changed' }"
+      changed_when: "'changed' in (stdout | default(''))"
       when:
         - target_timezone is defined
         - target_timezone is not none
         - target_timezone | string | trim != ""
         - target_timezone | string | lower != "null"
+
+    - name: Reboot Windows at end of customization
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
+      changed_when: true
+      failed_when: false
+
+    - name: Wait for Windows to come back after reboot
+      ansible.builtin.wait_for_connection:
+        timeout: 1800
+        sleep: 10
+        delay: 15

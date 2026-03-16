@@ -98,6 +98,7 @@ resource "proxmox_vm_qemu" "lab_vm" {
   cipassword = trimspace(var.windows_admin_password) == "" ? null : var.windows_admin_password
   bios       = try(each.value.bios, null)
   machine    = try(each.value.machine, null)
+  tags       = try(each.value.tags, null)
 
   scsihw = var.vm_scsi_hw
   agent = 1

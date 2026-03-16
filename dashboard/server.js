@@ -480,6 +480,7 @@ const mapClassroom = row => ({
 
 const mapDeployment = row => ({
   id: row.id,
+  deploymentNumber: Number(row.deployment_number ?? 0),
   status: row.status,
   lastAction: row.last_action,
   lastJobId: row.last_job_id,
@@ -501,6 +502,20 @@ const mapDeployment = row => ({
   },
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
+
+const deriveDeploymentProgress = ({ deployment, vmPlan, resourceByVmid }) => {
+  const totalVmCount = vmPlan.vms.length;
+  const createdCount = vmPlan.vms.filter(vm => resourceByVmid.has(Number(vm.vmid))).length;
+  const customizedCount = ['deployed', 'running', 'stopped', 'mixed'].includes(deployment.status)
+    ? totalVmCount
+    : 0;
+
+  return {
+    totalVmCount,
+    createdCount,
+    customizedCount
+  };
+};
 
 const fetchBlueprintById = async blueprintId => {
   const blueprintResult = await dbPool.query(
@@ -960,7 +975,27 @@ app.get(
   '/api/lifecycle/deployments',
   wrapAsync(async (req, res) => {
     const rows = await fetchDeploymentRows();
-    res.json(rows.map(mapDeployment));
+    let resourceByVmid = new Map();
+    try {
+      const resources = await fetchClusterVmResources();
+      resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
+    } catch (error) {
+      console.error('Unable to fetch Proxmox VM resources for lifecycle deployments list', error);
+    }
+
+    const deployments = [];
+    for (const row of rows) {
+      const deployment = mapDeployment(row);
+      const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+      const classroom = await fetchClassroomById(deployment.classroom.id);
+      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom });
+      deployments.push({
+        ...deployment,
+        ...deriveDeploymentProgress({ deployment, vmPlan, resourceByVmid })
+      });
+    }
+
+    res.json(deployments);
   })
 );
 
@@ -1077,6 +1112,7 @@ app.get(
     res.json({
       deployment: {
         id: deployment.id,
+        deploymentNumber: deployment.deploymentNumber,
         status: deployment.status,
         blueprintName: deployment.blueprint.name,
         classroomName: deployment.classroom.name
@@ -1132,6 +1168,7 @@ app.post(
       {
         action,
         labInstanceId: deployment.id,
+        deploymentNumber: deployment.deploymentNumber,
         runId,
         deploymentId: deployment.id,
         blueprint: buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom })
@@ -1459,6 +1496,7 @@ app.get('/api/jobs', async (req, res) => {
               ? Math.max(0, Date.now() - job.processedOn)
               : null;
         const blueprint = job.data?.blueprint ?? null;
+        const deploymentNumber = job.data?.deploymentNumber ?? null;
         const associatedLab =
           blueprint?.name && blueprint?.classroomName
             ? `${blueprint.name} @ ${blueprint.classroomName}`
@@ -1472,6 +1510,7 @@ app.get('/api/jobs', async (req, res) => {
           state,
           action: job.data?.action ?? job.name,
           associatedLab,
+          deploymentNumber: deploymentNumber == null ? null : Number(deploymentNumber),
           runId: job.data?.runId ?? null,
           createdAt,
           startedAt,

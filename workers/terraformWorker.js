@@ -356,8 +356,9 @@ export function startTerraformWorker(connection) {
               ? 'stop'
               : 'deploy';
       const workspaceName = job.data.labInstanceId ? workspaceNameFor(job.data.labInstanceId) : 'default';
+      const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.labInstanceId);
       try {
-        console.log(`Terraform job ${job.id} started for ${job.data.labInstanceId} (${action})`);
+        console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -407,6 +408,7 @@ export function startTerraformWorker(connection) {
               cloudinit_storage: vm.cloudinitStorage ?? null,
               bios: vm.bios ?? null,
               machine: vm.machine ?? null,
+              tags: job.data.deploymentNumber == null ? null : String(job.data.deploymentNumber),
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
           }
@@ -549,6 +551,7 @@ export function startTerraformWorker(connection) {
             {
               action: 'customize',
               labInstanceId: job.data.labInstanceId,
+              deploymentNumber: job.data.deploymentNumber,
               deploymentId: job.data.deploymentId,
               runId: job.data.runId,
               blueprint: {
@@ -575,7 +578,7 @@ export function startTerraformWorker(connection) {
           });
         }
 
-        console.log(`Terraform job ${job.id} finished for ${job.data.labInstanceId} (${action})`);
+        console.log(`Terraform job ${job.id} finished for deployment ${deploymentLabel} (${action})`);
 
         return {
           planOutput,
@@ -583,7 +586,7 @@ export function startTerraformWorker(connection) {
           runId: job.data.runId
         };
       } catch (error) {
-        console.error(`Terraform job ${job.id} failed for ${job.data.labInstanceId} (${action})`, error);
+        console.error(`Terraform job ${job.id} failed for deployment ${deploymentLabel} (${action})`, error);
         await safeUpdateLifecycleStatus(job.data.labInstanceId, 'failed', {
           action,
           jobId: String(job.id),

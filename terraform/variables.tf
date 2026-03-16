@@ -91,6 +91,7 @@ variable "vm_definitions" {
     cloudinit_storage = optional(string)
     bios         = optional(string)
     machine      = optional(string)
+    tags         = optional(string)
     vlan_tag     = number
   }))
   default = []

@@ -409,7 +409,6 @@ function renderClassrooms() {
             <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
             <span class="mini-pill">Subnet start: ${classroom.startingSubnet}</span>
             <span class="mini-pill">VLAN end: ${classroom.vlans[classroom.vlans.length - 1]}</span>
-            <span class="mini-pill">Increment VLAN: ${classroom.incrementVlan ? 'on' : 'off'}</span>
           </div>
           <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
           <p class="muted">Assigned subnets: ${classroom.subnetOctets.join(', ')}</p>
@@ -577,6 +576,15 @@ function renderLifecycleLabs() {
         const actions = resolveLifecycleActions(deployment.status);
         const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
         const hasWarning = deployment.status === 'mixed';
+        const totalCount = Number(deployment.totalVmCount ?? 0);
+        const createdCount = Number(deployment.createdCount ?? 0);
+        const customizedCount = Number(deployment.customizedCount ?? 0);
+        const statusLabel =
+          deployment.status === 'queued' || deployment.status === 'deploying'
+            ? `${deployment.status} ${createdCount}/${totalCount}`
+            : deployment.status === 'customizing'
+              ? `${deployment.status} ${customizedCount}/${totalCount}`
+              : escapeHtml(deployment.status || 'idle');
         const actionMarkup = actions.busy
           ? '<span class="loading-spinner" aria-hidden="true"></span>'
           : actions.items
@@ -591,7 +599,7 @@ function renderLifecycleLabs() {
           <div class="panel-head">
             <div>
               <strong style="display:inline-flex; align-items:center; gap:8px;">
-                <span>${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${escapeHtml(deployment.status || 'idle')})</span>
+                <span>#${deployment.deploymentNumber} ${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${statusLabel})</span>
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
                 ${actionMarkup}
               </strong>
@@ -719,7 +727,7 @@ async function openDeploymentDetails(deploymentId) {
 
   try {
     const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
-    deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
+    deploymentDetailsTitle.textContent = `#${payload.deployment.deploymentNumber} ${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
     renderDeploymentVmDetails(payload);
   } catch (error) {
     deploymentVmDetailsList.innerHTML = '<p class="placeholder">Unable to load deployment VMs.</p>';
@@ -1009,7 +1017,24 @@ async function loadBlueprints() {
 }
 
 async function refreshLifecycleLabs() {
-  state.deployments = await fetchJson('/api/lifecycle/deployments');
+  const previousDeploymentsById = new Map(state.deployments.map(deployment => [deployment.id, deployment]));
+  const nextDeployments = await fetchJson('/api/lifecycle/deployments');
+  state.deployments = nextDeployments.map(deployment => {
+    const previous = previousDeploymentsById.get(deployment.id);
+    const sameTransientPhase = previous
+      && previous.status === deployment.status
+      && ['queued', 'deploying', 'customizing'].includes(deployment.status);
+
+    if (!sameTransientPhase) {
+      return deployment;
+    }
+
+    return {
+      ...deployment,
+      createdCount: Math.max(Number(previous.createdCount ?? 0), Number(deployment.createdCount ?? 0)),
+      customizedCount: Math.max(Number(previous.customizedCount ?? 0), Number(deployment.customizedCount ?? 0))
+    };
+  });
   renderLifecycleLabs();
 }
 
@@ -1298,6 +1323,14 @@ function formatJobDetail(job) {
   return '-';
 }
 
+function formatAssociatedLab(job) {
+  const label = String(job.associatedLab ?? 'n/a');
+  if (job.deploymentNumber == null) {
+    return label;
+  }
+  return `#${job.deploymentNumber} ${label}`;
+}
+
 async function refreshJobs() {
   if (!jobsTableBody) return;
   try {
@@ -1314,7 +1347,7 @@ async function refreshJobs() {
             <td>#${escapeHtml(job.id)}</td>
             <td>${escapeHtml(job.queue)}</td>
             <td>${escapeHtml(job.state ?? 'unknown')}</td>
-            <td>${escapeHtml(job.associatedLab ?? 'n/a')}</td>
+            <td>${escapeHtml(formatAssociatedLab(job))}</td>
             <td>${escapeHtml(job.action ?? job.name ?? 'n/a')}</td>
             <td>${escapeHtml(formatDuration(job.durationMs))}</td>
             <td>${escapeHtml(job.createdAt ? new Date(job.createdAt).toLocaleString() : 'n/a')}</td>
@@ -1382,13 +1415,12 @@ templateForm.addEventListener('submit', async event => {
 classroomForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const form = new FormData(classroomForm);
-  const incrementVlan = classroomForm.querySelector('[name="incrementVlan"]');
   const payload = {
     name: String(form.get('name') || '').trim(),
     workstationCount: Number(form.get('workstationCount') || 0),
     startingVlan: Number(form.get('startingVlan') || 0),
     startingSubnet: String(form.get('startingSubnet') || '').trim(),
-    incrementVlan: Boolean(incrementVlan?.checked)
+    incrementVlan: true
   };
 
   try {
@@ -1398,24 +1430,10 @@ classroomForm?.addEventListener('submit', async event => {
       body: JSON.stringify(payload)
     });
     classroomForm.reset();
-    if (incrementVlan) {
-      incrementVlan.checked = true;
-      const label = classroomForm.querySelector('.switch-label');
-      if (label) label.textContent = 'On';
-    }
     await loadClassrooms();
     showMessage(globalStatus, 'Classroom created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
-  }
-});
-
-const classroomIncrementVlanInput = classroomForm?.querySelector('[name="incrementVlan"]');
-const classroomIncrementVlanLabel = classroomForm?.querySelector('.switch-label');
-
-classroomIncrementVlanInput?.addEventListener('change', event => {
-  if (classroomIncrementVlanLabel) {
-    classroomIncrementVlanLabel.textContent = event.target.checked ? 'On' : 'Off';
   }
 });
 
