@@ -120,6 +120,64 @@ Important points:
 
 `start` and `stop` do not run Terraform apply; they call the Proxmox API directly on the deployed VMIDs.
 
+## Ubuntu Template Preparation
+To prepare an Ubuntu VM before converting it to a Proxmox template:
+
+1. Install Cloud-Init, the QEMU guest agent, and OpenSSH server:
+
+```bash
+sudo apt update
+sudo apt install -y cloud-init qemu-guest-agent openssh-server
+```
+
+2. Enable the guest agent and SSH:
+
+```bash
+sudo systemctl enable qemu-guest-agent
+sudo systemctl enable ssh
+```
+
+3. Configure Cloud-Init for Proxmox and make sure the NoCloud datasource is allowed:
+
+```bash
+sudo nano /etc/cloud/cloud.cfg.d/99-pve.cfg
+```
+
+Use:
+
+```yaml
+datasource_list: [ NoCloud, ConfigDrive ]
+```
+
+4. Clean the Cloud-Init state before turning the VM into a template:
+
+```bash
+sudo cloud-init clean --logs
+```
+
+5. Remove machine identifiers to avoid duplicate identities and network conflicts on clones:
+
+```bash
+sudo truncate -s 0 /etc/machine-id
+sudo rm /var/lib/dbus/machine-id
+```
+
+6. Optionally remove existing SSH host keys so they are regenerated on first boot:
+
+```bash
+sudo rm -f /etc/ssh/ssh_host_*
+```
+
+7. Power off the VM:
+
+```bash
+sudo poweroff
+```
+
+Once the VM is powered off, convert it into a Proxmox template.
+
+LabFactory expects Linux guest customization over SSH. The template must therefore expose an SSH server and allow login for the configured `linux_default_username`.
+
 ## Data Model
 Main SQL migrations:
 - [001-init.sql](./db/migrations/001-init.sql)
@@ -140,11 +198,26 @@ The dashboard keeps track of applied migrations with `schema_migrations`.
 
 ## Environment
 Copy `.env.example` to `.env` and set at least:
+- `REDIS_PASSWORD`
 - `PROXMOX_API_URL`
 - `PROXMOX_NODE`
 - `PROXMOX_TLS_INSECURE`
 - `PROXMOX_API_TOKEN_ID`
 - `PROXMOX_API_TOKEN_SECRET`
+
+## Redis Security
+Redis is used as the BullMQ backend and is expected to run behind the internal Docker network only.
+
+Current security model:
+- Redis is not published with `ports`, so it is not exposed on the host by default
+- Redis requires authentication through `REDIS_PASSWORD`
+- `dashboard`, `terraform-worker`, and `ansible-worker` use the same `REDIS_PASSWORD` value
+
+When changing the Redis password in `.env`, restart the Redis and application services:
+
+```bash
+docker compose up -d redis dashboard ansible-worker terraform-worker
+```
 
 ## Run
 1. Install dependencies:
@@ -168,6 +241,7 @@ http://localhost:8080
 ## Notes
 - PostgreSQL stores VM models, blueprints, classrooms, and prepared deployments.
 - Redis stores BullMQ queue data.
+- Redis should stay on the internal Docker network unless you also add network-level restrictions and secret management.
 - `config/terraform-settings.json` is still mounted and available, but the old settings form is no longer used for operational parameters.
 - The old `terraform-validator` service has been removed from the stack.
 

@@ -74,7 +74,7 @@ let pendingVmTimezonePrompt = null;
 let activeDragItem = null;
 
 const DEFAULT_WINDOWS_TIMEZONE = 'W. Europe Standard Time';
-const DEFAULT_LINUX_TIMEZONE = 'Europe/Bern';
+const DEFAULT_LINUX_TIMEZONE = 'Europe/Zurich';
 const FALLBACK_WINDOWS_TIMEZONE_OPTIONS = [
   {
     id: 'W. Europe Standard Time',

@@ -7,7 +7,10 @@ import { runCommand } from '../lib/runCommand.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ansibleDir = path.resolve(__dirname, '../ansible');
-const playbookPath = path.join(ansibleDir, 'playbook.yml');
+const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
+const isLinuxOsType = osType => !isWindowsOsType(osType);
+const linuxPlaybookPath = path.join(ansibleDir, 'linux-playbook.yml');
+const windowsPlaybookPath = path.join(ansibleDir, 'windows-playbook.yml');
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
 });
@@ -129,7 +132,7 @@ export function startAnsibleWorker(connection) {
             target &&
             target.ipAddress &&
             (target.timezone || target.hostname) &&
-            String(target.osType ?? '') === 'ubuntu'
+            isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
           await safeUpdateDeploymentStatus(job.data.deploymentId, 'deployed', {
@@ -188,21 +191,31 @@ export function startAnsibleWorker(connection) {
         });
 
         try {
-          await runCommand(
-            'ansible-playbook',
-            [
-              playbookPath,
-              '--inventory',
-              inventoryPath,
-              '--extra-vars',
-              JSON.stringify(extraVars)
-            ],
-            {
-              cwd: ansibleDir,
-              env: { ...process.env },
-              signal: abortController.signal
-            }
-          );
+          const commonArgs = ['--inventory', inventoryPath, '--extra-vars', JSON.stringify(extraVars)];
+
+          if (linuxTimezoneTargets.length) {
+            await runCommand(
+              'ansible-playbook',
+              [linuxPlaybookPath, ...commonArgs],
+              {
+                cwd: ansibleDir,
+                env: { ...process.env },
+                signal: abortController.signal
+              }
+            );
+          }
+
+          if (windowsTimezoneTargets.length) {
+            await runCommand(
+              'ansible-playbook',
+              [windowsPlaybookPath, ...commonArgs],
+              {
+                cwd: ansibleDir,
+                env: { ...process.env },
+                signal: abortController.signal
+              }
+            );
+          }
         } finally {
           await fs.rm(inventoryPath, { force: true });
         }

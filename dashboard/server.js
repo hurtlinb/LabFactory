@@ -64,8 +64,8 @@ const fallbackWindowsTimezones = [
 ];
 const fallbackLinuxTimezones = [
   {
-    id: 'Europe/Bern',
-    label: 'Europe/Bern'
+    id: 'Europe/Zurich',
+    label: 'Europe/Zurich'
   }
 ];
 
@@ -230,6 +230,7 @@ const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask, gatewayHostOffset = 
 };
 
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
+const isLinuxOsType = osType => !isWindowsOsType(osType);
 
 const isVmCustomNameEnabled = vm => {
   if (typeof vm?.config?.customNameEnabled === 'boolean') {
@@ -281,7 +282,7 @@ const validateBlueprintGuestPassword = async payload => {
   const hasWindowsVm = payload.vms.some(vm => isWindowsOsType(osTypesById.get(vm.templateId)));
   const hasLinuxCustomization = payload.vms.some(vm => {
     const osType = String(osTypesById.get(vm.templateId) ?? '').trim();
-    if (osType !== 'ubuntu') {
+    if (!isLinuxOsType(osType)) {
       return false;
     }
     return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim());

@@ -14,6 +14,10 @@ import {
   sanitizeSettingsInput
 } from '../lib/terraformSettings.js';
 
+const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
+const LINUX_SSH_WAIT_RETRY_MS = 5000;
+const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const terraformDir = path.resolve(__dirname, '../terraform');
 const terraformVarsPath = path.resolve(__dirname, '../config/terraform-settings.json');
@@ -118,6 +122,11 @@ const extractTemplateCloudInitConfig = config => {
   };
 };
 
+const extractTemplateFirmwareConfig = config => ({
+  bios: String(config?.bios ?? '').trim() || null,
+  machine: String(config?.machine ?? '').trim() || null
+});
+
 const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
   const apiUrl = new URL(
     'cluster/resources?type=vm',
@@ -161,6 +170,7 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
     const config = await fetchVmConfig(envSettings, match.node, vm.cloneSource);
     const diskConfig = extractTemplateDiskConfig(config);
     const cloudInitConfig = extractTemplateCloudInitConfig(config);
+    const firmwareConfig = extractTemplateFirmwareConfig(config);
     return [
       ...acc,
       {
@@ -171,7 +181,9 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
         diskStorage: diskConfig.diskStorage,
         diskSize: diskConfig.diskSize,
         cloudinitSlot: cloudInitConfig.cloudinitSlot,
-        cloudinitStorage: cloudInitConfig.cloudinitStorage
+        cloudinitStorage: cloudInitConfig.cloudinitStorage,
+        bios: firmwareConfig.bios,
+        machine: firmwareConfig.machine
       }
     ];
   }, Promise.resolve([]));
@@ -214,6 +226,7 @@ const safeUpdateLifecycleStatus = async (blueprintId, status, details = {}) => {
 
 const workspaceNameFor = blueprintId => `blueprint-${String(blueprintId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
+const isLinuxOsType = osType => !isWindowsOsType(osType);
 
 const parseVlanMaskBits = mask => {
   const match = /^\/(\d{1,2})$/.exec(String(mask || '').trim());
@@ -271,6 +284,53 @@ const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayHostOffs
   return `ip=${address}${mask},gw=${gateway}`;
 };
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => {
+  const startedAt = Date.now();
+  let lastError = null;
+  const remoteCommand =
+    "test -f /var/lib/cloud/instance/boot-finished || (command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait >/dev/null 2>&1) || true";
+
+  while (Date.now() - startedAt < LINUX_SSH_WAIT_TIMEOUT_MS) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error('Linux readiness wait aborted');
+    }
+
+    try {
+      await runCommand(
+        'timeout',
+        [
+          `${LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS}s`,
+          'sshpass',
+          '-p',
+          password,
+          'ssh',
+          '-o',
+          'StrictHostKeyChecking=no',
+          '-o',
+          'UserKnownHostsFile=/dev/null',
+          '-o',
+          'LogLevel=ERROR',
+          '-o',
+          'ConnectTimeout=10',
+          `${user}@${host}`,
+          remoteCommand
+        ],
+        { signal }
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+      await sleep(LINUX_SSH_WAIT_RETRY_MS);
+    }
+  }
+
+  throw new Error(
+    `Timed out waiting for Linux guest ${host} to accept SSH and finish cloud-init${lastError ? `: ${lastError.message}` : ''}`
+  );
+};
+
 export const terraformQueueName = 'terraform-workflows';
 
 export function startTerraformWorker(connection) {
@@ -313,12 +373,13 @@ export function startTerraformWorker(connection) {
         });
 
         let preparedVarFile;
+        let merged;
         try {
           const raw = await readFile(terraformVarsPath, 'utf8');
           const rawSettings = JSON.parse(raw);
           const sanitized = sanitizeSettingsInput(rawSettings);
           const envSettings = readTerraformEnvSettings();
-          const merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
+          merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
           if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
               envSettings,
@@ -344,6 +405,8 @@ export function startTerraformWorker(connection) {
               disk_size: vm.diskSize ?? null,
               cloudinit_slot: vm.cloudinitSlot ?? null,
               cloudinit_storage: vm.cloudinitStorage ?? null,
+              bios: vm.bios ?? null,
+              machine: vm.machine ?? null,
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
           }
@@ -430,6 +493,33 @@ export function startTerraformWorker(connection) {
           );
         }
 
+        const linuxReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
+          ? job.data.blueprint.vms
+              .filter(vm => isLinuxOsType(vm.osType) && vm.ipLastOctet != null && vm.subnetBase)
+              .map(vm => ({
+                name: vm.name,
+                host: `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
+              }))
+          : [];
+
+        if (action === 'deploy' && linuxReadinessTargets.length > 0) {
+          const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
+          const linuxPassword = String(merged.windows_admin_password ?? '').trim();
+          if (!linuxPassword) {
+            throw new Error('A lab password is required for Linux guest readiness checks');
+          }
+
+          for (const target of linuxReadinessTargets) {
+            console.log(`Waiting for Linux guest ${target.name} (${target.host}) to finish cloud-init`);
+            await waitForLinuxSshAndCloudInit({
+              host: target.host,
+              user: linuxUser,
+              password: linuxPassword,
+              signal: abortController.signal
+            });
+          }
+        }
+
         const customizationTargets = Array.isArray(job.data?.blueprint?.vms)
           ? job.data.blueprint.vms
               .filter(
@@ -438,7 +528,7 @@ export function startTerraformWorker(connection) {
                     String(vm.timezone ?? '').trim() ||
                     String(vm.hostname ?? '').trim()
                   ) &&
-                  [isWindowsOsType(vm.osType), String(vm.osType ?? '').trim() === 'ubuntu'].some(Boolean)
+                  [isWindowsOsType(vm.osType), isLinuxOsType(vm.osType)].some(Boolean)
               )
               .map(vm => ({
                 id: vm.id,

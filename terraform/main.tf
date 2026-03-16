@@ -52,8 +52,21 @@ locals {
     if contains(local.windows_os_types, try(vm.os_type, ""))
   }
 
+  linux_vm_definitions = {
+    for key, vm in local.vm_definitions_by_id : key => vm
+    if !contains(local.windows_os_types, try(vm.os_type, ""))
+  }
+
   cloudbase_wait_hosts = {
     for key, vm in local.windows_vm_definitions : key => (
+      length(regexall("^ip=([0-9.]+)", trimspace(try(vm.ipconfig0, "")))) > 0
+      ? regexall("^ip=([0-9.]+)", trimspace(vm.ipconfig0))[0][0]
+      : trimspace(proxmox_vm_qemu.lab_vm[key].default_ipv4_address)
+    )
+  }
+
+  linux_wait_hosts = {
+    for key, vm in local.linux_vm_definitions : key => (
       length(regexall("^ip=([0-9.]+)", trimspace(try(vm.ipconfig0, "")))) > 0
       ? regexall("^ip=([0-9.]+)", trimspace(vm.ipconfig0))[0][0]
       : trimspace(proxmox_vm_qemu.lab_vm[key].default_ipv4_address)
@@ -81,9 +94,10 @@ resource "proxmox_vm_qemu" "lab_vm" {
   clone      = each.value.clone_source
   full_clone = each.value.full_clone
   ipconfig0  = try(each.value.ipconfig0, "ip=dhcp")
-  ciuser     = contains(local.windows_os_types, try(each.value.os_type, "")) ? "Administrator" : null
-  cipassword = contains(local.windows_os_types, try(each.value.os_type, "")) ? var.windows_admin_password : null
-  bios       = var.vm_bios
+  ciuser     = contains(local.windows_os_types, try(each.value.os_type, "")) ? "Administrator" : var.linux_default_username
+  cipassword = trimspace(var.windows_admin_password) == "" ? null : var.windows_admin_password
+  bios       = try(each.value.bios, null)
+  machine    = try(each.value.machine, null)
 
   scsihw = var.vm_scsi_hw
   agent = 1

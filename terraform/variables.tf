@@ -89,6 +89,8 @@ variable "vm_definitions" {
     disk_size    = optional(string)
     cloudinit_slot = optional(string)
     cloudinit_storage = optional(string)
+    bios         = optional(string)
+    machine      = optional(string)
     vlan_tag     = number
   }))
   default = []
@@ -101,10 +103,16 @@ variable "vm_full_clone" {
 }
 
 variable "windows_admin_password" {
-  description = "Administrator password used for Windows cloud-init and WinRM readiness checks."
+  description = "Guest password used for Windows cloud-init / WinRM checks and Linux SSH readiness checks."
   type        = string
   default     = ""
   sensitive   = true
+}
+
+variable "linux_default_username" {
+  description = "Default Linux username injected through cloud-init and used for SSH readiness checks."
+  type        = string
+  default     = "ubuntu"
 }
 
 variable "vm_cores" {
@@ -147,12 +155,6 @@ variable "vm_scsi_hw" {
   description = "SCSI controller type."
   type        = string
   default     = "virtio-scsi-pci"
-}
-
-variable "vm_bios" {
-  description = "BIOS type for the cloned VM."
-  type        = string
-  default     = "ovmf"
 }
 
 variable "network_bridge" {

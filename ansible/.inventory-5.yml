@@ -1,0 +1,15 @@
+all:
+  children:
+    linux_timezone_targets:
+      hosts:
+        linux_vm_1:
+          ansible_host: 10.19.60.31
+          ansible_user: "emf"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "linux-01-blaise"
+          target_timezone: "null"
+          target_hostname: "blaise"

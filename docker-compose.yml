@@ -14,6 +14,14 @@ services:
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
 
@@ -35,6 +43,7 @@ services:
       - TF_DATA_DIR=/usr/src/app/.terraform
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run terraform-worker
 
   ansible-worker:
@@ -52,6 +61,7 @@ services:
       - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run ansible-worker
 
   dashboard:
@@ -68,6 +78,7 @@ services:
       - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run dashboard
     volumes:
       - ./config:/usr/src/app/config:cached

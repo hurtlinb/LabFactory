@@ -1,0 +1,35 @@
+- name: Apply Windows timezone customization
+  hosts: windows_timezone_targets
+  gather_facts: false
+  tasks:
+    - name: Display lab context
+      ansible.builtin.debug:
+        msg: "Customizing {{ lab_instance_id | default('lab-demo') }} deployment {{ deployment_id | default('') }} on {{ inventory_hostname }} (run {{ run_id | default('demo-run') }})"
+
+    - name: Set Windows hostname
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "$current = (Get-CimInstance Win32_ComputerSystem).Name; if ($current -ne '{{ target_hostname }}') { Rename-Computer -NewName '{{ target_hostname }}' -Force -PassThru | Out-Null; Write-Output 'changed' }"
+      register: windows_hostname_result
+      changed_when: "'changed' in (windows_hostname_result.stdout | default(''))"
+      when:
+        - target_hostname is defined
+        - target_hostname is not none
+        - target_hostname | string | trim != ""
+        - target_hostname | string | lower != "null"
+
+    - name: Reboot Windows after hostname change
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
+      when:
+        - windows_hostname_result is defined
+        - "'changed' in (windows_hostname_result.stdout | default(''))"
+
+    - name: Set Windows timezone
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "$current = (Get-TimeZone).Id; if ($current -ne '{{ target_timezone }}') { Set-TimeZone -Id '{{ target_timezone }}'; Write-Output 'changed' }"
+      changed_when: true
+      when:
+        - target_timezone is defined
+        - target_timezone is not none
+        - target_timezone | string | trim != ""
+        - target_timezone | string | lower != "null"
