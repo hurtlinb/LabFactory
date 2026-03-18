@@ -167,6 +167,8 @@ const classroomSchema = z
     workstationCount: z.number().int().positive(),
     startingVlan: z.number().int().positive(),
     startingSubnet: z.string().trim().min(1),
+    networkGateway: z.string().trim().min(1),
+    networkVlanMask: z.enum(['/24', '/25', '/26', '/27', '/28', '/29', '/30']),
     incrementVlan: z.boolean().optional().default(true)
   })
   .refine(
@@ -181,6 +183,29 @@ const classroomSchema = z
     {
       message: 'startingSubnet must be like 10.0.200.0 and its third octet range must stay within 255',
       path: ['startingSubnet']
+    }
+  )
+  .refine(
+    data => {
+      const subnet = String(data.startingSubnet).trim();
+      const subnetMatch = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.0)?$/.exec(subnet);
+      const gatewayMatch = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(String(data.networkGateway).trim());
+      if (!subnetMatch || !gatewayMatch) return false;
+      const subnetParts = subnetMatch.slice(1).map(Number);
+      const gatewayParts = gatewayMatch.slice(1).map(Number);
+      if (gatewayParts.some(part => part < 0 || part > 255)) return false;
+      if (gatewayParts[0] !== subnetParts[0] || gatewayParts[1] !== subnetParts[1] || gatewayParts[2] !== subnetParts[2]) {
+        return false;
+      }
+      const subnetSize = getSubnetSizeFromMask(data.networkVlanMask);
+      if (subnetSize == null) return false;
+      const gatewayHostOctet = gatewayParts[3];
+      const offsetInSubnet = gatewayHostOctet % subnetSize;
+      return offsetInSubnet > 0 && offsetInSubnet < subnetSize - 1;
+    },
+    {
+      message: 'gateway must be a valid IP inside the starting subnet and compatible with the selected VLAN mask',
+      path: ['networkGateway']
     }
   );
 
@@ -229,6 +254,17 @@ const isIpLastOctetCompatibleWithMask = (ipLastOctet, mask, gatewayHostOffset = 
   return gatewayOctet == null ? true : ipLastOctet !== gatewayOctet;
 };
 
+const getGatewayHostOctetFromIp = gatewayIp => {
+  const parts = String(gatewayIp ?? '')
+    .trim()
+    .split('.')
+    .map(Number);
+  if (parts.length !== 4 || parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return null;
+  }
+  return parts[3];
+};
+
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 const isLinuxOsType = osType => !isWindowsOsType(osType);
 
@@ -253,14 +289,13 @@ const resolveVmHostnameToken = (vm, fallbackToken) => {
   return sanitizeVmName(fallbackToken);
 };
 
-const validateBlueprintVmIpLastOctets = async payload => {
-  const settings = await readPublicTerraformSettings();
-  const mask = settings.network_vlan_mask || '/24';
-  const gatewayHostOffset = settings.network_vlan_gateway_host_offset || 1;
+const validateBlueprintVmIpLastOctetsForClassroom = async ({ payload, classroom }) => {
+  const mask = classroom.networkVlanMask || '/24';
+  const gatewayHostOffset = getGatewayHostOctetFromIp(classroom.networkGateway) || 1;
   const invalidVm = payload.vms.find(vm => !isIpLastOctetCompatibleWithMask(vm.ipLastOctet, mask, gatewayHostOffset));
   if (invalidVm) {
     throw new Error(
-      `VM "${invalidVm.name}" has an IP last octet incompatible with VLAN mask ${mask} and gateway offset ${gatewayHostOffset}`
+      `VM "${invalidVm.name}" has an IP last octet incompatible with VLAN mask ${mask} and gateway ${classroom.networkGateway}`
     );
   }
 };
@@ -463,6 +498,8 @@ const mapClassroom = row => ({
   workstationCount: Number(row.workstation_count),
   startingVlan: Number(row.starting_vlan),
   startingSubnet: row.starting_subnet,
+  networkGateway: row.network_gateway,
+  networkVlanMask: row.network_vlan_mask,
   incrementVlan: row.increment_vlan !== false,
   vlans: Array.from({ length: Number(row.workstation_count) }, (_, index) =>
     row.increment_vlan === false ? Number(row.starting_vlan) : Number(row.starting_vlan) + index
@@ -715,6 +752,8 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
     classroomName: classroom.name,
     description: blueprint.description ?? '',
     windowsAdminPassword: blueprint.windowsAdminPassword ?? '',
+    networkGateway: classroom.networkGateway,
+    networkVlanMask: classroom.networkVlanMask,
     vms
   };
 };
@@ -942,8 +981,8 @@ app.post(
 
     const result = await dbPool.query(
       `INSERT INTO classrooms
-        (id, name, workstation_count, starting_vlan, increment_vlan, starting_subnet, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        (id, name, workstation_count, starting_vlan, increment_vlan, starting_subnet, network_gateway, network_vlan_gateway_host_offset, network_vlan_mask, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
        RETURNING *`,
       [
         uuidv4(),
@@ -951,11 +990,58 @@ app.post(
         parsed.data.workstationCount,
         parsed.data.startingVlan,
         parsed.data.incrementVlan ?? true,
-        parsed.data.startingSubnet
+        parsed.data.startingSubnet,
+        parsed.data.networkGateway,
+        getGatewayHostOctetFromIp(parsed.data.networkGateway),
+        parsed.data.networkVlanMask
       ]
     );
 
     res.status(201).json(mapClassroom(result.rows[0]));
+  })
+);
+
+app.put(
+  '/api/classrooms/:id',
+  wrapAsync(async (req, res) => {
+    const parsed = classroomSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const result = await dbPool.query(
+      `UPDATE classrooms
+          SET name = $2,
+              workstation_count = $3,
+              starting_vlan = $4,
+              increment_vlan = $5,
+              starting_subnet = $6,
+              network_gateway = $7,
+              network_vlan_gateway_host_offset = $8,
+              network_vlan_mask = $9,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [
+        req.params.id,
+        parsed.data.name,
+        parsed.data.workstationCount,
+        parsed.data.startingVlan,
+        parsed.data.incrementVlan ?? true,
+        parsed.data.startingSubnet,
+        parsed.data.networkGateway,
+        getGatewayHostOctetFromIp(parsed.data.networkGateway),
+        parsed.data.networkVlanMask
+      ]
+    );
+
+    if (!result.rowCount) {
+      res.status(404).json({ error: 'classroom not found' });
+      return;
+    }
+
+    res.json(mapClassroom(result.rows[0]));
   })
 );
 
@@ -1069,6 +1155,8 @@ app.post(
       res.status(404).json({ error: 'classroom not found' });
       return;
     }
+
+    await validateBlueprintVmIpLastOctetsForClassroom({ payload: blueprint, classroom });
 
     const deploymentInsert = await dbPool.query(
       `INSERT INTO lab_deployments
@@ -1252,6 +1340,44 @@ app.post(
   })
 );
 
+app.put(
+  '/api/templates/:id',
+  wrapAsync(async (req, res) => {
+    const parsed = templateSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    const result = await dbPool.query(
+      `UPDATE vm_templates
+          SET name = $2,
+              description = $3,
+              os_type = $4,
+              proxmox_template_vmid = $5,
+              full_clone = $6,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [
+        req.params.id,
+        parsed.data.name,
+        parsed.data.description,
+        parsed.data.osType,
+        parsed.data.proxmoxTemplateVmid,
+        parsed.data.fullClone
+      ]
+    );
+
+    if (!result.rowCount) {
+      res.status(404).json({ error: 'vm model not found' });
+      return;
+    }
+
+    res.json(mapTemplate(result.rows[0]));
+  })
+);
+
 app.delete(
   '/api/templates/:id',
   wrapAsync(async (req, res) => {
@@ -1314,7 +1440,6 @@ app.post(
       return;
     }
 
-    await validateBlueprintVmIpLastOctets(parsed.data);
     await validateBlueprintGuestPassword(parsed.data);
     const blueprint = await persistBlueprint(uuidv4(), parsed.data);
     res.status(201).json(blueprint);
@@ -1330,7 +1455,6 @@ app.put(
       return;
     }
 
-    await validateBlueprintVmIpLastOctets(parsed.data);
     await validateBlueprintGuestPassword(parsed.data);
     const existing = await fetchBlueprintById(req.params.id);
     if (!existing) {

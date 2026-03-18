@@ -3,6 +3,11 @@
   templates: [],
   blueprints: [],
   deployments: [],
+  editingTemplateId: null,
+  editingClassroomId: null,
+  isBlueprintWorkspaceVisible: false,
+  isTemplateEditorVisible: false,
+  isClassroomEditorVisible: false,
   timezoneOptions: {
     windows: [],
     linux: []
@@ -16,6 +21,7 @@ const pages = Array.from(document.querySelectorAll('.page'));
 const globalStatus = document.getElementById('globalStatus');
 
 const blueprintList = document.getElementById('blueprintList');
+const blueprintWorkspace = document.getElementById('blueprintWorkspace');
 const modelList = document.getElementById('modelList');
 const classroomList = document.getElementById('classroomList');
 const lifecycleList = document.getElementById('lifecycleList');
@@ -29,8 +35,18 @@ const blueprintDescriptionInput = document.getElementById('blueprintDescription'
 const blueprintWindowsAdminPasswordInput = document.getElementById('blueprintWindowsAdminPassword');
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
 const newBlueprintButton = document.getElementById('newBlueprintButton');
+const newTemplateButton = document.getElementById('newTemplateButton');
 const templateForm = document.getElementById('templateForm');
+const templateSubmitButton = document.getElementById('templateSubmitButton');
+const cancelTemplateEditButton = document.getElementById('cancelTemplateEditButton');
+const templateEditorPanel = document.getElementById('templateEditorPanel');
+const newClassroomButton = document.getElementById('newClassroomButton');
 const classroomForm = document.getElementById('classroomForm');
+const classroomEditorPanel = document.getElementById('classroomEditorPanel');
+const classroomSubmitButton = document.getElementById('classroomSubmitButton');
+const cancelClassroomEditButton = document.getElementById('cancelClassroomEditButton');
+const classroomStartingSubnetInput = classroomForm?.elements?.startingSubnet ?? null;
+const classroomNetworkGatewayInput = classroomForm?.elements?.networkGateway ?? null;
 const deploymentForm = document.getElementById('deploymentForm');
 const deploymentBlueprintSelect = document.getElementById('deploymentBlueprintSelect');
 const deploymentClassroomSelect = document.getElementById('deploymentClassroomSelect');
@@ -61,7 +77,6 @@ const workersContainer = document.getElementById('workers');
 const terraformStatus = document.getElementById('terraformJobStatus');
 const terraformSettingsForm = document.getElementById('terraformSettingsForm');
 const terraformSettingsStatus = document.getElementById('terraformSettingsStatus');
-const resetSettingsButton = document.getElementById('resetSettingsButton');
 const refreshLabsStateButton = document.getElementById('refreshLabsStateButton');
 const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
 const settingsStatus = document.getElementById('settingsStatus');
@@ -142,6 +157,16 @@ function setActiveView(view) {
   pages.forEach(page => {
     page.hidden = page.dataset.view !== view;
   });
+  if (view !== 'blueprint') {
+    state.isBlueprintWorkspaceVisible = false;
+    renderBlueprintWorkspace();
+  }
+  if (view !== 'models') {
+    resetTemplateForm();
+  }
+  if (view !== 'classrooms') {
+    resetClassroomForm();
+  }
 }
 
 function syncBlueprintFields() {
@@ -149,6 +174,24 @@ function syncBlueprintFields() {
   blueprintDescriptionInput.value = state.currentBlueprint.description;
   if (blueprintWindowsAdminPasswordInput) {
     blueprintWindowsAdminPasswordInput.value = state.currentBlueprint.windowsAdminPassword || '';
+  }
+}
+
+function renderBlueprintWorkspace() {
+  if (blueprintWorkspace) {
+    blueprintWorkspace.hidden = !state.isBlueprintWorkspaceVisible;
+  }
+}
+
+function renderTemplateEditor() {
+  if (templateEditorPanel) {
+    templateEditorPanel.hidden = !state.isTemplateEditorVisible;
+  }
+}
+
+function renderClassroomEditor() {
+  if (classroomEditorPanel) {
+    classroomEditorPanel.hidden = !state.isClassroomEditorVisible;
   }
 }
 
@@ -261,11 +304,11 @@ function renderTemplates() {
         </div>
         <div class="palette-group-grid">
           <article class="palette-label-card" draggable="true" data-customization-key="name">
-            <span class="palette-label-tag">Aa</span>
+            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('name')}</span>
             <strong>Name</strong>
           </article>
           <article class="palette-label-card" draggable="true" data-customization-key="timezone">
-            <span class="palette-label-tag">TZ</span>
+            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
             <strong>Timezone</strong>
           </article>
         </div>
@@ -287,11 +330,11 @@ function renderTemplates() {
         </div>
         <div class="palette-group-grid">
           <article class="palette-label-card" draggable="true" data-customization-key="name">
-            <span class="palette-label-tag">Aa</span>
+            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('name')}</span>
             <strong>Name</strong>
           </article>
           <article class="palette-label-card" draggable="true" data-customization-key="timezone">
-            <span class="palette-label-tag">TZ</span>
+            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
             <strong>Timezone</strong>
           </article>
         </div>
@@ -342,7 +385,7 @@ function renderModelList() {
   modelList.innerHTML = state.templates
     .map(
       template => `
-        <article class="blueprint-item">
+        <article class="blueprint-item${template.id === state.editingTemplateId ? ' active' : ''}" data-template-id="${template.id}">
           <div class="panel-head">
             <div>
               <strong>${escapeHtml(template.name)}</strong>
@@ -370,6 +413,9 @@ function renderModelList() {
       button.disabled = true;
       try {
         await fetchJson(`/api/templates/${button.dataset.templateId}`, { method: 'DELETE' });
+        if (state.editingTemplateId === button.dataset.templateId) {
+          resetTemplateForm();
+        }
         if (state.currentBlueprint.vms.some(vm => vm.templateId === button.dataset.templateId)) {
           state.currentBlueprint.vms = state.currentBlueprint.vms.filter(
             vm => vm.templateId !== button.dataset.templateId
@@ -385,6 +431,14 @@ function renderModelList() {
       }
     });
   });
+
+  modelList.querySelectorAll('[data-template-id]').forEach(card => {
+    card.addEventListener('click', () => {
+      const template = state.templates.find(item => item.id === card.dataset.templateId);
+      if (!template) return;
+      populateTemplateForm(template);
+    });
+  });
 }
 
 function renderClassrooms() {
@@ -397,7 +451,7 @@ function renderClassrooms() {
   classroomList.innerHTML = state.classrooms
     .map(
       classroom => `
-        <article class="blueprint-item">
+        <article class="blueprint-item${classroom.id === state.editingClassroomId ? ' active' : ''}" data-classroom-id="${classroom.id}">
           <div class="panel-head">
             <div>
               <strong>${escapeHtml(classroom.name)}</strong>
@@ -408,6 +462,8 @@ function renderClassrooms() {
           <div class="template-meta">
             <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
             <span class="mini-pill">Subnet start: ${classroom.startingSubnet}</span>
+            <span class="mini-pill">Mask: ${classroom.networkVlanMask}</span>
+            <span class="mini-pill">Gateway: ${classroom.networkGateway}</span>
             <span class="mini-pill">VLAN end: ${classroom.vlans[classroom.vlans.length - 1]}</span>
           </div>
           <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
@@ -418,10 +474,14 @@ function renderClassrooms() {
     .join('');
 
   classroomList.querySelectorAll('.delete-classroom-button').forEach(button => {
-    button.addEventListener('click', async () => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
       button.disabled = true;
       try {
         await fetchJson(`/api/classrooms/${button.dataset.classroomId}`, { method: 'DELETE' });
+        if (state.editingClassroomId === button.dataset.classroomId) {
+          resetClassroomForm();
+        }
         await loadClassrooms();
         showMessage(globalStatus, 'Classroom deleted.', 'success');
       } catch (error) {
@@ -429,6 +489,14 @@ function renderClassrooms() {
       } finally {
         button.disabled = false;
       }
+    });
+  });
+
+  classroomList.querySelectorAll('[data-classroom-id]').forEach(card => {
+    card.addEventListener('click', () => {
+      const classroom = state.classrooms.find(item => item.id === card.dataset.classroomId);
+      if (!classroom) return;
+      populateClassroomForm(classroom);
     });
   });
 
@@ -980,6 +1048,14 @@ function getIpLastOctetMaskMessage(mask, gatewayHostOffset = 1) {
   return `IP last octet is not compatible with VLAN mask ${mask} and gateway offset ${gatewayHostOffset}.`;
 }
 
+function deriveGatewayFromSubnet(subnet) {
+  const match = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})(?:\.(\d{1,3}))?$/.exec(String(subnet || '').trim());
+  if (!match) return '';
+  const parts = match.slice(1, 4).map(Number);
+  if (parts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) return '';
+  return `${parts[0]}.${parts[1]}.${parts[2]}.1`;
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
@@ -997,6 +1073,84 @@ function firstFieldError(errors) {
 async function loadTemplates() {
   state.templates = await fetchJson('/api/templates');
   renderTemplates();
+}
+
+function populateTemplateForm(template) {
+  templateForm.elements.name.value = template.name || '';
+  templateForm.elements.description.value = template.description || '';
+  templateForm.elements.proxmoxTemplateVmid.value = String(template.proxmoxTemplateVmid || '');
+  templateForm.elements.fullClone.checked = Boolean(template.fullClone);
+  const osRadio = templateForm.querySelector(`input[name="osType"][value="${template.osType}"]`);
+  if (osRadio) {
+    osRadio.checked = true;
+  }
+  state.editingTemplateId = template.id;
+  state.isTemplateEditorVisible = true;
+  if (templateSubmitButton) {
+    templateSubmitButton.textContent = 'Save changes';
+  }
+  if (cancelTemplateEditButton) {
+    cancelTemplateEditButton.hidden = false;
+  }
+  renderTemplateEditor();
+  renderModelList();
+}
+
+function resetTemplateForm({ keepVisible = false } = {}) {
+  state.editingTemplateId = null;
+  state.isTemplateEditorVisible = keepVisible;
+  templateForm.reset();
+  if (templateSubmitButton) {
+    templateSubmitButton.textContent = 'Add model';
+  }
+  if (cancelTemplateEditButton) {
+    cancelTemplateEditButton.hidden = true;
+  }
+  renderTemplateEditor();
+  renderModelList();
+}
+
+function populateClassroomForm(classroom) {
+  if (!classroomForm) return;
+  classroomForm.elements.name.value = classroom.name || '';
+  classroomForm.elements.workstationCount.value = String(classroom.workstationCount || '');
+  classroomForm.elements.startingVlan.value = String(classroom.startingVlan || '');
+  classroomForm.elements.startingSubnet.value = classroom.startingSubnet || '';
+  classroomForm.elements.networkGateway.value = classroom.networkGateway || '';
+  classroomForm.elements.networkVlanMask.value = classroom.networkVlanMask || '/24';
+  if (classroomNetworkGatewayInput) {
+    classroomNetworkGatewayInput.dataset.autoDerived = 'false';
+  }
+  state.editingClassroomId = classroom.id;
+  state.isClassroomEditorVisible = true;
+  if (classroomSubmitButton) {
+    classroomSubmitButton.textContent = 'Save changes';
+  }
+  if (cancelClassroomEditButton) {
+    cancelClassroomEditButton.hidden = false;
+  }
+  renderClassroomEditor();
+  renderClassrooms();
+}
+
+function resetClassroomForm({ keepVisible = false } = {}) {
+  state.editingClassroomId = null;
+  state.isClassroomEditorVisible = keepVisible;
+  classroomForm?.reset();
+  if (classroomNetworkGatewayInput) {
+    classroomNetworkGatewayInput.value = deriveGatewayFromSubnet(
+      classroomStartingSubnetInput?.value || classroomStartingSubnetInput?.getAttribute('placeholder') || ''
+    );
+    classroomNetworkGatewayInput.dataset.autoDerived = 'true';
+  }
+  if (classroomSubmitButton) {
+    classroomSubmitButton.textContent = 'Add classroom';
+  }
+  if (cancelClassroomEditButton) {
+    cancelClassroomEditButton.hidden = true;
+  }
+  renderClassroomEditor();
+  renderClassrooms();
 }
 
 async function loadAppInfo() {
@@ -1054,15 +1208,19 @@ async function loadBlueprint(blueprintId) {
       config: { customNameEnabled: true, ...(vm.config || {}) }
     }))
   };
+  state.isBlueprintWorkspaceVisible = true;
   syncBlueprintFields();
+  renderBlueprintWorkspace();
   renderCanvas();
   renderBlueprintList();
   showMessage(globalStatus, 'Blueprint loaded.', 'success');
 }
 
-function resetBlueprintEditor() {
+function resetBlueprintEditor({ keepVisible = false } = {}) {
   state.currentBlueprint = createEmptyBlueprint();
+  state.isBlueprintWorkspaceVisible = keepVisible;
   syncBlueprintFields();
+  renderBlueprintWorkspace();
   renderCanvas();
   renderBlueprintList();
 }
@@ -1087,7 +1245,7 @@ async function saveBlueprint() {
     windowsAdminPassword: state.currentBlueprint.windowsAdminPassword,
     vms: state.currentBlueprint.vms.map(vm => ({
       id: state.currentBlueprint.id ? vm.id : undefined,
-      templateId: vm.templateId,
+      templateId: vm.templateId || vm.template?.id,
       name: vm.name.trim(),
       ipLastOctet: vm.ipLastOctet,
       config: sanitizeConfig(vm.config)
@@ -1100,20 +1258,6 @@ async function saveBlueprint() {
     }
     if (vm.ipLastOctet != null && (vm.ipLastOctet < 1 || vm.ipLastOctet > 254)) {
       throw new Error('IP last octet must be between 1 and 254');
-    }
-    if (
-      !isIpLastOctetCompatibleWithMask(
-        vm.ipLastOctet,
-        state.terraformSettings.network_vlan_mask || '/24',
-        state.terraformSettings.network_vlan_gateway_host_offset || 1
-      )
-    ) {
-      throw new Error(
-        getIpLastOctetMaskMessage(
-          state.terraformSettings.network_vlan_mask || '/24',
-          state.terraformSettings.network_vlan_gateway_host_offset || 1
-        )
-      );
     }
   });
 
@@ -1146,7 +1290,11 @@ async function saveBlueprint() {
   syncBlueprintFields();
   renderCanvas();
   await loadBlueprints();
-  await refreshLifecycleLabs();
+  try {
+    await refreshLifecycleLabs();
+  } catch (error) {
+    console.error('Unable to refresh lifecycle labs after saving blueprint', error);
+  }
   showMessage(globalStatus, 'Blueprint saved.', 'success');
 }
 
@@ -1173,10 +1321,25 @@ function getOsLabel(osType) {
 }
 
 function getOsLogo(osType) {
-  if (osType === 'windows11') return '/assets/os-windows11.svg';
-  if (osType === 'windows-server') return '/assets/os-windows-server.svg';
+  if (osType === 'windows11') return '/assets/os-windows11.png';
+  if (osType === 'windows-server') return '/assets/os-windows-server.png';
   if (osType === 'other') return '/assets/os-other.svg';
-  return '/assets/os-ubuntu.svg';
+  return '/assets/os-ubuntu.png';
+}
+
+function getCustomizationIcon(key) {
+  if (key === 'name') {
+    return `
+      <svg viewBox="0 0 24 24" focusable="false">
+        <path d="M5 18 9.5 6h1.8L16 18h-1.9l-1.1-3.1H8L6.9 18H5Zm3.6-4.7h3.8L10.5 8 8.6 13.3Z"></path>
+      </svg>
+    `;
+  }
+  return `
+    <svg viewBox="0 0 24 24" focusable="false">
+      <path d="M12 7a1 1 0 0 1 1 1v.4a4.6 4.6 0 0 1 2.6 2.6H16a1 1 0 1 1 0 2h-.4a4.6 4.6 0 0 1-2.6 2.6V16a1 1 0 1 1-2 0v-.4a4.6 4.6 0 0 1-2.6-2.6H8a1 1 0 1 1 0-2h.4A4.6 4.6 0 0 1 11 8.4V8a1 1 0 0 1 1-1Zm0 3.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM19 4a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V6h-1a1 1 0 1 1 0-2h2Zm-14 0a1 1 0 1 1 0 2H4v1a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1h2Zm14 14a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1h-2a1 1 0 1 1 0-2h1v-1ZM4 18a1 1 0 1 1-2 0v2a1 1 0 0 0 1 1h2a1 1 0 1 0 0-2H4v-1Z"></path>
+    </svg>
+  `;
 }
 
 function escapeHtml(value) {
@@ -1390,6 +1553,7 @@ navButtons.forEach(button => {
 templateForm.addEventListener('submit', async event => {
   event.preventDefault();
   const form = new FormData(templateForm);
+  const editingTemplateId = state.editingTemplateId;
   const payload = {
     name: String(form.get('name') || '').trim(),
     description: String(form.get('description') || '').trim(),
@@ -1399,39 +1563,70 @@ templateForm.addEventListener('submit', async event => {
   };
 
   try {
-    await fetchJson('/api/templates', {
-      method: 'POST',
+    await fetchJson(editingTemplateId ? `/api/templates/${editingTemplateId}` : '/api/templates', {
+      method: editingTemplateId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    templateForm.reset();
+    resetTemplateForm();
     await loadTemplates();
-    showMessage(globalStatus, 'VM model created.', 'success');
+    showMessage(globalStatus, editingTemplateId ? 'VM model updated.' : 'VM model created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   }
 });
 
+cancelTemplateEditButton?.addEventListener('click', () => {
+  resetTemplateForm();
+});
+
+newTemplateButton?.addEventListener('click', () => {
+  resetTemplateForm({ keepVisible: true });
+});
+
+newClassroomButton?.addEventListener('click', () => {
+  resetClassroomForm({ keepVisible: true });
+});
+
+classroomStartingSubnetInput?.addEventListener('input', () => {
+  if (!classroomNetworkGatewayInput) return;
+  if (classroomNetworkGatewayInput.dataset.autoDerived !== 'false') {
+    classroomNetworkGatewayInput.value = deriveGatewayFromSubnet(classroomStartingSubnetInput.value);
+    classroomNetworkGatewayInput.dataset.autoDerived = 'true';
+  }
+});
+
+classroomNetworkGatewayInput?.addEventListener('input', () => {
+  classroomNetworkGatewayInput.dataset.autoDerived = 'false';
+});
+
+cancelClassroomEditButton?.addEventListener('click', () => {
+  resetClassroomForm({ keepVisible: true });
+});
+
 classroomForm?.addEventListener('submit', async event => {
   event.preventDefault();
   const form = new FormData(classroomForm);
+  const editingClassroomId = state.editingClassroomId;
   const payload = {
     name: String(form.get('name') || '').trim(),
     workstationCount: Number(form.get('workstationCount') || 0),
     startingVlan: Number(form.get('startingVlan') || 0),
     startingSubnet: String(form.get('startingSubnet') || '').trim(),
+    networkGateway: String(form.get('networkGateway') || '').trim(),
+    networkVlanMask: String(form.get('networkVlanMask') || '/24'),
     incrementVlan: true
   };
 
   try {
-    await fetchJson('/api/classrooms', {
-      method: 'POST',
+    await fetchJson(editingClassroomId ? `/api/classrooms/${editingClassroomId}` : '/api/classrooms', {
+      method: editingClassroomId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    classroomForm.reset();
+    resetClassroomForm();
     await loadClassrooms();
-    showMessage(globalStatus, 'Classroom created.', 'success');
+    showMessage(globalStatus, editingClassroomId ? 'Classroom updated.' : 'Classroom created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   }
@@ -1459,7 +1654,7 @@ deploymentForm?.addEventListener('submit', async event => {
 });
 
 newBlueprintButton.addEventListener('click', () => {
-  resetBlueprintEditor();
+  resetBlueprintEditor({ keepVisible: true });
 });
 
 saveBlueprintButton.addEventListener('click', async () => {
@@ -1510,10 +1705,6 @@ terraformSettingsForm?.addEventListener('submit', async event => {
   } catch (error) {
     showMessage(terraformSettingsStatus, error.message, 'danger');
   }
-});
-
-resetSettingsButton?.addEventListener('click', () => {
-  loadTerraformSettings();
 });
 
 refreshLabsStateButton?.addEventListener('click', async () => {
@@ -1598,20 +1789,10 @@ vmIpForm?.addEventListener('submit', event => {
   if (!pendingVmIpPrompt || !vmIpValueInput) return;
 
   const ipLastOctet = parseIpLastOctet(vmIpValueInput.value);
-  const mask = state.terraformSettings.network_vlan_mask || '/24';
-  const gatewayHostOffset = state.terraformSettings.network_vlan_gateway_host_offset || 1;
 
   if (ipLastOctet == null) {
     if (vmIpHelp) {
       vmIpHelp.textContent = 'Enter a number between 1 and 254.';
-    }
-    vmIpValueInput.focus();
-    return;
-  }
-
-  if (!isIpLastOctetCompatibleWithMask(ipLastOctet, mask, gatewayHostOffset)) {
-    if (vmIpHelp) {
-      vmIpHelp.textContent = getIpLastOctetMaskMessage(mask, gatewayHostOffset);
     }
     vmIpValueInput.focus();
     return;
@@ -1674,6 +1855,9 @@ vmTimezoneDialog?.addEventListener('close', () => {
 async function bootstrap() {
   setActiveView('blueprint');
   syncBlueprintFields();
+  renderBlueprintWorkspace();
+  renderTemplateEditor();
+  renderClassroomEditor();
   renderCanvas();
   await Promise.all([
     loadAppInfo(),

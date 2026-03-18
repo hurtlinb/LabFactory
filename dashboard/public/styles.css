@@ -190,11 +190,48 @@ select {
   gap: 20px;
 }
 
+#blueprintWorkspace[hidden] {
+  display: none !important;
+}
+
+#templateEditorPanel[hidden] {
+  display: none !important;
+}
+
+#classroomEditorPanel[hidden] {
+  display: none !important;
+}
+
 .panel {
   padding: 24px;
   display: grid;
   gap: 18px;
   align-content: start;
+}
+
+.danger-panel {
+  position: relative;
+  padding-left: 28px;
+}
+
+.danger-panel::before {
+  content: '';
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 12px;
+  width: 4px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, rgba(190, 24, 24, 0.78), rgba(220, 38, 38, 0.35));
+}
+
+.danger-eyebrow {
+  color: rgba(153, 27, 27, 0.82);
+}
+
+.danger-copy {
+  margin: -8px 0 0;
+  max-width: 52ch;
 }
 
 .panel-wide {
@@ -266,8 +303,12 @@ select {
   border-radius: 10px;
   background: linear-gradient(135deg, rgba(34, 63, 115, 0.12), rgba(78, 147, 170, 0.16));
   color: var(--brand);
-  font-size: 0.78rem;
-  font-weight: 700;
+}
+
+.palette-label-tag svg {
+  width: 17px;
+  height: 17px;
+  fill: currentColor;
 }
 
 .palette-group-empty {
@@ -556,6 +597,12 @@ select:focus {
   align-content: start;
 }
 
+#blueprintList,
+#modelList,
+#classroomList {
+  gap: 8px;
+}
+
 .blueprint-item,
 .template-card,
 .vm-card,
@@ -603,6 +650,36 @@ select:focus {
 .blueprint-item.active {
   border-color: rgba(78, 147, 170, 0.4);
   transform: translateY(-1px);
+}
+
+#blueprintList .blueprint-item,
+#modelList .blueprint-item,
+#classroomList .blueprint-item {
+  padding: 12px 14px;
+  border-radius: 18px;
+}
+
+#blueprintList .blueprint-item .panel-head,
+#modelList .blueprint-item .panel-head,
+#classroomList .blueprint-item .panel-head {
+  gap: 8px;
+}
+
+#blueprintList .blueprint-item .muted,
+#modelList .blueprint-item .muted,
+#classroomList .blueprint-item .muted {
+  margin: 2px 0 0;
+  line-height: 1.35;
+}
+
+#blueprintList .blueprint-item .pill,
+#modelList .blueprint-item .pill,
+#classroomList .blueprint-item .pill,
+#blueprintList .blueprint-item .mini-pill,
+#modelList .blueprint-item .mini-pill,
+#classroomList .blueprint-item .mini-pill {
+  min-height: 26px;
+  padding: 0 8px;
 }
 
 .template-card {

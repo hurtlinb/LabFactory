@@ -255,7 +255,7 @@ const parseSubnetBase = subnet => {
   return parts;
 };
 
-const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayHostOffset }) => {
+const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayIp }) => {
   if (ipLastOctet == null) {
     return 'ip=dhcp';
   }
@@ -267,15 +267,20 @@ const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayHostOffs
     throw new Error(`IP last octet ${ipLastOctet} is reserved for VLAN mask ${mask}`);
   }
 
-  const gatewayOffset = Number(gatewayHostOffset);
-  if (!Number.isInteger(gatewayOffset) || gatewayOffset < 1 || gatewayOffset >= subnetSize - 1) {
-    throw new Error(`Gateway host offset ${gatewayHostOffset} is invalid for VLAN mask ${mask}`);
+  const gatewayParts = String(gatewayIp ?? '').trim().split('.').map(Number);
+  const gatewayHostOctet = gatewayParts[3];
+  if (gatewayParts.length !== 4 || gatewayParts.some(part => !Number.isInteger(part) || part < 0 || part > 255)) {
+    throw new Error(`Gateway IP ${gatewayIp} is invalid`);
   }
 
   const subnetBaseOctet = Math.floor(Number(ipLastOctet) / subnetSize) * subnetSize;
-  const gatewayOctet = subnetBaseOctet + gatewayOffset;
+  const gatewayOffsetInSubnet = gatewayHostOctet % subnetSize;
+  if (gatewayOffsetInSubnet === 0 || gatewayOffsetInSubnet === subnetSize - 1) {
+    throw new Error(`Gateway IP ${gatewayIp} is invalid for VLAN mask ${mask}`);
+  }
+  const gatewayOctet = subnetBaseOctet + gatewayOffsetInSubnet;
   if (gatewayOctet === Number(ipLastOctet)) {
-    throw new Error(`IP last octet ${ipLastOctet} conflicts with gateway host offset ${gatewayHostOffset}`);
+    throw new Error(`IP last octet ${ipLastOctet} conflicts with gateway ${gatewayIp}`);
   }
 
   const [octet1, octet2, thirdOctet] = parseSubnetBase(subnetBase);
@@ -381,6 +386,8 @@ export function startTerraformWorker(connection) {
           const sanitized = sanitizeSettingsInput(rawSettings);
           const envSettings = readTerraformEnvSettings();
           merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
+          merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
+          merged.network_gateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
               envSettings,
@@ -398,7 +405,7 @@ export function startTerraformWorker(connection) {
                 subnetBase: vm.subnetBase,
                 mask: merged.network_vlan_mask,
                 ipLastOctet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
-                gatewayHostOffset: merged.network_vlan_gateway_host_offset
+                gatewayIp: merged.network_gateway
               }),
               disk_type: vm.diskType ?? null,
               disk_slot: vm.diskSlot ?? null,
@@ -427,7 +434,7 @@ export function startTerraformWorker(connection) {
           preparedVarFile = sanitizedVarsPath;
 
           if (action === 'start' || action === 'stop') {
-            const desiredAction = action === 'start' ? 'start' : 'stop';
+            const desiredAction = action === 'start' ? 'start' : 'shutdown';
             const blueprintVms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
             for (const vm of blueprintVms) {
               await invokeVmPowerAction(envSettings, vm.vmid, desiredAction);

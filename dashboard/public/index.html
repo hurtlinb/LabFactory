@@ -28,7 +28,7 @@
           <button data-view="lifecycle">Lifecycle</button>
         </div>
         <div class="nav-group">
-          <p class="nav-group-title">Configuration</p>
+          <p class="nav-group-title">Administration</p>
           <button data-view="models">VM Models</button>
           <button data-view="classrooms">Classrooms</button>
           <button data-view="admin-settings">Settings</button>
@@ -45,8 +45,20 @@
       <div id="globalStatus" class="status-message" hidden></div>
 
       <section class="page" data-view="models" hidden>
-        <div class="hero-grid">
+        <div class="builder-grid">
           <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">inventory</p>
+              </div>
+              <button id="newTemplateButton" class="btn btn-ghost" type="button">New</button>
+            </div>
+            <div id="modelList" class="saved-list">
+              <p class="placeholder">Loading models...</p>
+            </div>
+          </article>
+
+          <article id="templateEditorPanel" class="panel" hidden>
             <div class="panel-head">
               <div>
                 <p class="eyebrow">VM Templates</p>
@@ -63,17 +75,17 @@
                 <div class="os-choice-grid">
                   <label class="os-choice-card">
                     <input type="radio" name="osType" value="windows11" required>
-                    <img src="/assets/os-windows11.svg" alt="" aria-hidden="true">
+                    <img src="/assets/os-windows11.png" alt="" aria-hidden="true">
                     <span>Windows 11</span>
                   </label>
                   <label class="os-choice-card">
                     <input type="radio" name="osType" value="windows-server" required>
-                    <img src="/assets/os-windows-server.svg" alt="" aria-hidden="true">
+                    <img src="/assets/os-windows-server.png" alt="" aria-hidden="true">
                     <span>Windows Server</span>
                   </label>
                   <label class="os-choice-card">
                     <input type="radio" name="osType" value="ubuntu" required checked>
-                    <img src="/assets/os-ubuntu.svg" alt="" aria-hidden="true">
+                    <img src="/assets/os-ubuntu.png" alt="" aria-hidden="true">
                     <span>Ubuntu</span>
                   </label>
                   <label class="os-choice-card">
@@ -97,15 +109,11 @@
                 <input type="checkbox" name="fullClone">
                 <span>Use full clone instead of linked clone</span>
               </label>
-              <button class="btn btn-secondary" type="submit">Add model</button>
+              <div class="split">
+                <button id="templateSubmitButton" class="btn btn-secondary" type="submit">Add model</button>
+                <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel edit</button>
+              </div>
             </form>
-          </article>
-
-          <article class="panel">
-            <p class="eyebrow">inventory</p>
-            <div id="modelList" class="saved-list">
-              <p class="placeholder">Loading models...</p>
-            </div>
           </article>
         </div>
       </section>
@@ -125,7 +133,7 @@
           </article>
         </div>
 
-        <div class="builder-grid">
+        <div id="blueprintWorkspace" class="builder-grid" hidden>
           <article class="panel">
             <div class="panel-head">
               <div>
@@ -175,8 +183,20 @@
       </section>
 
       <section class="page" data-view="classrooms" hidden>
-        <div class="hero-grid">
+        <div class="builder-grid">
           <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">inventory</p>
+              </div>
+              <button id="newClassroomButton" class="btn btn-ghost" type="button">New</button>
+            </div>
+            <div id="classroomList" class="saved-list">
+              <p class="placeholder">Loading classrooms...</p>
+            </div>
+          </article>
+
+          <article id="classroomEditorPanel" class="panel" hidden>
             <p class="eyebrow">classrooms</p>
             <p class="muted">Each workstation gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
             <form id="classroomForm" class="stack">
@@ -186,7 +206,7 @@
               </label>
               <div class="split">
                 <label class="field">
-                  <span>Workstations</span>
+                  <span>Workplaces</span>
                   <input type="number" name="workstationCount" min="1" placeholder="24" required>
                 </label>
                 <label class="field">
@@ -198,19 +218,29 @@
                   <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
                 </label>
               </div>
-              <button class="btn btn-secondary" type="submit">Add classroom</button>
-            </form>
-          </article>
-
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">inventory</p>
+              <div class="split">
+                <label class="field">
+                  <span>Gateway</span>
+                  <input type="text" name="networkGateway" placeholder="10.0.200.1" required>
+                </label>
+                <label class="field">
+                  <span>VLAN mask</span>
+                  <select name="networkVlanMask" required>
+                    <option value="/24">/24</option>
+                    <option value="/25">/25</option>
+                    <option value="/26">/26</option>
+                    <option value="/27">/27</option>
+                    <option value="/28">/28</option>
+                    <option value="/29">/29</option>
+                    <option value="/30">/30</option>
+                  </select>
+                </label>
               </div>
-            </div>
-            <div id="classroomList" class="saved-list">
-              <p class="placeholder">Loading classrooms...</p>
-            </div>
+              <div class="split">
+                <button id="classroomSubmitButton" class="btn btn-secondary" type="submit">Add classroom</button>
+                <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button" hidden>Cancel edit</button>
+              </div>
+            </form>
           </article>
         </div>
       </section>
@@ -272,38 +302,27 @@
       <section class="page" data-view="admin-settings" hidden>
         <article class="panel">
           <p class="eyebrow">settings</p>
-          <p class="muted">Configure the default network parameters used by Terraform jobs.</p>
+          <p class="muted">Configure global defaults used by Terraform jobs.</p>
           <form id="terraformSettingsForm" class="stack section-form">
-            <label class="field">
-              <span>Gateway host offset</span>
-              <input type="number" name="network_vlan_gateway_host_offset" min="1" step="1" placeholder="1">
-            </label>
-            <label class="field">
-              <span>VLAN mask</span>
-              <select name="network_vlan_mask">
-                <option value="/24">/24</option>
-                <option value="/25">/25</option>
-                <option value="/26">/26</option>
-                <option value="/27">/27</option>
-                <option value="/28">/28</option>
-                <option value="/29">/29</option>
-                <option value="/30">/30</option>
-              </select>
-            </label>
             <label class="field">
               <span>Linux default username</span>
               <input type="text" name="linux_default_username" placeholder="ubuntu">
             </label>
             <div class="inline-actions">
               <button type="submit" class="btn btn-primary">Save settings</button>
-              <button type="button" id="resetSettingsButton" class="btn btn-ghost">Reset form</button>
               <div id="terraformSettingsStatus" class="status-message" hidden></div>
             </div>
           </form>
           <div class="inline-actions section-actions">
             <button type="button" id="refreshLabsStateButton" class="btn btn-ghost">Refresh labs state</button>
-            <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Clear job history</button>
             <div id="settingsStatus" class="status-message" hidden></div>
+          </div>
+        </article>
+
+        <article class="panel danger-panel">
+          <p class="eyebrow danger-eyebrow">danger zone</p>
+          <div class="inline-actions section-actions">
+            <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
           </div>
         </article>
       </section>

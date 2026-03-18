@@ -178,6 +178,22 @@ Once the VM is powered off, convert it into a Proxmox template.
 
 LabFactory expects Linux guest customization over SSH. The template must therefore expose an SSH server and allow login for the configured `linux_default_username`.
 
+## Windows Template Preparation
+To prepare a Windows VM before converting it to a Proxmox template:
+
+1. Install the QEMU guest agent.
+
+2. Install Cloudbase-Init.
+
+3. Copy the files from [FilesForTemplates](./FilesForTemplates):
+- `cloudbase-init.conf`
+- `unattend.xml`
+- any additional Windows preparation files needed by your template workflow
+
+4. Run `sysprep`.
+
+5. Once the VM is powered off, convert it into a Proxmox template.
+
 ## Data Model
 Main SQL migrations:
 - [001-init.sql](./db/migrations/001-init.sql)
