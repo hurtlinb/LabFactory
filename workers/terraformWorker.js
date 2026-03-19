@@ -547,6 +547,7 @@ export function startTerraformWorker(connection) {
                 id: vm.id,
                 name: vm.name,
                 hostname: String(vm.hostname ?? '').trim() || null,
+                language: String(vm.language ?? '').trim().toLowerCase() || 'en',
                 windowsAdminUsername: String(vm.windowsAdminUsername ?? '').trim() || null,
                 ipAddress:
                   vm.ipLastOctet != null && vm.subnetBase

@@ -9,6 +9,8 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ansibleDir = path.resolve(__dirname, '../ansible');
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 const isLinuxOsType = osType => !isWindowsOsType(osType);
+const getWindowsAdminUsername = language =>
+  (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
 const linuxPlaybookPath = path.join(ansibleDir, 'linux-playbook.yml');
 const windowsPlaybookPath = path.join(ansibleDir, 'windows-playbook.yml');
 const dbPool = new Pool({
@@ -44,10 +46,12 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) =
   const hosts = timezoneTargets
     .map((target, index) => {
       const hostName = `vm_${index + 1}`;
+      const windowsAdminUsername =
+        String(target.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(target.language);
       const lines = [
         `        ${hostName}:`,
         `          ansible_host: ${target.ipAddress}`,
-        `          ansible_user: ${JSON.stringify(String(target.windowsAdminUsername ?? '').trim() || 'Administrator')}`,
+        `          ansible_user: ${JSON.stringify(windowsAdminUsername)}`,
         `          ansible_password: ${JSON.stringify(windowsAdminPassword)}`,
         '          ansible_connection: winrm',
         '          ansible_port: 5986',

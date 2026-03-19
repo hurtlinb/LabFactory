@@ -179,20 +179,29 @@ Once the VM is powered off, convert it into a Proxmox template.
 LabFactory expects Linux guest customization over SSH. The template must therefore expose an SSH server and allow login for the configured `linux_default_username`.
 
 ## Windows Template Preparation
+The Windows template preparation flow is the same for Windows Server 2022 and Windows 11.
+
 To prepare a Windows VM before converting it to a Proxmox template:
 
 1. Install the QEMU guest agent.
 
 2. Install Cloudbase-Init.
+   Cloudbase-Init must run with the built-in `Administrateur` account, not `admin`.
 
 3. Copy the files from [FilesForTemplates](./FilesForTemplates):
 - `cloudbase-init.conf`
 - `unattend.xml`
 - any additional Windows preparation files needed by your template workflow
 
-4. Run `sysprep`.
+4. Open an elevated PowerShell session and set the execution policy to `RemoteSigned`:
 
-5. Once the VM is powered off, convert it into a Proxmox template.
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine
+```
+
+5. Run `sysprep`.
+
+6. Once the VM is powered off, convert it into a Proxmox template.
 
 ## Data Model
 Main SQL migrations:
