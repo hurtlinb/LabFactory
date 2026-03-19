@@ -387,7 +387,7 @@ export function startTerraformWorker(connection) {
           const envSettings = readTerraformEnvSettings();
           merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
-          merged.network_gateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
+          const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
           if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
@@ -408,7 +408,7 @@ export function startTerraformWorker(connection) {
                 subnetBase: vm.subnetBase,
                 mask: merged.network_vlan_mask,
                 ipLastOctet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
-                gatewayIp: merged.network_gateway
+                gatewayIp: networkGateway
               }),
               disk_type: vm.diskType ?? null,
               disk_slot: vm.diskSlot ?? null,
@@ -433,6 +433,7 @@ export function startTerraformWorker(connection) {
             );
           }
           assertRequiredTerraformEnvSettings(merged);
+          delete merged.network_gateway;
           await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2));
           preparedVarFile = sanitizedVarsPath;
 
