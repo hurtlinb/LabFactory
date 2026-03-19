@@ -47,7 +47,7 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) =
       const lines = [
         `        ${hostName}:`,
         `          ansible_host: ${target.ipAddress}`,
-        '          ansible_user: Administrator',
+        `          ansible_user: ${JSON.stringify(String(target.windowsAdminUsername ?? '').trim() || 'Administrator')}`,
         `          ansible_password: ${JSON.stringify(windowsAdminPassword)}`,
         '          ansible_connection: winrm',
         '          ansible_port: 5986',

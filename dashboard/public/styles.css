@@ -270,16 +270,18 @@ select {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: 12px;
+  align-items: stretch;
 }
 
 .palette-label-card {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 56px;
-  padding: 10px 12px;
+  min-height: 72px;
+  height: 100%;
+  padding: 12px 14px;
   border: 1px dashed rgba(78, 147, 170, 0.34);
-  border-radius: 16px;
+  border-radius: 18px;
   background: rgba(246, 250, 251, 0.9);
   cursor: grab;
   transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
@@ -687,6 +689,7 @@ select:focus {
   align-items: center;
   gap: 12px;
   min-height: 72px;
+  height: 100%;
   padding: 12px 14px;
   cursor: grab;
   border-radius: 18px;

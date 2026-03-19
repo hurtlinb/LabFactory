@@ -78,6 +78,41 @@ const wrapAsync =
     });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const PROXMOX_VM_RESOURCE_TIMEOUT_MS = 8000;
+const PROXMOX_VM_RESOURCE_MAX_ATTEMPTS = 3;
+const PROXMOX_VM_RESOURCE_RETRY_DELAYS_MS = [500, 1500];
+const PROXMOX_VM_RESOURCE_LOG_INTERVAL_MS = 60_000;
+let lastProxmoxVmResourceErrorLog = {
+  at: 0,
+  key: ''
+};
+
+const createErrorWithCode = (message, code) => {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+};
+
+const isRetriableNetworkError = error =>
+  ['ECONNRESET', 'ETIMEDOUT', 'ESOCKETTIMEDOUT', 'ECONNREFUSED', 'EPIPE'].includes(error?.code ?? '');
+
+const logProxmoxVmResourceFetchError = (context, error) => {
+  const now = Date.now();
+  const errorCode = error?.code ?? 'UNKNOWN';
+  const errorMessage = error?.message ?? 'Unknown error';
+  const logKey = `${context}:${errorCode}:${errorMessage}`;
+
+  if (lastProxmoxVmResourceErrorLog.key === logKey && now - lastProxmoxVmResourceErrorLog.at < PROXMOX_VM_RESOURCE_LOG_INTERVAL_MS) {
+    return;
+  }
+
+  lastProxmoxVmResourceErrorLog = {
+    at: now,
+    key: logKey
+  };
+
+  console.warn(`Unable to fetch Proxmox VM resources for ${context} (${errorCode}): ${errorMessage}`);
+};
 
 const parseWindowsTimezoneList = rawOutput => {
   const lines = String(rawOutput ?? '')
@@ -131,6 +166,7 @@ const templateSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().optional().default(''),
   osType: z.enum(['windows11', 'windows-server', 'ubuntu', 'other']),
+  language: z.enum(['fr', 'en']).optional().default('en'),
   proxmoxTemplateVmid: z.number().int().positive(),
   fullClone: z.boolean().optional().default(false),
 });
@@ -158,6 +194,7 @@ const blueprintSchema = z.object({
   description: z.string().trim().optional().default(''),
   status: z.enum(['draft', 'ready', 'archived']).optional().default('draft'),
   windowsAdminPassword: z.string().optional().default(''),
+  linuxDefaultUsername: z.string().trim().optional().default('ubuntu'),
   vms: z.array(blueprintVmSchema).min(1)
 });
 
@@ -267,6 +304,7 @@ const getGatewayHostOctetFromIp = gatewayIp => {
 
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 const isLinuxOsType = osType => !isWindowsOsType(osType);
+const getWindowsAdminUsername = language => (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
 
 const isVmCustomNameEnabled = vm => {
   if (typeof vm?.config?.customNameEnabled === 'boolean') {
@@ -370,7 +408,7 @@ const writeTerraformSettings = async settings => {
   await fs.writeFile(terraformSettingsPath, JSON.stringify(settings, null, 2));
 };
 
-const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true }) =>
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, timeoutMs = 0 }) =>
   new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
@@ -401,6 +439,11 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
       }
     );
     request.on('error', reject);
+    if (timeoutMs > 0) {
+      request.setTimeout(timeoutMs, () => {
+        request.destroy(createErrorWithCode(`Request timed out after ${timeoutMs}ms`, 'ETIMEDOUT'));
+      });
+    }
     request.end();
   });
 
@@ -448,6 +491,7 @@ const mapTemplate = row => ({
   name: row.name,
   description: row.description ?? '',
   osType: row.os_type,
+  language: row.language ?? 'en',
   proxmoxTemplateVmid: row.proxmox_template_vmid,
   fullClone: Boolean(row.full_clone),
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
@@ -561,6 +605,7 @@ const fetchBlueprintById = async blueprintId => {
       b.name,
       b.description,
       b.windows_admin_password,
+      b.linux_default_username,
       b.status,
       b.created_at,
       b.updated_at,
@@ -586,6 +631,7 @@ const fetchBlueprintById = async blueprintId => {
         t.name AS template_name,
         t.description AS template_description,
         t.os_type,
+        t.language,
         t.proxmox_template_vmid,
         t.full_clone
       FROM lab_blueprint_vms v
@@ -599,6 +645,7 @@ const fetchBlueprintById = async blueprintId => {
   return {
     ...blueprint,
     windowsAdminPassword: blueprintResult.rows[0].windows_admin_password ?? '',
+    linuxDefaultUsername: blueprintResult.rows[0].linux_default_username ?? 'ubuntu',
     vms: vmResult.rows.map(row => ({
       id: row.id,
       name: row.name,
@@ -610,6 +657,7 @@ const fetchBlueprintById = async blueprintId => {
         name: row.template_name,
         description: row.template_description ?? '',
         osType: row.os_type,
+        language: row.language ?? 'en',
         proxmoxTemplateVmid: row.proxmox_template_vmid,
         fullClone: Boolean(row.full_clone)
       }
@@ -643,6 +691,7 @@ const buildTerraformBlueprintPayload = blueprint => {
     name: blueprint.name,
     description: blueprint.description ?? '',
     windowsAdminPassword: blueprint.windowsAdminPassword ?? '',
+    linuxDefaultUsername: blueprint.linuxDefaultUsername ?? 'ubuntu',
     vms: blueprint.vms.map((vm, index) => {
       const hostnameToken = resolveVmHostnameToken(vm, `vm-${String(index + 1).padStart(2, '0')}`);
       return {
@@ -651,6 +700,8 @@ const buildTerraformBlueprintPayload = blueprint => {
         hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + index,
         osType: vm.template.osType,
+        language: vm.template.language ?? 'en',
+        windowsAdminUsername: getWindowsAdminUsername(vm.template.language),
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
@@ -734,6 +785,8 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
         hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + vms.length,
         osType: vm.template.osType,
+        language: vm.template.language ?? 'en',
+        windowsAdminUsername: getWindowsAdminUsername(vm.template.language),
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
@@ -752,21 +805,38 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
     classroomName: classroom.name,
     description: blueprint.description ?? '',
     windowsAdminPassword: blueprint.windowsAdminPassword ?? '',
+    linuxDefaultUsername: blueprint.linuxDefaultUsername ?? 'ubuntu',
     networkGateway: classroom.networkGateway,
     networkVlanMask: classroom.networkVlanMask,
     vms
   };
 };
 
-const fetchClusterVmResources = async () => {
+const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request' } = {}) => {
   const envSettings = readTerraformEnvSettings();
   assertRequiredTerraformEnvSettings(envSettings);
-  const payload = await requestJson({
-    url: new URL('cluster/resources?type=vm', `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
-    method: 'GET',
-    ...proxmoxRequestOptions(envSettings)
-  });
-  return Array.isArray(payload?.data) ? payload.data : [];
+  let lastError;
+
+  for (let attempt = 1; attempt <= PROXMOX_VM_RESOURCE_MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const payload = await requestJson({
+        url: new URL('cluster/resources?type=vm', `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
+        method: 'GET',
+        timeoutMs: PROXMOX_VM_RESOURCE_TIMEOUT_MS,
+        ...proxmoxRequestOptions(envSettings)
+      });
+      return Array.isArray(payload?.data) ? payload.data : [];
+    } catch (error) {
+      lastError = error;
+      if (!isRetriableNetworkError(error) || attempt >= PROXMOX_VM_RESOURCE_MAX_ATTEMPTS) {
+        break;
+      }
+      await sleep(PROXMOX_VM_RESOURCE_RETRY_DELAYS_MS[attempt - 1] ?? PROXMOX_VM_RESOURCE_RETRY_DELAYS_MS.at(-1) ?? 1000);
+    }
+  }
+
+  logProxmoxVmResourceFetchError(context, lastError);
+  throw lastError;
 };
 
 const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource }) => {
@@ -897,13 +967,14 @@ const persistBlueprint = async (blueprintId, payload) => {
   try {
     await client.query('BEGIN');
     await client.query(
-      `INSERT INTO lab_blueprints (id, name, description, status, windows_admin_password, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      `INSERT INTO lab_blueprints (id, name, description, status, windows_admin_password, linux_default_username, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
        ON CONFLICT (id)
        DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
          windows_admin_password = EXCLUDED.windows_admin_password,
+         linux_default_username = EXCLUDED.linux_default_username,
          status = EXCLUDED.status,
          updated_at = NOW()`,
       [
@@ -911,7 +982,8 @@ const persistBlueprint = async (blueprintId, payload) => {
         payload.name,
         payload.description,
         payload.status,
-        String(payload.windowsAdminPassword ?? '').trim()
+        String(payload.windowsAdminPassword ?? '').trim(),
+        String(payload.linuxDefaultUsername ?? '').trim() || 'ubuntu'
       ]
     );
 
@@ -1063,10 +1135,10 @@ app.get(
     const rows = await fetchDeploymentRows();
     let resourceByVmid = new Map();
     try {
-      const resources = await fetchClusterVmResources();
+      const resources = await fetchClusterVmResources({ context: 'lifecycle deployments list' });
       resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
-    } catch (error) {
-      console.error('Unable to fetch Proxmox VM resources for lifecycle deployments list', error);
+    } catch {
+      // The deployments list remains usable without live Proxmox data for this refresh cycle.
     }
 
     const deployments = [];
@@ -1088,16 +1160,7 @@ app.get(
 app.post(
   '/api/lifecycle/deployments/refresh-state',
   wrapAsync(async (req, res) => {
-    const envSettings = readTerraformEnvSettings();
-    assertRequiredTerraformEnvSettings(envSettings);
-
-    const payload = await requestJson({
-      url: new URL('cluster/resources?type=vm', `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
-      method: 'GET',
-      ...proxmoxRequestOptions(envSettings)
-    });
-
-    const resources = Array.isArray(payload?.data) ? payload.data : [];
+    const resources = await fetchClusterVmResources({ context: 'lifecycle deployments refresh-state' });
     const resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
     const rows = await fetchDeploymentRows();
     const refreshed = [];
@@ -1323,14 +1386,15 @@ app.post(
     const id = uuidv4();
     const result = await dbPool.query(
       `INSERT INTO vm_templates
-        (id, name, description, os_type, proxmox_template_vmid, full_clone, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+        (id, name, description, os_type, language, proxmox_template_vmid, full_clone, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
        RETURNING *`,
       [
         id,
         parsed.data.name,
         parsed.data.description,
         parsed.data.osType,
+        parsed.data.language,
         parsed.data.proxmoxTemplateVmid,
         parsed.data.fullClone
       ]
@@ -1354,8 +1418,9 @@ app.put(
           SET name = $2,
               description = $3,
               os_type = $4,
-              proxmox_template_vmid = $5,
-              full_clone = $6,
+              language = $5,
+              proxmox_template_vmid = $6,
+              full_clone = $7,
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
@@ -1364,6 +1429,7 @@ app.put(
         parsed.data.name,
         parsed.data.description,
         parsed.data.osType,
+        parsed.data.language,
         parsed.data.proxmoxTemplateVmid,
         parsed.data.fullClone
       ]

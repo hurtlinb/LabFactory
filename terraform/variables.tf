@@ -79,6 +79,8 @@ variable "vm_definitions" {
     name         = string
     hostname     = optional(string)
     os_type      = optional(string)
+    language     = optional(string)
+    windows_admin_username = optional(string)
     clone_source = string
     full_clone   = bool
     ip_last_octet = optional(number)

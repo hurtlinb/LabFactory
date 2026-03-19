@@ -100,6 +100,13 @@
                   <span>Proxmox VMID</span>
                   <input type="number" name="proxmoxTemplateVmid" min="1" placeholder="9002" required>
                 </label>
+                <label class="field">
+                  <span>Language</span>
+                  <select name="language" required>
+                    <option value="en" selected>EN</option>
+                    <option value="fr">FR</option>
+                  </select>
+                </label>
               </div>
               <label class="field">
                 <span>Description</span>
@@ -176,6 +183,10 @@
               <label class="field">
                 <span>Guest password</span>
                 <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Used for Windows guest access and Linux SSH customization">
+              </label>
+              <label class="field">
+                <span>Linux default username</span>
+                <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
               </label>
             </form>
           </article>
@@ -302,17 +313,6 @@
       <section class="page" data-view="admin-settings" hidden>
         <article class="panel">
           <p class="eyebrow">settings</p>
-          <p class="muted">Configure global defaults used by Terraform jobs.</p>
-          <form id="terraformSettingsForm" class="stack section-form">
-            <label class="field">
-              <span>Linux default username</span>
-              <input type="text" name="linux_default_username" placeholder="ubuntu">
-            </label>
-            <div class="inline-actions">
-              <button type="submit" class="btn btn-primary">Save settings</button>
-              <div id="terraformSettingsStatus" class="status-message" hidden></div>
-            </div>
-          </form>
           <div class="inline-actions section-actions">
             <button type="button" id="refreshLabsStateButton" class="btn btn-ghost">Refresh labs state</button>
             <div id="settingsStatus" class="status-message" hidden></div>

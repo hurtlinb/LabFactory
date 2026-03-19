@@ -15,6 +15,5 @@
   "network_model": "virtio",
   "network_firewall": false,
   "network_vlan_tag": 0,
-  "network_vlan_mask": "/24",
-  "linux_default_username": "ubuntu"
+  "network_vlan_mask": "/24"
 }

@@ -52,6 +52,14 @@ locals {
     if contains(local.windows_os_types, try(vm.os_type, ""))
   }
 
+  windows_admin_usernames = {
+    for key, vm in local.windows_vm_definitions : key => (
+      trimspace(try(vm.windows_admin_username, "")) != ""
+      ? trimspace(vm.windows_admin_username)
+      : lower(trimspace(try(vm.language, "en"))) == "fr" ? "Administrateur" : "Administrator"
+    )
+  }
+
   linux_vm_definitions = {
     for key, vm in local.vm_definitions_by_id : key => vm
     if !contains(local.windows_os_types, try(vm.os_type, ""))
@@ -94,7 +102,7 @@ resource "proxmox_vm_qemu" "lab_vm" {
   clone      = each.value.clone_source
   full_clone = each.value.full_clone
   ipconfig0  = try(each.value.ipconfig0, "ip=dhcp")
-  ciuser     = contains(local.windows_os_types, try(each.value.os_type, "")) ? "Administrator" : var.linux_default_username
+  ciuser     = contains(local.windows_os_types, try(each.value.os_type, "")) ? local.windows_admin_usernames[each.key] : var.linux_default_username
   cipassword = trimspace(var.windows_admin_password) == "" ? null : var.windows_admin_password
   bios       = try(each.value.bios, null)
   machine    = try(each.value.machine, null)
@@ -148,7 +156,7 @@ resource "terraform_data" "wait_for_cloudbase_init" {
   connection {
     type     = "winrm"
     host     = local.cloudbase_wait_hosts[each.key]
-    user     = "Administrator"
+    user     = local.windows_admin_usernames[each.key]
     password = var.windows_admin_password
     port     = 5986
     https    = true

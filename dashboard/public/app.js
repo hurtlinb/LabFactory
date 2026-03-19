@@ -33,6 +33,7 @@ const dropzone = document.getElementById('dropzone');
 const blueprintNameInput = document.getElementById('blueprintName');
 const blueprintDescriptionInput = document.getElementById('blueprintDescription');
 const blueprintWindowsAdminPasswordInput = document.getElementById('blueprintWindowsAdminPassword');
+const blueprintLinuxDefaultUsernameInput = document.getElementById('blueprintLinuxDefaultUsername');
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
 const newBlueprintButton = document.getElementById('newBlueprintButton');
 const newTemplateButton = document.getElementById('newTemplateButton');
@@ -125,6 +126,7 @@ function createEmptyBlueprint() {
     description: '',
     status: 'draft',
     windowsAdminPassword: '',
+    linuxDefaultUsername: 'ubuntu',
     vms: []
   };
 }
@@ -174,6 +176,9 @@ function syncBlueprintFields() {
   blueprintDescriptionInput.value = state.currentBlueprint.description;
   if (blueprintWindowsAdminPasswordInput) {
     blueprintWindowsAdminPasswordInput.value = state.currentBlueprint.windowsAdminPassword || '';
+  }
+  if (blueprintLinuxDefaultUsernameInput) {
+    blueprintLinuxDefaultUsernameInput.value = state.currentBlueprint.linuxDefaultUsername || 'ubuntu';
   }
 }
 
@@ -305,7 +310,7 @@ function renderTemplates() {
         <div class="palette-group-grid">
           <article class="palette-label-card" draggable="true" data-customization-key="name">
             <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('name')}</span>
-            <strong>Name</strong>
+            <strong>Hostname</strong>
           </article>
           <article class="palette-label-card" draggable="true" data-customization-key="timezone">
             <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
@@ -331,7 +336,7 @@ function renderTemplates() {
         <div class="palette-group-grid">
           <article class="palette-label-card" draggable="true" data-customization-key="name">
             <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('name')}</span>
-            <strong>Name</strong>
+            <strong>Hostname</strong>
           </article>
           <article class="palette-label-card" draggable="true" data-customization-key="timezone">
             <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
@@ -393,6 +398,7 @@ function renderModelList() {
             </div>
             <div class="inline-actions">
               <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
+              <span class="mini-pill">${escapeHtml(getLanguageLabel(template.language))}</span>
               <span class="pill">VMID ${template.proxmoxTemplateVmid}</span>
             </div>
           </div>
@@ -524,8 +530,8 @@ function renderCanvas() {
       if (vm.config?.customNameEnabled && String(vm.name || '').trim()) {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
-            <span>Name: ${escapeHtml(vm.name.trim())}</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="name" aria-label="Remove Name customization" title="Remove Name customization">×</button>
+            <span>Hostname: ${escapeHtml(vm.name.trim())}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="name" aria-label="Remove Hostname customization" title="Remove Hostname customization">×</button>
           </span>
         `);
       }
@@ -902,7 +908,7 @@ async function promptVmName(vmId) {
   const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
   if (!vm) return;
   const submitted = await promptVmCustomization({
-    title: 'Set Name',
+    title: 'Set Hostname',
     initialValue: vm.name || '',
     onSubmit: value => {
       updateVm(vmId, nextVm => {
@@ -1079,6 +1085,7 @@ function populateTemplateForm(template) {
   templateForm.elements.name.value = template.name || '';
   templateForm.elements.description.value = template.description || '';
   templateForm.elements.proxmoxTemplateVmid.value = String(template.proxmoxTemplateVmid || '');
+  templateForm.elements.language.value = template.language || 'en';
   templateForm.elements.fullClone.checked = Boolean(template.fullClone);
   const osRadio = templateForm.querySelector(`input[name="osType"][value="${template.osType}"]`);
   if (osRadio) {
@@ -1200,6 +1207,7 @@ async function loadBlueprint(blueprintId) {
     description: blueprint.description || '',
     status: blueprint.status,
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
+    linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
     vms: blueprint.vms.map(vm => ({
       id: vm.id,
       templateId: vm.template.id,
@@ -1229,6 +1237,7 @@ async function saveBlueprint() {
   state.currentBlueprint.name = blueprintNameInput.value.trim();
   state.currentBlueprint.description = blueprintDescriptionInput.value.trim();
   state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
+  state.currentBlueprint.linuxDefaultUsername = blueprintLinuxDefaultUsernameInput?.value?.trim() || 'ubuntu';
   state.currentBlueprint.status = 'draft';
 
   if (!state.currentBlueprint.name) {
@@ -1243,6 +1252,7 @@ async function saveBlueprint() {
     description: state.currentBlueprint.description,
     status: state.currentBlueprint.status,
     windowsAdminPassword: state.currentBlueprint.windowsAdminPassword,
+    linuxDefaultUsername: state.currentBlueprint.linuxDefaultUsername,
     vms: state.currentBlueprint.vms.map(vm => ({
       id: state.currentBlueprint.id ? vm.id : undefined,
       templateId: vm.templateId || vm.template?.id,
@@ -1278,6 +1288,7 @@ async function saveBlueprint() {
     description: blueprint.description || '',
     status: blueprint.status,
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
+    linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
     vms: blueprint.vms.map(vm => ({
       id: vm.id,
       templateId: vm.template.id,
@@ -1318,6 +1329,10 @@ function getOsLabel(osType) {
   if (osType === 'windows-server') return 'Windows Server';
   if (osType === 'other') return 'Other';
   return 'Ubuntu';
+}
+
+function getLanguageLabel(language) {
+  return String(language || 'en').trim().toUpperCase() === 'FR' ? 'FR' : 'EN';
 }
 
 function getOsLogo(osType) {
@@ -1539,11 +1554,12 @@ navButtons.forEach(button => {
   });
 });
 
-[blueprintNameInput, blueprintDescriptionInput].forEach(input => {
+[blueprintNameInput, blueprintDescriptionInput, blueprintWindowsAdminPasswordInput, blueprintLinuxDefaultUsernameInput].forEach(input => {
   input.addEventListener('input', () => {
     state.currentBlueprint.name = blueprintNameInput.value;
     state.currentBlueprint.description = blueprintDescriptionInput.value;
     state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
+    state.currentBlueprint.linuxDefaultUsername = blueprintLinuxDefaultUsernameInput?.value?.trim() || 'ubuntu';
     state.currentBlueprint.status = 'draft';
     syncBlueprintFields();
     renderBlueprintList();
@@ -1558,6 +1574,7 @@ templateForm.addEventListener('submit', async event => {
     name: String(form.get('name') || '').trim(),
     description: String(form.get('description') || '').trim(),
     osType: String(form.get('osType') || 'ubuntu'),
+    language: String(form.get('language') || 'en').trim().toLowerCase(),
     proxmoxTemplateVmid: Number(form.get('proxmoxTemplateVmid') || 0),
     fullClone: form.get('fullClone') === 'on'
   };

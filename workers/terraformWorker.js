@@ -388,6 +388,7 @@ export function startTerraformWorker(connection) {
           merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           merged.network_gateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
+          merged.linux_default_username = String(job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
           if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
               envSettings,
@@ -398,6 +399,8 @@ export function startTerraformWorker(connection) {
               name: vm.name,
               hostname: vm.customNameEnabled ? String(vm.hostname ?? '').trim() || null : null,
               os_type: vm.osType ?? 'other',
+              language: String(vm.language ?? 'en').trim().toLowerCase() || 'en',
+              windows_admin_username: String(vm.windowsAdminUsername ?? '').trim() || null,
               clone_source: String(vm.cloneSource),
               full_clone: Boolean(vm.fullClone),
               ip_last_octet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
@@ -543,6 +546,7 @@ export function startTerraformWorker(connection) {
                 id: vm.id,
                 name: vm.name,
                 hostname: String(vm.hostname ?? '').trim() || null,
+                windowsAdminUsername: String(vm.windowsAdminUsername ?? '').trim() || null,
                 ipAddress:
                   vm.ipLastOctet != null && vm.subnetBase
                     ? `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
