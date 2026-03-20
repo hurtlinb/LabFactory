@@ -186,7 +186,8 @@ To prepare a Windows VM before converting it to a Proxmox template:
 1. Install the QEMU guest agent.
 
 2. Install Cloudbase-Init.
-   For Windows 11 FR: Cloudbase-Init must run with the built-in `Administrateur` account, not `admin`.
+  # EDIT BHU: that's not true
+  # For Windows 11 FR: Cloudbase-Init must run with the built-in `Administrateur` account, not `admin`.
 
 3. Copy the files from [FilesForTemplates](./FilesForTemplates):
 - `cloudbase-init.conf`
