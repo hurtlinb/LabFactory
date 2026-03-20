@@ -1050,6 +1050,47 @@ app.get('/api/app-info', (req, res) => {
 });
 
 app.get(
+  '/api/health',
+  wrapAsync(async (_req, res) => {
+    let postgres = { ok: true };
+    let proxmox = { ok: true };
+
+    try {
+      await dbPool.query('SELECT 1');
+    } catch (error) {
+      postgres = {
+        ok: false,
+        error: error?.message ?? 'Unable to connect to PostgreSQL'
+      };
+    }
+
+    try {
+      await fetchClusterVmResources({ context: 'proxmox status check' });
+    } catch (error) {
+      proxmox = {
+        ok: false,
+        error: error?.message ?? 'Unable to connect to Proxmox'
+      };
+    }
+
+    const workers = Object.fromEntries(
+      await Promise.all(
+        Object.keys(queueNames).map(async workerName => {
+          try {
+            const state = await redisClient.hGetAll(`worker:${workerName}`);
+            return [workerName, state.status || 'unknown'];
+          } catch {
+            return [workerName, 'unknown'];
+          }
+        })
+      )
+    );
+
+    res.json({ postgres, proxmox, workers });
+  })
+);
+
+app.get(
   '/api/timezones',
   wrapAsync(async (req, res) => {
     const [windows, linux] = await Promise.all([

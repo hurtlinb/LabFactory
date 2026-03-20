@@ -37,6 +37,24 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div id="connectionStatusList" class="sidebar-health-list" aria-live="polite">
+          <div id="postgresStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="postgresStatusLabel">Postgres</span>
+          </div>
+          <div id="proxmoxStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="proxmoxStatusLabel">Proxmox</span>
+          </div>
+          <div id="terraformWorkerStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="terraformWorkerStatusLabel">Terraform Worker</span>
+          </div>
+          <div id="ansibleWorkerStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="ansibleWorkerStatusLabel">Ansible Worker</span>
+          </div>
+        </div>
         <span id="appVersion">Version --</span>
       </div>
     </aside>

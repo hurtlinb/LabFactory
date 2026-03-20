@@ -81,6 +81,14 @@ const terraformSettingsStatus = document.getElementById('terraformSettingsStatus
 const refreshLabsStateButton = document.getElementById('refreshLabsStateButton');
 const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
 const settingsStatus = document.getElementById('settingsStatus');
+const postgresStatusIndicator = document.getElementById('postgresStatusIndicator');
+const postgresStatusLabel = document.getElementById('postgresStatusLabel');
+const proxmoxStatusIndicator = document.getElementById('proxmoxStatusIndicator');
+const proxmoxStatusLabel = document.getElementById('proxmoxStatusLabel');
+const terraformWorkerStatusIndicator = document.getElementById('terraformWorkerStatusIndicator');
+const terraformWorkerStatusLabel = document.getElementById('terraformWorkerStatusLabel');
+const ansibleWorkerStatusIndicator = document.getElementById('ansibleWorkerStatusIndicator');
+const ansibleWorkerStatusLabel = document.getElementById('ansibleWorkerStatusLabel');
 const appVersion = document.getElementById('appVersion');
 
 const statusTimers = new WeakMap();
@@ -1166,6 +1174,58 @@ async function loadAppInfo() {
   appVersion.textContent = `Version ${info.version ?? '--'}`;
 }
 
+function applyHealthIndicator(indicator, labelNode, label, status, title) {
+  if (!indicator || !labelNode) return;
+  indicator.dataset.state = status;
+  labelNode.textContent = label;
+  indicator.title = title || label;
+}
+
+async function loadConnectionStatuses() {
+  if (!proxmoxStatusIndicator || !proxmoxStatusLabel) return;
+
+  try {
+    const payload = await fetchJson('/api/health');
+    applyHealthIndicator(
+      postgresStatusIndicator,
+      postgresStatusLabel,
+      'Postgres',
+      payload?.postgres?.ok ? 'ok' : 'error',
+      payload?.postgres?.ok ? 'Connected to PostgreSQL' : String(payload?.postgres?.error || 'Unable to connect to PostgreSQL')
+    );
+    applyHealthIndicator(
+      proxmoxStatusIndicator,
+      proxmoxStatusLabel,
+      'Proxmox',
+      payload?.proxmox?.ok ? 'ok' : 'error',
+      payload?.proxmox?.ok ? 'Connected to Proxmox' : String(payload?.proxmox?.error || 'Unable to connect to Proxmox')
+    );
+
+    const terraformWorkerStatus = payload?.workers?.terraform ?? 'unknown';
+    const ansibleWorkerStatus = payload?.workers?.ansible ?? 'unknown';
+    applyHealthIndicator(
+      terraformWorkerStatusIndicator,
+      terraformWorkerStatusLabel,
+      'Terraform Worker',
+      terraformWorkerStatus === 'running' ? 'ok' : terraformWorkerStatus === 'paused' ? 'warning' : 'error',
+      `Terraform worker: ${terraformWorkerStatus}`
+    );
+    applyHealthIndicator(
+      ansibleWorkerStatusIndicator,
+      ansibleWorkerStatusLabel,
+      'Ansible Worker',
+      ansibleWorkerStatus === 'running' ? 'ok' : ansibleWorkerStatus === 'paused' ? 'warning' : 'error',
+      `Ansible worker: ${ansibleWorkerStatus}`
+    );
+  } catch (error) {
+    const message = error.message || 'Unable to load connection statuses';
+    applyHealthIndicator(postgresStatusIndicator, postgresStatusLabel, 'Postgres', 'error', message);
+    applyHealthIndicator(proxmoxStatusIndicator, proxmoxStatusLabel, 'Proxmox', 'error', message);
+    applyHealthIndicator(terraformWorkerStatusIndicator, terraformWorkerStatusLabel, 'Terraform Worker', 'error', message);
+    applyHealthIndicator(ansibleWorkerStatusIndicator, ansibleWorkerStatusLabel, 'Ansible Worker', 'error', message);
+  }
+}
+
 async function loadClassrooms() {
   state.classrooms = await fetchJson('/api/classrooms');
   renderClassrooms();
@@ -1878,6 +1938,7 @@ async function bootstrap() {
   renderCanvas();
   await Promise.all([
     loadAppInfo(),
+    loadConnectionStatuses(),
     loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),
@@ -1894,6 +1955,9 @@ async function bootstrap() {
     refreshWorkers();
     refreshLifecycleLabs();
   }, 5000);
+  setInterval(() => {
+    loadConnectionStatuses();
+  }, 30000);
 }
 
 bootstrap().catch(error => {
