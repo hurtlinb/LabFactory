@@ -73,6 +73,10 @@ const wrapAsync =
   handler =>
   (req, res) =>
     Promise.resolve(handler(req, res)).catch(err => {
+      if (err?.code === 'VALIDATION') {
+        res.status(400).json({ error: err.message });
+        return;
+      }
       console.error('Unhandled request error', err);
       res.status(500).json({ error: 'internal server error' });
     });
@@ -362,7 +366,10 @@ const validateBlueprintGuestPassword = async payload => {
   });
 
   if ((hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
-    throw new Error('A lab guest password is required for Windows VMs and Linux customizations');
+    throw createErrorWithCode(
+      'A lab guest password is required when the blueprint contains a Windows VM or Linux customization.',
+      'VALIDATION'
+    );
   }
 };
 
@@ -742,6 +749,25 @@ const fetchDeploymentById = async deploymentId => {
   );
   if (!result.rowCount) return null;
   return mapDeployment(result.rows[0]);
+};
+
+const countDeploymentsUsingBlueprint = async blueprintId => {
+  const result = await dbPool.query(
+    'SELECT COUNT(*)::int AS deployment_count FROM lab_deployments WHERE blueprint_id = $1',
+    [blueprintId]
+  );
+  return Number(result.rows[0]?.deployment_count ?? 0);
+};
+
+const countDeploymentsUsingTemplate = async templateId => {
+  const result = await dbPool.query(
+    `SELECT COUNT(DISTINCT d.id)::int AS deployment_count
+       FROM lab_deployments d
+       INNER JOIN lab_blueprint_vms v ON v.blueprint_id = d.blueprint_id
+      WHERE v.template_id = $1`,
+    [templateId]
+  );
+  return Number(result.rows[0]?.deployment_count ?? 0);
 };
 
 const updateDeploymentState = async ({ deploymentId, action, status, jobId = null, runId = null }) => {
@@ -1450,6 +1476,12 @@ app.put(
 app.delete(
   '/api/templates/:id',
   wrapAsync(async (req, res) => {
+    const deploymentCount = await countDeploymentsUsingTemplate(req.params.id);
+    if (deploymentCount > 0) {
+      res.status(409).json({ error: 'vm model is used by an existing deployment' });
+      return;
+    }
+
     try {
       const result = await dbPool.query('DELETE FROM vm_templates WHERE id = $1 RETURNING id', [req.params.id]);
       if (!result.rowCount) {
@@ -1539,6 +1571,12 @@ app.put(
 app.delete(
   '/api/blueprints/:id',
   wrapAsync(async (req, res) => {
+    const deploymentCount = await countDeploymentsUsingBlueprint(req.params.id);
+    if (deploymentCount > 0) {
+      res.status(409).json({ error: 'blueprint is used by an existing deployment' });
+      return;
+    }
+
     const result = await dbPool.query('DELETE FROM lab_blueprints WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rowCount) {
       res.status(404).json({ error: 'blueprint not found' });
