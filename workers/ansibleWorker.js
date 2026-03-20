@@ -114,6 +114,7 @@ export function startAnsibleWorker(connection) {
       const abortController = new AbortController();
       activeAbortControllers.set(String(job.id), abortController);
       const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.deploymentId ?? job.id);
+      const blueprintWindowsAdminPassword = String(job.data?.blueprint?.windowsAdminPassword ?? '').trim() || null;
       const extraVars = {
         lab_instance_id: job.data.labInstanceId ?? 'lab-demo',
         deployment_id: job.data.deploymentId ?? null,
@@ -126,6 +127,9 @@ export function startAnsibleWorker(connection) {
 
       try {
         console.log(`Ansible job ${job.id} started for deployment ${deploymentLabel} (customize)`);
+        if (extraVars.windows_admin_password !== blueprintWindowsAdminPassword) {
+          throw new Error('Ansible customization password does not match blueprint windowsAdminPassword');
+        }
         const windowsTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&

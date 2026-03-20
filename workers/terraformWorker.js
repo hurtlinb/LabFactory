@@ -378,9 +378,15 @@ export function startTerraformWorker(connection) {
           runId: job.data.runId
         });
 
-        let preparedVarFile;
-        let merged;
-        try {
+      let preparedVarFile;
+      let merged;
+      try {
+          const blueprintWindowsAdminPassword = String(job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+          const jobWindowsAdminPassword = String(job.data?.windowsAdminPassword ?? '').trim();
+          const resolvedWindowsAdminPassword = jobWindowsAdminPassword || blueprintWindowsAdminPassword;
+          if (jobWindowsAdminPassword && blueprintWindowsAdminPassword && jobWindowsAdminPassword !== blueprintWindowsAdminPassword) {
+            throw new Error('Terraform job password does not match blueprint windowsAdminPassword');
+          }
           const raw = await readFile(terraformVarsPath, 'utf8');
           const rawSettings = JSON.parse(raw);
           const sanitized = sanitizeSettingsInput(rawSettings);
@@ -388,7 +394,7 @@ export function startTerraformWorker(connection) {
           merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
-          merged.linux_default_username = String(job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
+          merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
           if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
               envSettings,
@@ -424,9 +430,7 @@ export function startTerraformWorker(connection) {
           }
           const hasWindowsVm = Array.isArray(merged.vm_definitions)
             && merged.vm_definitions.some(vm => isWindowsOsType(vm.os_type));
-          merged.windows_admin_password = String(
-            job.data?.blueprint?.windowsAdminPassword ?? merged.windows_admin_password ?? ''
-          ).trim();
+          merged.windows_admin_password = resolvedWindowsAdminPassword;
           if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim()) {
             throw new Error(
               'windows_admin_password must be set on the blueprint before deploying a Windows template with Cloudbase-Init wait'
@@ -517,9 +521,9 @@ export function startTerraformWorker(connection) {
 
         if (action === 'deploy' && linuxReadinessTargets.length > 0) {
           const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
-          const linuxPassword = String(merged.windows_admin_password ?? '').trim();
+          const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
           if (!linuxPassword) {
-            throw new Error('A lab password is required for Linux guest readiness checks');
+            throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
           }
 
           for (const target of linuxReadinessTargets) {
@@ -569,10 +573,11 @@ export function startTerraformWorker(connection) {
               runId: job.data.runId,
               blueprint: {
                 name: job.data?.blueprint?.name ?? null,
-                classroomName: job.data?.blueprint?.classroomName ?? null
+                classroomName: job.data?.blueprint?.classroomName ?? null,
+                windowsAdminPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim()
               },
-              linuxDefaultUsername: String(merged.linux_default_username ?? '').trim() || 'ubuntu',
-              windowsAdminPassword: String(job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
+              linuxDefaultUsername: String(job.data?.linuxDefaultUsername ?? merged.linux_default_username ?? '').trim() || 'ubuntu',
+              windowsAdminPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
               timezoneTargets: customizationTargets
             },
             { attempts: 1 }

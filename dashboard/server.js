@@ -1314,6 +1314,7 @@ app.post(
         : action === 'destroy'
           ? 'destroy'
           : action;
+    const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom });
     const job = await queues.terraform.add(
       jobName,
       {
@@ -1322,7 +1323,9 @@ app.post(
         deploymentNumber: deployment.deploymentNumber,
         runId,
         deploymentId: deployment.id,
-        blueprint: buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom })
+        blueprint: terraformBlueprintPayload,
+        windowsAdminPassword: String(terraformBlueprintPayload.windowsAdminPassword ?? '').trim(),
+        linuxDefaultUsername: String(terraformBlueprintPayload.linuxDefaultUsername ?? '').trim() || 'ubuntu'
       },
       {
         attempts: 1,
@@ -1617,13 +1620,16 @@ app.post(
         : action === 'destroy'
           ? 'destroy'
           : action;
+    const terraformBlueprintPayload = buildTerraformBlueprintPayload(blueprint);
     const job = await queues.terraform.add(
       jobName,
       {
         action,
         labInstanceId: blueprint.id,
         runId,
-        blueprint: buildTerraformBlueprintPayload(blueprint)
+        blueprint: terraformBlueprintPayload,
+        windowsAdminPassword: String(terraformBlueprintPayload.windowsAdminPassword ?? '').trim(),
+        linuxDefaultUsername: String(terraformBlueprintPayload.linuxDefaultUsername ?? '').trim() || 'ubuntu'
       },
       {
         attempts: 1,
