@@ -9,6 +9,27 @@ LabFactory is a Proxmox lab orchestration dashboard built around:
 
 The UI is served by the `dashboard` service, state is stored in PostgreSQL, and workflow execution is handled by Redis-backed workers.
 
+## Authentication
+The dashboard can be protected with OpenID Connect through Keycloak.
+
+When `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID` are configured:
+- all dashboard pages and `/api/*` routes require authentication
+- login is handled with the Authorization Code flow + PKCE
+- the sidebar shows the authenticated user and a logout link
+
+Required environment variables for OIDC:
+- `SESSION_SECRET`
+- `OIDC_ISSUER_URL`
+- `OIDC_CLIENT_ID`
+
+Optional environment variables:
+- `OIDC_CLIENT_SECRET`
+- `OIDC_SCOPES` (default: `openid profile email`)
+- `OIDC_REDIRECT_URI`
+- `OIDC_POST_LOGOUT_REDIRECT_URI`
+- `SESSION_COOKIE_SECURE`
+- `TRUST_PROXY`
+
 ## Stack
 - `dashboard`: Express server + static UI
 - `postgres`: persistent storage for models, blueprints, classrooms, and deployments
@@ -69,6 +90,7 @@ Supported actions:
 - destroy
 
 Each prepared deployment is stored independently, so multiple labs can target the same classroom.
+Each deployment also stores the teacher email that created it, using the authenticated OpenID Connect user email as the key.
 
 For a classroom deployment, the blueprint is replicated for every workstation in the classroom.
 
@@ -230,6 +252,16 @@ Copy `.env.example` to `.env` and set at least:
 - `PROXMOX_TLS_INSECURE`
 - `PROXMOX_API_TOKEN_ID`
 - `PROXMOX_API_TOKEN_SECRET`
+
+To enable Keycloak authentication, also set:
+- `SESSION_SECRET`
+- `OIDC_ISSUER_URL`
+- `OIDC_CLIENT_ID`
+
+Example Keycloak values:
+- `OIDC_ISSUER_URL=https://keycloak.example.com/realms/labfactory`
+- `OIDC_CLIENT_ID=labfactory-dashboard`
+- `OIDC_CLIENT_SECRET=<only for confidential clients>`
 
 ## Redis Security
 Redis is used as the BullMQ backend and is expected to run behind the internal Docker network only.

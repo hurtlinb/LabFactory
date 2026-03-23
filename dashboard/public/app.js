@@ -3,6 +3,7 @@
   templates: [],
   blueprints: [],
   deployments: [],
+  teachers: [],
   editingTemplateId: null,
   editingClassroomId: null,
   isBlueprintWorkspaceVisible: false,
@@ -13,6 +14,10 @@
     linux: []
   },
   terraformSettings: {},
+  auth: {
+    enabled: false
+  },
+  currentUser: null,
   currentBlueprint: createEmptyBlueprint()
 };
 
@@ -90,6 +95,11 @@ const terraformWorkerStatusLabel = document.getElementById('terraformWorkerStatu
 const ansibleWorkerStatusIndicator = document.getElementById('ansibleWorkerStatusIndicator');
 const ansibleWorkerStatusLabel = document.getElementById('ansibleWorkerStatusLabel');
 const appVersion = document.getElementById('appVersion');
+const teacherList = document.getElementById('teacherList');
+const userSession = document.getElementById('userSession');
+const userSessionName = document.getElementById('userSessionName');
+const userSessionMeta = document.getElementById('userSessionMeta');
+const logoutLink = document.getElementById('logoutLink');
 
 const statusTimers = new WeakMap();
 let pendingVmCustomization = null;
@@ -281,6 +291,34 @@ function renderDeploymentSelectors() {
         .join('');
     deploymentClassroomSelect.value = selected;
   }
+}
+
+function renderTeachers() {
+  if (!teacherList) return;
+  if (!state.teachers.length) {
+    teacherList.innerHTML = '<p class="placeholder">No synchronized users yet.</p>';
+    return;
+  }
+
+  teacherList.innerHTML = state.teachers
+    .map(teacher => {
+      const secondaryLabel = teacher.email && teacher.displayName !== teacher.email ? teacher.email : '';
+      return `
+        <article class="blueprint-item teacher-card">
+          <div class="panel-head">
+            <div>
+              <strong>${escapeHtml(teacher.displayName || teacher.email || 'Unknown teacher')}</strong>
+              <p class="muted">${secondaryLabel ? escapeHtml(secondaryLabel) : ''}</p>
+            </div>
+            <div class="inline-actions">
+              ${renderTeacherBadge(teacher)}
+              <span class="mini-pill">${new Date(teacher.updatedAt).toLocaleString()}</span>
+            </div>
+          </div>
+        </article>
+      `;
+    })
+    .join('');
 }
 
 function renderTemplates() {
@@ -688,6 +726,7 @@ function renderLifecycleLabs() {
               <p class="muted">${escapeHtml(deployment.blueprint.description || 'No description')}</p>
             </div>
             <div class="inline-actions">
+              ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               <span class="pill">${deployment.totalVmCount} VM</span>
               ${
                 canDeleteDeployment
@@ -1070,10 +1109,41 @@ function deriveGatewayFromSubnet(subnet) {
   return `${parts[0]}.${parts[1]}.${parts[2]}.1`;
 }
 
+function renderTeacherIdentity(teacher) {
+  const email = String(teacher?.email || '').trim();
+  const initials = String(teacher?.initials || '').trim();
+  const displayName = String(teacher?.displayName || '').trim() || email || 'Unknown teacher';
+
+  if (initials) {
+    return `
+      <span class="teacher-chip" title="${escapeHtmlAttr(displayName)}">
+        <span class="teacher-chip-badge">${escapeHtml(initials)}</span>
+        <span>${escapeHtml(email || displayName)}</span>
+      </span>
+    `;
+  }
+
+  return `<span>${escapeHtml(displayName)}</span>`;
+}
+
+function renderTeacherBadge(teacher) {
+  const email = String(teacher?.email || '').trim();
+  const initials = String(teacher?.initials || '').trim();
+  const displayName = String(teacher?.displayName || '').trim() || email || 'Unknown teacher';
+  const label = initials || displayName;
+
+  return `<span class="mini-pill teacher-pill" title="${escapeHtmlAttr(displayName)}">${escapeHtml(label)}</span>`;
+}
+
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, options);
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
+    if (response.status === 401 && payload.loginUrl) {
+      const returnTo = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      window.location.assign(`${payload.loginUrl}?returnTo=${encodeURIComponent(returnTo)}`);
+      throw new Error('Authentication required');
+    }
     throw new Error(payload.error || firstFieldError(payload.errors) || 'Request failed');
   }
   return payload;
@@ -1169,9 +1239,29 @@ function resetClassroomForm({ keepVisible = false } = {}) {
 }
 
 async function loadAppInfo() {
-  if (!appVersion) return;
   const info = await fetchJson('/api/app-info');
-  appVersion.textContent = `Version ${info.version ?? '--'}`;
+  state.auth = info.auth || { enabled: false };
+  state.currentUser = info.auth?.user || null;
+
+  if (appVersion) {
+    appVersion.textContent = `Version ${info.version ?? '--'}`;
+  }
+
+  if (!userSession || !userSessionName || !userSessionMeta) {
+    return;
+  }
+
+  if (!state.auth.enabled || !state.currentUser) {
+    userSession.hidden = true;
+    return;
+  }
+
+  userSessionName.textContent = state.currentUser.name || state.currentUser.username || 'Authenticated user';
+  userSessionMeta.textContent = state.currentUser.email || state.currentUser.username || '';
+  if (logoutLink && state.auth.logoutUrl) {
+    logoutLink.href = state.auth.logoutUrl;
+  }
+  userSession.hidden = false;
 }
 
 function applyHealthIndicator(indicator, labelNode, label, status, title) {
@@ -1235,6 +1325,11 @@ async function loadBlueprints() {
   state.blueprints = await fetchJson('/api/blueprints');
   renderBlueprintList();
   renderDeploymentSelectors();
+}
+
+async function loadTeachers() {
+  state.teachers = await fetchJson('/api/teachers');
+  renderTeachers();
 }
 
 async function refreshLifecycleLabs() {
@@ -1723,6 +1818,7 @@ deploymentForm?.addEventListener('submit', async event => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    await loadTeachers();
     await refreshLifecycleLabs();
     showMessage(globalStatus, 'Deployment prepared.', 'success');
   } catch (error) {
@@ -1939,6 +2035,7 @@ async function bootstrap() {
   await Promise.all([
     loadAppInfo(),
     loadConnectionStatuses(),
+    loadTeachers(),
     loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),

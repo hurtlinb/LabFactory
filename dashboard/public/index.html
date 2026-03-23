@@ -29,6 +29,7 @@
         </div>
         <div class="nav-group">
           <p class="nav-group-title">Administration</p>
+          <button data-view="admin-users">Users</button>
           <button data-view="models">VM Models</button>
           <button data-view="classrooms">Classrooms</button>
           <button data-view="admin-settings">Settings</button>
@@ -37,6 +38,12 @@
       </nav>
 
       <div class="sidebar-footer">
+        <div id="userSession" class="user-session" hidden>
+          <p class="eyebrow">Session</p>
+          <div id="userSessionName" class="user-session-name">Authenticated user</div>
+          <div id="userSessionMeta" class="user-session-meta"></div>
+          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
+        </div>
         <div id="connectionStatusList" class="sidebar-health-list" aria-live="polite">
           <div id="postgresStatusIndicator" class="sidebar-health" data-state="unknown">
             <span class="sidebar-health-icon" aria-hidden="true"></span>
@@ -341,6 +348,20 @@
           <p class="eyebrow danger-eyebrow">danger zone</p>
           <div class="inline-actions section-actions">
             <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
+          </div>
+        </article>
+      </section>
+
+      <section class="page" data-view="admin-users" hidden>
+        <article class="panel">
+          <div class="panel-head">
+            <div>
+              <p class="eyebrow">users</p>
+              <h3>Synchronized teachers</h3>
+            </div>
+          </div>
+          <div id="teacherList" class="saved-list">
+            <p class="placeholder">Loading users...</p>
           </div>
         </article>
       </section>

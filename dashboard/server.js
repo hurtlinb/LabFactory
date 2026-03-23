@@ -13,6 +13,7 @@ import { Pool } from 'pg';
 import { v4 as uuidv4 } from 'uuid';
 import { z } from 'zod';
 import { redisConnectionOptions } from '../config/redis.js';
+import { initializeOidcAuth } from './auth.js';
 import {
   sanitizeSettingsInput,
   defaultTerraformSettings,
@@ -566,9 +567,34 @@ const mapClassroom = row => ({
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
 
+const mapTeacher = row => ({
+  email: row.email,
+  initials: row.initials ?? null,
+  firstName: row.first_name ?? null,
+  lastName: row.last_name ?? null,
+  displayName:
+    row.display_name ||
+    [row.first_name, row.last_name].filter(Boolean).join(' ').trim() ||
+    row.email,
+  createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+  updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
+});
+
 const mapDeployment = row => ({
   id: row.id,
   deploymentNumber: Number(row.deployment_number ?? 0),
+  teacherEmail: row.teacher_email ?? '',
+  teacher: {
+    email: row.teacher_email ?? '',
+    initials: row.teacher_initials ?? null,
+    firstName: row.teacher_first_name ?? null,
+    lastName: row.teacher_last_name ?? null,
+    displayName:
+      row.teacher_display_name ||
+      [row.teacher_first_name, row.teacher_last_name].filter(Boolean).join(' ').trim() ||
+      row.teacher_email ||
+      ''
+  },
   status: row.status,
   lastAction: row.last_action,
   lastJobId: row.last_job_id,
@@ -731,6 +757,10 @@ const fetchDeploymentById = async deploymentId => {
        d.*,
        b.name AS blueprint_name,
        b.description AS blueprint_description,
+       t.initials AS teacher_initials,
+       t.first_name AS teacher_first_name,
+       t.last_name AS teacher_last_name,
+       t.display_name AS teacher_display_name,
        c.name AS classroom_name,
        c.workstation_count,
        c.starting_vlan,
@@ -743,6 +773,7 @@ const fetchDeploymentById = async deploymentId => {
        ) AS blueprint_vm_count
      FROM lab_deployments d
      INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+     LEFT JOIN teachers t ON t.email = d.teacher_email
      INNER JOIN classrooms c ON c.id = d.classroom_id
      WHERE d.id = $1`,
     [deploymentId]
@@ -912,6 +943,10 @@ const fetchDeploymentRows = async () => {
        d.*,
        b.name AS blueprint_name,
        b.description AS blueprint_description,
+       t.initials AS teacher_initials,
+       t.first_name AS teacher_first_name,
+       t.last_name AS teacher_last_name,
+       t.display_name AS teacher_display_name,
        c.name AS classroom_name,
        c.workstation_count,
        c.starting_vlan,
@@ -924,10 +959,42 @@ const fetchDeploymentRows = async () => {
        ) AS blueprint_vm_count
      FROM lab_deployments d
      INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+     LEFT JOIN teachers t ON t.email = d.teacher_email
      INNER JOIN classrooms c ON c.id = d.classroom_id
      ORDER BY LOWER(b.name) ASC, LOWER(c.name) ASC, d.created_at ASC`
   );
   return result.rows;
+};
+
+const upsertTeacher = async user => {
+  const email = String(user?.email ?? '').trim().toLowerCase();
+  if (!email) {
+    throw createErrorWithCode('authenticated user email is required to create a deployment', 'VALIDATION');
+  }
+
+  const initials = String(user?.initials ?? '').trim() || null;
+  const firstName = String(user?.firstName ?? '').trim() || null;
+  const lastName = String(user?.lastName ?? '').trim() || null;
+  const displayName =
+    String(user?.name ?? '').trim() ||
+    [firstName, lastName].filter(Boolean).join(' ').trim() ||
+    email;
+
+  await dbPool.query(
+    `INSERT INTO teachers
+      (email, initials, first_name, last_name, display_name, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+     ON CONFLICT (email)
+     DO UPDATE SET
+       initials = COALESCE(NULLIF(EXCLUDED.initials, ''), teachers.initials),
+       first_name = COALESCE(NULLIF(EXCLUDED.first_name, ''), teachers.first_name),
+       last_name = COALESCE(NULLIF(EXCLUDED.last_name, ''), teachers.last_name),
+       display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), teachers.display_name),
+       updated_at = NOW()`,
+    [email, initials, firstName, lastName, displayName]
+  );
+
+  return email;
 };
 
 const TRANSIENT_DEPLOYMENT_STATUSES = new Set([
@@ -1039,13 +1106,18 @@ const persistBlueprint = async (blueprintId, payload) => {
   return fetchBlueprintById(blueprintId);
 };
 
+const auth = await initializeOidcAuth(app);
+
+app.use(auth.attachUser);
 app.use(express.json());
+app.use(auth.requireAuth);
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/app-info', (req, res) => {
   res.json({
     name: packageJson.name ?? 'LabFactory',
-    version: packageJson.version ?? '0.0.0'
+    version: packageJson.version ?? '0.0.0',
+    auth: auth.describeSession(req)
   });
 });
 
@@ -1197,6 +1269,20 @@ app.delete(
 );
 
 app.get(
+  '/api/teachers',
+  wrapAsync(async (_req, res) => {
+    const result = await dbPool.query(
+      `SELECT email, initials, first_name, last_name, display_name, created_at, updated_at
+         FROM teachers
+        ORDER BY
+          LOWER(COALESCE(display_name, CONCAT_WS(' ', first_name, last_name), email)) ASC,
+          LOWER(email) ASC`
+    );
+    res.json(result.rows.map(mapTeacher));
+  })
+);
+
+app.get(
   '/api/lifecycle/deployments',
   wrapAsync(async (req, res) => {
     const rows = await fetchDeploymentRows();
@@ -1288,12 +1374,14 @@ app.post(
 
     await validateBlueprintVmIpLastOctetsForClassroom({ payload: blueprint, classroom });
 
+    const teacherEmail = await upsertTeacher(req.session?.user);
+
     const deploymentInsert = await dbPool.query(
       `INSERT INTO lab_deployments
-        (id, blueprint_id, classroom_id, status, last_action, created_at, updated_at)
-       VALUES ($1, $2, $3, 'idle', 'prepare', NOW(), NOW())
+        (id, blueprint_id, classroom_id, teacher_email, status, last_action, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, 'idle', 'prepare', NOW(), NOW())
        RETURNING id`,
-      [uuidv4(), blueprint.id, classroom.id]
+      [uuidv4(), blueprint.id, classroom.id, teacherEmail]
     );
 
     const deploymentId = deploymentInsert.rows[0].id;
@@ -1332,6 +1420,7 @@ app.get(
         id: deployment.id,
         deploymentNumber: deployment.deploymentNumber,
         status: deployment.status,
+        teacher: deployment.teacher,
         blueprintName: deployment.blueprint.name,
         classroomName: deployment.classroom.name
       },

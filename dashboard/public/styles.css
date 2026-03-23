@@ -140,6 +140,41 @@ select {
   text-transform: uppercase;
 }
 
+.user-session {
+  margin-bottom: 18px;
+  padding: 0 0 14px;
+  border-bottom: 1px solid rgba(34, 63, 115, 0.08);
+}
+
+.user-session-name {
+  color: var(--brand);
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
+.user-session-meta {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  letter-spacing: normal;
+  text-transform: none;
+  word-break: break-word;
+}
+
+.user-session-link {
+  display: inline-flex;
+  margin-top: 10px;
+  color: var(--brand);
+  text-decoration: none;
+  letter-spacing: 0.08em;
+}
+
+.user-session-link:hover {
+  text-decoration: underline;
+}
+
 .sidebar-health {
   display: flex;
   align-items: center;
@@ -382,6 +417,27 @@ select {
 .panel-head > div,
 .inline-actions > div {
   min-width: 0;
+}
+
+.teacher-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  vertical-align: middle;
+}
+
+.teacher-chip-badge {
+  display: inline-grid;
+  place-items: center;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(34, 63, 115, 0.14), rgba(78, 147, 170, 0.2));
+  color: var(--brand);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .stack {
@@ -811,6 +867,13 @@ select:focus {
   border-color: rgba(217, 145, 57, 0.24);
   background: rgba(255, 248, 238, 0.96);
   color: #9a641b;
+}
+
+.teacher-pill {
+  border-color: rgba(47, 158, 68, 0.22);
+  background: rgba(240, 253, 244, 0.98);
+  color: #2f9e44;
+  font-weight: 700;
 }
 
 .dropzone {
