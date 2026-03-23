@@ -4,6 +4,7 @@
   blueprints: [],
   deployments: [],
   teachers: [],
+  courses: [],
   editingTemplateId: null,
   editingClassroomId: null,
   isBlueprintWorkspaceVisible: false,
@@ -37,6 +38,7 @@ const dropzone = document.getElementById('dropzone');
 
 const blueprintNameInput = document.getElementById('blueprintName');
 const blueprintDescriptionInput = document.getElementById('blueprintDescription');
+const blueprintCourseIdInput = document.getElementById('blueprintCourseId');
 const blueprintWindowsAdminPasswordInput = document.getElementById('blueprintWindowsAdminPassword');
 const blueprintLinuxDefaultUsernameInput = document.getElementById('blueprintLinuxDefaultUsername');
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
@@ -83,6 +85,9 @@ const workersContainer = document.getElementById('workers');
 const terraformStatus = document.getElementById('terraformJobStatus');
 const terraformSettingsForm = document.getElementById('terraformSettingsForm');
 const terraformSettingsStatus = document.getElementById('terraformSettingsStatus');
+const courseList = document.getElementById('courseList');
+const courseForm = document.getElementById('courseForm');
+const courseSubmitButton = document.getElementById('courseSubmitButton');
 const refreshLabsStateButton = document.getElementById('refreshLabsStateButton');
 const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
 const settingsStatus = document.getElementById('settingsStatus');
@@ -143,6 +148,7 @@ function createEmptyBlueprint() {
     name: '',
     description: '',
     status: 'draft',
+    courseId: '',
     windowsAdminPassword: '',
     linuxDefaultUsername: 'ubuntu',
     vms: []
@@ -192,6 +198,9 @@ function setActiveView(view) {
 function syncBlueprintFields() {
   blueprintNameInput.value = state.currentBlueprint.name;
   blueprintDescriptionInput.value = state.currentBlueprint.description;
+  if (blueprintCourseIdInput) {
+    blueprintCourseIdInput.value = state.currentBlueprint.courseId || '';
+  }
   if (blueprintWindowsAdminPasswordInput) {
     blueprintWindowsAdminPasswordInput.value = state.currentBlueprint.windowsAdminPassword || '';
   }
@@ -230,10 +239,11 @@ function renderBlueprintList() {
         <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${blueprint.id}">
           <div class="panel-head">
             <div class="blueprint-summary">
-              <strong>${escapeHtml(blueprint.name)}</strong>
+              <strong>${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</strong>
               <p class="muted">${escapeHtml(blueprint.description || 'No description')}</p>
             </div>
             <div class="inline-actions">
+              ${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}
               <span class="mini-pill">${new Date(blueprint.updatedAt).toLocaleString()}</span>
               <span class="pill">${blueprint.vmCount} VM</span>
               <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint">×</button>
@@ -277,7 +287,10 @@ function renderDeploymentSelectors() {
     deploymentBlueprintSelect.innerHTML =
       '<option value="">Select a blueprint</option>' +
       state.blueprints
-        .map(blueprint => `<option value="${blueprint.id}">${escapeHtml(blueprint.name)}</option>`)
+        .map(
+          blueprint =>
+            `<option value="${blueprint.id}">${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</option>`
+        )
         .join('');
     deploymentBlueprintSelect.value = selected;
   }
@@ -291,6 +304,17 @@ function renderDeploymentSelectors() {
         .join('');
     deploymentClassroomSelect.value = selected;
   }
+}
+
+function renderBlueprintCourseOptions() {
+  if (!blueprintCourseIdInput) return;
+  const selected = state.currentBlueprint.courseId || blueprintCourseIdInput.value || '';
+  blueprintCourseIdInput.innerHTML =
+    '<option value="">Select a course</option>' +
+    state.courses
+      .map(course => `<option value="${course.id}">#${escapeHtml(String(course.courseNumber))}${course.description ? ` - ${escapeHtml(course.description)}` : ''}</option>`)
+      .join('');
+  blueprintCourseIdInput.value = selected;
 }
 
 function renderTeachers() {
@@ -319,6 +343,49 @@ function renderTeachers() {
       `;
     })
     .join('');
+}
+
+function renderCourses() {
+  if (!courseList) return;
+  if (!state.courses.length) {
+    courseList.innerHTML = '<p class="placeholder">No courses registered yet.</p>';
+    return;
+  }
+
+  courseList.innerHTML = state.courses
+    .map(
+      course => `
+        <article class="blueprint-item course-card">
+          <div class="panel-head">
+            <div>
+              <strong>Course ${escapeHtml(String(course.courseNumber))}</strong>
+              <p class="muted">${escapeHtml(course.description || 'No description')}</p>
+            </div>
+            <div class="inline-actions">
+              <span class="mini-pill">${new Date(course.updatedAt).toLocaleString()}</span>
+              <button class="icon-btn delete-course-button" type="button" data-course-id="${course.id}" aria-label="Delete course">×</button>
+            </div>
+          </div>
+        </article>
+      `
+    )
+    .join('');
+
+  courseList.querySelectorAll('.delete-course-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      button.disabled = true;
+      try {
+        await fetchJson(`/api/courses/${button.dataset.courseId}`, { method: 'DELETE' });
+        await loadCourses();
+        showMessage(globalStatus, 'Course deleted.', 'success');
+      } catch (error) {
+        showMessage(globalStatus, error.message, 'danger');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
 }
 
 function renderTemplates() {
@@ -719,13 +786,14 @@ function renderLifecycleLabs() {
           <div class="panel-head">
             <div>
               <strong style="display:inline-flex; align-items:center; gap:8px;">
-                <span>#${deployment.deploymentNumber} ${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${statusLabel})</span>
+                <span>${deployment.blueprint.course ? `${escapeHtml(String(deployment.blueprint.course.courseNumber))} - ` : ''}${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${statusLabel})</span>
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
                 ${actionMarkup}
               </strong>
               <p class="muted">${escapeHtml(deployment.blueprint.description || 'No description')}</p>
             </div>
             <div class="inline-actions">
+              <span class="mini-pill">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               <span class="pill">${deployment.totalVmCount} VM</span>
               ${
@@ -1332,6 +1400,12 @@ async function loadTeachers() {
   renderTeachers();
 }
 
+async function loadCourses() {
+  state.courses = await fetchJson('/api/courses');
+  renderCourses();
+  renderBlueprintCourseOptions();
+}
+
 async function refreshLifecycleLabs() {
   const previousDeploymentsById = new Map(state.deployments.map(deployment => [deployment.id, deployment]));
   const nextDeployments = await fetchJson('/api/lifecycle/deployments');
@@ -1361,6 +1435,7 @@ async function loadBlueprint(blueprintId) {
     name: blueprint.name,
     description: blueprint.description || '',
     status: blueprint.status,
+    courseId: blueprint.course?.id || '',
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
     linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
     vms: blueprint.vms.map(vm => ({
@@ -1391,6 +1466,7 @@ function resetBlueprintEditor({ keepVisible = false } = {}) {
 async function saveBlueprint() {
   state.currentBlueprint.name = blueprintNameInput.value.trim();
   state.currentBlueprint.description = blueprintDescriptionInput.value.trim();
+  state.currentBlueprint.courseId = blueprintCourseIdInput?.value || '';
   state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
   state.currentBlueprint.linuxDefaultUsername = blueprintLinuxDefaultUsernameInput?.value?.trim() || 'ubuntu';
   state.currentBlueprint.status = 'draft';
@@ -1401,11 +1477,15 @@ async function saveBlueprint() {
   if (!state.currentBlueprint.vms.length) {
     throw new Error('A lab must contain at least one VM');
   }
+  if (!state.currentBlueprint.courseId) {
+    throw new Error('A course must be selected');
+  }
 
   const payload = {
     name: state.currentBlueprint.name,
     description: state.currentBlueprint.description,
     status: state.currentBlueprint.status,
+    courseId: state.currentBlueprint.courseId,
     windowsAdminPassword: state.currentBlueprint.windowsAdminPassword,
     linuxDefaultUsername: state.currentBlueprint.linuxDefaultUsername,
     vms: state.currentBlueprint.vms.map(vm => ({
@@ -1709,10 +1789,11 @@ navButtons.forEach(button => {
   });
 });
 
-[blueprintNameInput, blueprintDescriptionInput, blueprintWindowsAdminPasswordInput, blueprintLinuxDefaultUsernameInput].forEach(input => {
+[blueprintNameInput, blueprintDescriptionInput, blueprintCourseIdInput, blueprintWindowsAdminPasswordInput, blueprintLinuxDefaultUsernameInput].forEach(input => {
   input.addEventListener('input', () => {
     state.currentBlueprint.name = blueprintNameInput.value;
     state.currentBlueprint.description = blueprintDescriptionInput.value;
+    state.currentBlueprint.courseId = blueprintCourseIdInput?.value || '';
     state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
     state.currentBlueprint.linuxDefaultUsername = blueprintLinuxDefaultUsernameInput?.value?.trim() || 'ubuntu';
     state.currentBlueprint.status = 'draft';
@@ -1801,6 +1882,36 @@ classroomForm?.addEventListener('submit', async event => {
     showMessage(globalStatus, editingClassroomId ? 'Classroom updated.' : 'Classroom created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
+  }
+});
+
+courseForm?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const form = new FormData(courseForm);
+  const payload = {
+    courseNumber: Number(form.get('courseNumber') || 0),
+    description: String(form.get('description') || '').trim()
+  };
+
+  if (courseSubmitButton) {
+    courseSubmitButton.disabled = true;
+  }
+
+  try {
+    await fetchJson('/api/courses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    courseForm.reset();
+    await loadCourses();
+    showMessage(globalStatus, 'Course created.', 'success');
+  } catch (error) {
+    showMessage(globalStatus, error.message, 'danger');
+  } finally {
+    if (courseSubmitButton) {
+      courseSubmitButton.disabled = false;
+    }
   }
 });
 
@@ -2036,6 +2147,7 @@ async function bootstrap() {
     loadAppInfo(),
     loadConnectionStatuses(),
     loadTeachers(),
+    loadCourses(),
     loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),

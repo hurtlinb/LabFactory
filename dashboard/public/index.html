@@ -30,6 +30,7 @@
         <div class="nav-group">
           <p class="nav-group-title">Administration</p>
           <button data-view="admin-users">Users</button>
+          <button data-view="admin-courses">Courses</button>
           <button data-view="models">VM Models</button>
           <button data-view="classrooms">Classrooms</button>
           <button data-view="admin-settings">Settings</button>
@@ -206,6 +207,12 @@
                 <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
               </label>
               <label class="field">
+                <span>Course</span>
+                <select id="blueprintCourseId" name="courseId" required>
+                  <option value="">Select a course</option>
+                </select>
+              </label>
+              <label class="field">
                 <span>Guest password</span>
                 <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Used for Windows guest access and Linux SSH customization">
               </label>
@@ -364,6 +371,41 @@
             <p class="placeholder">Loading users...</p>
           </div>
         </article>
+      </section>
+
+      <section class="page" data-view="admin-courses" hidden>
+        <div class="builder-grid">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">courses</p>
+                <h3>Courses</h3>
+              </div>
+            </div>
+            <div id="courseList" class="saved-list">
+              <p class="placeholder">Loading courses...</p>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">new course</p>
+              </div>
+            </div>
+            <form id="courseForm" class="stack">
+              <label class="field">
+                <span>Course number</span>
+                <input type="number" name="courseNumber" min="1" placeholder="101" required>
+              </label>
+              <label class="field">
+                <span>Description</span>
+                <textarea name="description" rows="3" placeholder="Optional description"></textarea>
+              </label>
+              <button id="courseSubmitButton" class="btn btn-secondary" type="submit">Add course</button>
+            </form>
+          </article>
+        </div>
       </section>
 
       <section class="page" data-view="admin-queues" hidden>

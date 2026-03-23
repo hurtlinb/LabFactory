@@ -65,6 +65,8 @@ Blueprints are created with drag and drop:
 - save, reload, and delete blueprints
 
 Each blueprint stores a reusable lab definition in PostgreSQL.
+Each blueprint is also linked to the teacher who created it, using the authenticated OpenID Connect user email.
+Each blueprint must also be attached to a course.
 
 ### Classrooms
 Classrooms are used as deployment targets and include:
@@ -75,6 +77,13 @@ Classrooms are used as deployment targets and include:
 For a classroom deployment:
 - each workstation gets its own VLAN
 - VLAN = `startingVlan + workstationIndex`
+
+### Courses
+Courses are managed from the `Administration` section.
+
+Each course contains:
+- a unique required number
+- an optional description
 
 ### Lifecycle
 Lifecycle works with prepared deployments:
@@ -95,12 +104,12 @@ Each deployment also stores the teacher email that created it, using the authent
 For a classroom deployment, the blueprint is replicated for every workstation in the classroom.
 
 VM naming convention:
-- `<blueprint-name>-<two-digit-workstation-number>-<instance-name>`
+- `<course-number>-<teacher-initials>-<blueprint-name>-<two-digit-workstation-number>-<instance-name>`
 
 Example:
-- `soc-lab-01-dc`
-- `soc-lab-01-client`
-- `soc-lab-02-dc`
+- `101-bh-soc-lab-01-dc`
+- `101-bh-soc-lab-01-client`
+- `101-bh-soc-lab-02-dc`
 
 ### Lifecycle State Refresh
 The `Settings` page contains a `Refresh labs state` button.

@@ -67,6 +67,19 @@ const proxmoxRequestOptions = envSettings => ({
   rejectUnauthorized: !envSettings.proxmox_tls_insecure
 });
 
+const mergeVmTags = (...tagValues) => {
+  const tags = [];
+  for (const value of tagValues) {
+    for (const rawTag of String(value ?? '').split(/[;,]/)) {
+      const tag = rawTag.trim();
+      if (tag && !tags.includes(tag)) {
+        tags.push(tag);
+      }
+    }
+  }
+  return tags.length ? tags.join(';') : null;
+};
+
 const fetchVmConfig = async (envSettings, node, vmid) => {
   const apiUrl = new URL(
     `nodes/${node}/qemu/${vmid}/config`,
@@ -424,7 +437,7 @@ export function startTerraformWorker(connection) {
               cloudinit_storage: vm.cloudinitStorage ?? null,
               bios: vm.bios ?? null,
               machine: vm.machine ?? null,
-              tags: job.data.deploymentNumber == null ? null : String(job.data.deploymentNumber),
+              tags: mergeVmTags(vm.tags, job.data.deploymentNumber == null ? null : String(job.data.deploymentNumber)),
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
           }

@@ -198,6 +198,7 @@ const blueprintSchema = z.object({
   name: z.string().trim().min(1),
   description: z.string().trim().optional().default(''),
   status: z.enum(['draft', 'ready', 'archived']).optional().default('draft'),
+  courseId: z.string().uuid(),
   windowsAdminPassword: z.string().optional().default(''),
   linuxDefaultUsername: z.string().trim().optional().default('ubuntu'),
   vms: z.array(blueprintVmSchema).min(1)
@@ -250,6 +251,11 @@ const classroomSchema = z
       path: ['networkGateway']
     }
   );
+
+const courseSchema = z.object({
+  courseNumber: z.number().int().positive(),
+  description: z.string().trim().optional().default('')
+});
 
 const deploymentCreateSchema = z.object({
   blueprintId: z.string().uuid(),
@@ -511,6 +517,25 @@ const mapBlueprintSummary = row => ({
   name: row.name,
   description: row.description ?? '',
   status: row.status,
+  course: row.course_id
+    ? {
+        id: row.course_id,
+        courseNumber: Number(row.course_number ?? 0),
+        description: row.course_description ?? ''
+      }
+    : null,
+  teacherEmail: row.teacher_email ?? '',
+  teacher: {
+    email: row.teacher_email ?? '',
+    initials: row.teacher_initials ?? null,
+    firstName: row.teacher_first_name ?? null,
+    lastName: row.teacher_last_name ?? null,
+    displayName:
+      row.teacher_display_name ||
+      [row.teacher_first_name, row.teacher_last_name].filter(Boolean).join(' ').trim() ||
+      row.teacher_email ||
+      ''
+  },
   vmCount: Number(row.vm_count ?? 0),
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
@@ -528,6 +553,45 @@ const sanitizeVmName = input =>
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .slice(0, 63) || 'lab-vm';
+
+const deriveTeacherInitials = teacher => {
+  const explicitInitials = String(teacher?.initials ?? '').trim();
+  if (explicitInitials) return explicitInitials;
+
+  const fromNames = [teacher?.firstName, teacher?.lastName]
+    .map(value => String(value ?? '').trim())
+    .filter(Boolean)
+    .map(value => value[0])
+    .join('');
+  if (fromNames) return fromNames;
+
+  const fromDisplayName = String(teacher?.displayName ?? '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 3)
+    .map(part => part[0])
+    .join('');
+  if (fromDisplayName) return fromDisplayName;
+
+  return 'xx';
+};
+
+const buildVmNamePrefix = ({ course, teacher }) => {
+  const courseNumber = Number(course?.courseNumber ?? 0);
+  const teacherInitials = deriveTeacherInitials(teacher);
+  return sanitizeVmName(`${courseNumber || '0'}-${teacherInitials}`);
+};
+
+const sanitizeVmTag = input =>
+  String(input ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32);
+
+const buildTeacherTag = teacher => sanitizeVmTag(deriveTeacherInitials(teacher));
 
 const computeBlueprintBaseVmid = blueprintId => {
   const compact = String(blueprintId).replace(/-/g, '').slice(0, 8);
@@ -580,6 +644,14 @@ const mapTeacher = row => ({
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
 
+const mapCourse = row => ({
+  id: row.id,
+  courseNumber: Number(row.course_number),
+  description: row.description ?? '',
+  createdAt: row.created_at?.toISOString?.() ?? row.created_at,
+  updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
+});
+
 const mapDeployment = row => ({
   id: row.id,
   deploymentNumber: Number(row.deployment_number ?? 0),
@@ -604,7 +676,14 @@ const mapDeployment = row => ({
   blueprint: {
     id: row.blueprint_id,
     name: row.blueprint_name,
-    description: row.blueprint_description ?? ''
+    description: row.blueprint_description ?? '',
+    course: row.course_id
+      ? {
+          id: row.course_id,
+          courseNumber: Number(row.course_number ?? 0),
+          description: row.course_description ?? ''
+        }
+      : null
   },
   classroom: {
     id: row.classroom_id,
@@ -637,16 +716,26 @@ const fetchBlueprintById = async blueprintId => {
       b.id,
       b.name,
       b.description,
+      b.course_id,
+      b.teacher_email,
       b.windows_admin_password,
       b.linux_default_username,
       b.status,
       b.created_at,
       b.updated_at,
+      c.course_number,
+      c.description AS course_description,
+      t.initials AS teacher_initials,
+      t.first_name AS teacher_first_name,
+      t.last_name AS teacher_last_name,
+      t.display_name AS teacher_display_name,
        COUNT(v.id) AS vm_count
      FROM lab_blueprints b
+     LEFT JOIN courses c ON c.id = b.course_id
+     LEFT JOIN teachers t ON t.email = b.teacher_email
      LEFT JOIN lab_blueprint_vms v ON v.blueprint_id = b.id
      WHERE b.id = $1
-     GROUP BY b.id`,
+     GROUP BY b.id, c.id, c.course_number, c.description, t.email, t.initials, t.first_name, t.last_name, t.display_name`,
     [blueprintId]
   );
 
@@ -719,6 +808,8 @@ const upsertLifecycleState = async ({ blueprintId, action, status, jobId = null,
 const buildTerraformBlueprintPayload = blueprint => {
   const baseVmid = computeBlueprintBaseVmid(blueprint.id);
   const labName = sanitizeVmName(blueprint.name);
+  const namePrefix = buildVmNamePrefix({ course: blueprint.course, teacher: blueprint.teacher });
+  const teacherTag = buildTeacherTag(blueprint.teacher);
   return {
     id: blueprint.id,
     name: blueprint.name,
@@ -729,7 +820,8 @@ const buildTerraformBlueprintPayload = blueprint => {
       const hostnameToken = resolveVmHostnameToken(vm, `vm-${String(index + 1).padStart(2, '0')}`);
       return {
         id: vm.id,
-        name: sanitizeVmName(`${labName}-${hostnameToken}`),
+        name: sanitizeVmName(`${namePrefix}-${labName}-${hostnameToken}`),
+        tags: teacherTag || null,
         hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + index,
         osType: vm.template.osType,
@@ -757,6 +849,9 @@ const fetchDeploymentById = async deploymentId => {
        d.*,
        b.name AS blueprint_name,
        b.description AS blueprint_description,
+       b.course_id,
+       bc.course_number,
+       bc.description AS course_description,
        t.initials AS teacher_initials,
        t.first_name AS teacher_first_name,
        t.last_name AS teacher_last_name,
@@ -773,6 +868,7 @@ const fetchDeploymentById = async deploymentId => {
        ) AS blueprint_vm_count
      FROM lab_deployments d
      INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+     LEFT JOIN courses bc ON bc.id = b.course_id
      LEFT JOIN teachers t ON t.email = d.teacher_email
      INNER JOIN classrooms c ON c.id = d.classroom_id
      WHERE d.id = $1`,
@@ -801,6 +897,17 @@ const countDeploymentsUsingTemplate = async templateId => {
   return Number(result.rows[0]?.deployment_count ?? 0);
 };
 
+const fetchCourseById = async courseId => {
+  const result = await dbPool.query(
+    `SELECT id, course_number, description, created_at, updated_at
+       FROM courses
+      WHERE id = $1`,
+    [courseId]
+  );
+  if (!result.rowCount) return null;
+  return mapCourse(result.rows[0]);
+};
+
 const updateDeploymentState = async ({ deploymentId, action, status, jobId = null, runId = null }) => {
   const result = await dbPool.query(
     `UPDATE lab_deployments
@@ -818,9 +925,12 @@ const updateDeploymentState = async ({ deploymentId, action, status, jobId = nul
   return fetchDeploymentById(result.rows[0].id);
 };
 
-const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom }) => {
+const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, teacher = null }) => {
   const baseVmid = computeBlueprintBaseVmid(deploymentId);
   const labName = sanitizeVmName(blueprint.name);
+  const effectiveTeacher = teacher ?? blueprint.teacher;
+  const namePrefix = buildVmNamePrefix({ course: blueprint.course, teacher: effectiveTeacher });
+  const teacherTag = buildTeacherTag(effectiveTeacher);
   const vms = [];
   const [subnetOctet1, subnetOctet2, startingSubnetOctet3] = String(classroom.startingSubnet)
     .split('.')
@@ -838,7 +948,8 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom })
       const hostnameToken = resolveVmHostnameToken(vm, `vm-${String(vmIndex + 1).padStart(2, '0')}`);
       vms.push({
         id: `${workstationNumber}-${vm.id}`,
-        name: sanitizeVmName(`${labName}-${workstationNumber}-${hostnameToken}`),
+        name: sanitizeVmName(`${namePrefix}-${labName}-${workstationNumber}-${hostnameToken}`),
+        tags: teacherTag || null,
         hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + vms.length,
         osType: vm.template.osType,
@@ -943,6 +1054,9 @@ const fetchDeploymentRows = async () => {
        d.*,
        b.name AS blueprint_name,
        b.description AS blueprint_description,
+       b.course_id,
+       bc.course_number,
+       bc.description AS course_description,
        t.initials AS teacher_initials,
        t.first_name AS teacher_first_name,
        t.last_name AS teacher_last_name,
@@ -959,6 +1073,7 @@ const fetchDeploymentRows = async () => {
        ) AS blueprint_vm_count
      FROM lab_deployments d
      INNER JOIN lab_blueprints b ON b.id = d.blueprint_id
+     LEFT JOIN courses bc ON bc.id = b.course_id
      LEFT JOIN teachers t ON t.email = d.teacher_email
      INNER JOIN classrooms c ON c.id = d.classroom_id
      ORDER BY LOWER(b.name) ASC, LOWER(c.name) ASC, d.created_at ASC`
@@ -1055,17 +1170,18 @@ const deriveDeploymentStatusFromResources = (currentStatus, expectedVmids, resou
   return 'mixed';
 };
 
-const persistBlueprint = async (blueprintId, payload) => {
+const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
   const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
     await client.query(
-      `INSERT INTO lab_blueprints (id, name, description, status, windows_admin_password, linux_default_username, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+      `INSERT INTO lab_blueprints (id, name, description, course_id, teacher_email, status, windows_admin_password, linux_default_username, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
        ON CONFLICT (id)
        DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
+         course_id = EXCLUDED.course_id,
          windows_admin_password = EXCLUDED.windows_admin_password,
          linux_default_username = EXCLUDED.linux_default_username,
          status = EXCLUDED.status,
@@ -1074,6 +1190,8 @@ const persistBlueprint = async (blueprintId, payload) => {
         blueprintId,
         payload.name,
         payload.description,
+        payload.courseId,
+        teacherEmail,
         payload.status,
         String(payload.windowsAdminPassword ?? '').trim(),
         String(payload.linuxDefaultUsername ?? '').trim() || 'ubuntu'
@@ -1283,6 +1401,66 @@ app.get(
 );
 
 app.get(
+  '/api/courses',
+  wrapAsync(async (_req, res) => {
+    const result = await dbPool.query(
+      `SELECT id, course_number, description, created_at, updated_at
+         FROM courses
+        ORDER BY course_number ASC`
+    );
+    res.json(result.rows.map(mapCourse));
+  })
+);
+
+app.post(
+  '/api/courses',
+  wrapAsync(async (req, res) => {
+    const parsed = courseSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    try {
+      const result = await dbPool.query(
+        `INSERT INTO courses
+          (id, course_number, description, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         RETURNING id, course_number, description, created_at, updated_at`,
+        [uuidv4(), parsed.data.courseNumber, parsed.data.description]
+      );
+      res.status(201).json(mapCourse(result.rows[0]));
+    } catch (error) {
+      if (error?.code === '23505') {
+        res.status(409).json({ error: 'course number already exists' });
+        return;
+      }
+      throw error;
+    }
+  })
+);
+
+app.delete(
+  '/api/courses/:id',
+  wrapAsync(async (req, res) => {
+    try {
+      const result = await dbPool.query('DELETE FROM courses WHERE id = $1 RETURNING id', [req.params.id]);
+      if (!result.rowCount) {
+        res.status(404).json({ error: 'course not found' });
+        return;
+      }
+      res.json({ ok: true, id: result.rows[0].id });
+    } catch (error) {
+      if (error?.code === '23503') {
+        res.status(409).json({ error: 'course is used by an existing blueprint' });
+        return;
+      }
+      throw error;
+    }
+  })
+);
+
+app.get(
   '/api/lifecycle/deployments',
   wrapAsync(async (req, res) => {
     const rows = await fetchDeploymentRows();
@@ -1299,7 +1477,7 @@ app.get(
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom });
+      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
       deployments.push({
         ...deployment,
         ...deriveDeploymentProgress({ deployment, vmPlan, resourceByVmid })
@@ -1325,7 +1503,8 @@ app.post(
       const vmids = buildTerraformDeploymentPayload({
         deploymentId: deployment.id,
         blueprint,
-        classroom
+        classroom,
+        teacher: deployment.teacher
       }).vms.map(vm => vm.vmid);
 
       const reconciledStatus = deriveDeploymentStatusFromResources(
@@ -1405,7 +1584,7 @@ app.get(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom });
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
 
     let resourceByVmid = new Map();
     try {
@@ -1470,7 +1649,7 @@ app.post(
         : action === 'destroy'
           ? 'destroy'
           : action;
-    const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom });
+    const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
     const job = await queues.terraform.add(
       jobName,
       {
@@ -1637,13 +1816,23 @@ app.get(
          b.id,
          b.name,
          b.description,
+         b.course_id,
+         b.teacher_email,
          b.status,
          b.created_at,
          b.updated_at,
+         c.course_number,
+         c.description AS course_description,
+         t.initials AS teacher_initials,
+         t.first_name AS teacher_first_name,
+         t.last_name AS teacher_last_name,
+         t.display_name AS teacher_display_name,
          COUNT(v.id) AS vm_count
        FROM lab_blueprints b
+       LEFT JOIN courses c ON c.id = b.course_id
+       LEFT JOIN teachers t ON t.email = b.teacher_email
        LEFT JOIN lab_blueprint_vms v ON v.blueprint_id = b.id
-       GROUP BY b.id
+       GROUP BY b.id, c.id, c.course_number, c.description, t.email, t.initials, t.first_name, t.last_name, t.display_name
        ORDER BY b.updated_at DESC, b.name ASC`
     );
     res.json(result.rows.map(mapBlueprintSummary));
@@ -1672,7 +1861,13 @@ app.post(
     }
 
     await validateBlueprintGuestPassword(parsed.data);
-    const blueprint = await persistBlueprint(uuidv4(), parsed.data);
+    const course = await fetchCourseById(parsed.data.courseId);
+    if (!course) {
+      res.status(404).json({ error: 'course not found' });
+      return;
+    }
+    const teacherEmail = await upsertTeacher(req.session?.user);
+    const blueprint = await persistBlueprint(uuidv4(), parsed.data, teacherEmail);
     res.status(201).json(blueprint);
   })
 );
@@ -1692,8 +1887,13 @@ app.put(
       res.status(404).json({ error: 'blueprint not found' });
       return;
     }
+    const course = await fetchCourseById(parsed.data.courseId);
+    if (!course) {
+      res.status(404).json({ error: 'course not found' });
+      return;
+    }
 
-    const blueprint = await persistBlueprint(req.params.id, parsed.data);
+    const blueprint = await persistBlueprint(req.params.id, parsed.data, existing.teacherEmail);
     res.json(blueprint);
   })
 );
