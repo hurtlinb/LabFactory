@@ -14,6 +14,7 @@ provider "proxmox" {
   pm_api_token_id     = var.proxmox_api_token_id
   pm_api_token_secret = var.proxmox_api_token_secret
   pm_tls_insecure     = var.proxmox_tls_insecure
+  pm_parallel         = var.proxmox_parallel
 }
 
 locals {
@@ -22,6 +23,10 @@ locals {
     "while (-not (Test-Path -LiteralPath 'C:\\ProgramData\\cloudbase-init\\done.flag')) { Start-Sleep -Seconds 5 }",
     "UTF-16LE"
   )
+  configured_proxmox_nodes = distinct(compact([
+    for node in var.proxmox_nodes : trimspace(node)
+  ]))
+  target_nodes = length(local.configured_proxmox_nodes) > 0 ? local.configured_proxmox_nodes : [trimspace(var.proxmox_node)]
 
   vm_definitions = length(var.vm_definitions) > 0 ? var.vm_definitions : [
     {
@@ -45,6 +50,11 @@ locals {
 
   vm_definitions_by_id = {
     for vm in local.vm_definitions : tostring(vm.vmid) => vm
+  }
+
+  vm_target_nodes = {
+    for index, vm in local.vm_definitions :
+    tostring(vm.vmid) => local.target_nodes[index % length(local.target_nodes)]
   }
 
   windows_vm_definitions = {
@@ -86,7 +96,7 @@ resource "proxmox_vm_qemu" "lab_vm" {
   for_each = local.vm_definitions_by_id
 
   name        = each.value.name
-  target_node = var.proxmox_node
+  target_node = local.vm_target_nodes[each.key]
   vmid        = each.value.vmid
   os_type     = "cloud-init"
 

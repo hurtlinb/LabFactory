@@ -146,10 +146,13 @@ Important points:
 - Proxmox authentication is done with API token environment variables
 - LabFactory stores template VMIDs in the database
 - before deploy, the Terraform worker resolves template VMID -> Proxmox VM name
+- the Proxmox API token must have `VM.Audit` on each template VMID, for example `/vms/<template-vmid>`, so the worker can read the template name and disk layout
 - each deployment uses its own Terraform workspace
+- VMs are distributed round-robin across `PROXMOX_NODES`; when it is empty, the worker discovers online Proxmox nodes and falls back to `PROXMOX_NODE`
+- Terraform and Telmate provider concurrency are controlled by `TERRAFORM_PARALLELISM` (`10` by default, capped at `64` by the worker)
 - deployment state is tracked in PostgreSQL
 
-`start` and `stop` do not run Terraform apply; they call the Proxmox API directly on the deployed VMIDs.
+`start` and `stop` do not run Terraform apply; they resolve each VM's current Proxmox node and call the Proxmox API directly on the deployed VMIDs.
 
 ## Ubuntu Template Preparation
 To prepare an Ubuntu VM before converting it to a Proxmox template:
@@ -261,6 +264,10 @@ Copy `.env.example` to `.env` and set at least:
 - `PROXMOX_TLS_INSECURE`
 - `PROXMOX_API_TOKEN_ID`
 - `PROXMOX_API_TOKEN_SECRET`
+
+Optional Proxmox node distribution:
+- `PROXMOX_NODES` comma-separated target nodes, for example `pve01,pve02,pve03`
+- `TERRAFORM_PARALLELISM` concurrent Terraform and Telmate provider operations, for example `20` for large multi-node deployments
 
 To enable Keycloak authentication, also set:
 - `SESSION_SECRET`

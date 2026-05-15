@@ -17,6 +17,8 @@ import {
 const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const LINUX_SSH_WAIT_RETRY_MS = 5000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
+const DEFAULT_TERRAFORM_PARALLELISM = 10;
+const MAX_TERRAFORM_PARALLELISM = 64;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const terraformDir = path.resolve(__dirname, '../terraform');
@@ -25,6 +27,27 @@ const sanitizedVarsPath = path.resolve(terraformDir, '.terraform-vars.json');
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
 });
+
+const buildHttpError = (statusCode, body) => {
+  let proxmoxMessage = null;
+  try {
+    proxmoxMessage = JSON.parse(body)?.message ?? null;
+  } catch {
+    proxmoxMessage = null;
+  }
+
+  const detail = String(proxmoxMessage ?? body ?? '').trim();
+  const error = new Error(`HTTP ${statusCode}${detail ? `: ${detail}` : ''}`);
+  error.statusCode = statusCode;
+  error.body = body;
+  error.proxmoxMessage = proxmoxMessage;
+  return error;
+};
+
+const formatProxmoxError = error =>
+  String(error?.proxmoxMessage ?? error?.message ?? error)
+    .replace(/\s+/g, ' ')
+    .trim();
 
 const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true }) =>
   new Promise((resolve, reject) => {
@@ -45,7 +68,7 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
         });
         response.on('end', () => {
           if ((response.statusCode ?? 500) >= 400) {
-            reject(new Error(`HTTP ${response.statusCode}: ${body}`));
+            reject(buildHttpError(response.statusCode, body));
             return;
           }
           try {
@@ -66,6 +89,35 @@ const proxmoxRequestOptions = envSettings => ({
   },
   rejectUnauthorized: !envSettings.proxmox_tls_insecure
 });
+
+const isProxmoxTemplate = value => value === true || value === 1 || String(value).trim() === '1';
+
+const resolveTerraformParallelism = () => {
+  const rawValue = String(process.env.TERRAFORM_PARALLELISM ?? '').trim();
+  if (!rawValue) {
+    return DEFAULT_TERRAFORM_PARALLELISM;
+  }
+
+  const parsed = Number(rawValue);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new Error('TERRAFORM_PARALLELISM must be a positive integer');
+  }
+
+  return Math.min(parsed, MAX_TERRAFORM_PARALLELISM);
+};
+
+const runWithConcurrency = async (items, concurrency, handler) => {
+  const queue = [...items];
+  const workerCount = Math.min(Math.max(1, Number(concurrency) || 1), queue.length);
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (queue.length) {
+        const item = queue.shift();
+        await handler(item);
+      }
+    })
+  );
+};
 
 const mergeVmTags = (...tagValues) => {
   const tags = [];
@@ -91,6 +143,127 @@ const fetchVmConfig = async (envSettings, node, vmid) => {
     ...proxmoxRequestOptions(envSettings)
   });
   return payload?.data ?? {};
+};
+
+const fetchProxmoxNodeNames = async (envSettings, { onlineOnly = false } = {}) => {
+  const apiUrl = new URL(
+    'nodes',
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  const payload = await requestJson({
+    url: apiUrl,
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return (Array.isArray(payload?.data) ? payload.data : [])
+    .filter(node => {
+      const status = String(node?.status ?? '').trim().toLowerCase();
+      return !onlineOnly || !status || status === 'online';
+    })
+    .map(node => String(node?.node ?? '').trim())
+    .filter(Boolean);
+};
+
+const normalizeProxmoxNodeList = value => {
+  const rawNodes = Array.isArray(value) ? value : String(value ?? '').split(',');
+  return [...new Set(rawNodes.map(node => String(node).trim()).filter(Boolean))];
+};
+
+const resolveProxmoxTargetNodes = async envSettings => {
+  const configuredNodes = normalizeProxmoxNodeList(envSettings.proxmox_nodes);
+  if (configuredNodes.length) {
+    return configuredNodes;
+  }
+
+  let discoveredNodes = [];
+  try {
+    discoveredNodes = await fetchProxmoxNodeNames(envSettings, { onlineOnly: true });
+  } catch (error) {
+    console.warn(
+      `Unable to discover Proxmox nodes for VM distribution; falling back to PROXMOX_NODE (${formatProxmoxError(error)})`
+    );
+  }
+  if (discoveredNodes.length) {
+    const preferredNode = String(envSettings.proxmox_node ?? '').trim();
+    return [
+      ...new Set([
+        ...(discoveredNodes.includes(preferredNode) ? [preferredNode] : []),
+        ...discoveredNodes
+      ])
+    ];
+  }
+
+  return normalizeProxmoxNodeList(envSettings.proxmox_node);
+};
+
+const fetchProxmoxVmResources = async envSettings => {
+  const apiUrl = new URL(
+    'cluster/resources?type=vm',
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  const payload = await requestJson({
+    url: apiUrl,
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+const resolveVmByDirectConfigLookup = async (envSettings, vmid) => {
+  const failures = [];
+  let discoveredNodes = [];
+  try {
+    discoveredNodes = await fetchProxmoxNodeNames(envSettings);
+  } catch (error) {
+    failures.push({ node: 'nodes', message: formatProxmoxError(error) });
+  }
+  const nodes = [
+    String(envSettings.proxmox_node ?? '').trim(),
+    ...discoveredNodes
+  ].filter(Boolean);
+  const uniqueNodes = [...new Set(nodes)];
+
+  for (const node of uniqueNodes) {
+    try {
+      const config = await fetchVmConfig(envSettings, node, vmid);
+      const name = String(config?.name ?? '').trim();
+      if (!name) {
+        failures.push({ node, message: 'VM config was found but did not include a name' });
+        continue;
+      }
+      return {
+        match: {
+          vmid: Number(vmid),
+          name,
+          node,
+          template: isProxmoxTemplate(config?.template)
+        },
+        failures
+      };
+    } catch (error) {
+      failures.push({ node, message: formatProxmoxError(error) });
+    }
+  }
+
+  return { match: null, failures };
+};
+
+const formatTemplateLookupFailure = ({ vmid, resources, failures }) => {
+  const details = [
+    `Unable to resolve Proxmox template VMID ${vmid} to a template name.`
+  ];
+  if (resources.length === 0) {
+    details.push(
+      'The Proxmox API returned 0 VM resources from cluster/resources?type=vm; the API token may lack VM.Audit on the template VM or VM inventory.'
+    );
+  }
+  if (failures.length) {
+    const directLookupErrors = failures
+      .map(failure => `${failure.node}: ${failure.message}`)
+      .join('; ');
+    details.push(`Direct VMID lookup also failed (${directLookupErrors}).`);
+  }
+  return details.join(' ');
 };
 
 const extractTemplateDiskConfig = config => {
@@ -141,26 +314,33 @@ const extractTemplateFirmwareConfig = config => ({
 });
 
 const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
-  const apiUrl = new URL(
-    'cluster/resources?type=vm',
-    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
-  );
-  const payload = await requestJson({
-    url: apiUrl,
-    method: 'GET',
-    ...proxmoxRequestOptions(envSettings)
-  });
-  const resources = Array.isArray(payload?.data) ? payload.data : [];
-  const matches = blueprintVms.map(vm => {
+  const resources = await fetchProxmoxVmResources(envSettings);
+  const matches = [];
+  for (const vm of blueprintVms) {
     const match = resources.find(resource => Number(resource.vmid) === Number(vm.cloneSource));
     if (!match?.name) {
-      throw new Error(`Unable to resolve Proxmox template VMID ${vm.cloneSource} to a template name`);
+      const { match: directMatch, failures } = await resolveVmByDirectConfigLookup(
+        envSettings,
+        vm.cloneSource
+      );
+      if (!directMatch?.name) {
+        throw new Error(formatTemplateLookupFailure({
+          vmid: vm.cloneSource,
+          resources,
+          failures
+        }));
+      }
+      if (!directMatch.template) {
+        throw new Error(`Proxmox VMID ${vm.cloneSource} is not marked as a template`);
+      }
+      matches.push(directMatch);
+      continue;
     }
-    if (!match.template) {
+    if (!isProxmoxTemplate(match.template)) {
       throw new Error(`Proxmox VMID ${vm.cloneSource} is not marked as a template`);
     }
-    return match;
-  });
+    matches.push(match);
+  }
   const vmidsByTemplateName = matches.reduce((acc, match) => {
     if (!acc.has(match.name)) {
       acc.set(match.name, new Set());
@@ -217,9 +397,50 @@ const updateLifecycleStatus = async (blueprintId, status, details = {}) => {
   );
 };
 
-const invokeVmPowerAction = async (envSettings, vmid, action) => {
+const resolveVmNodesByVmid = async (envSettings, vmids) => {
+  const requestedVmids = [
+    ...new Set(vmids.map(vmid => Number(vmid)).filter(vmid => Number.isInteger(vmid) && vmid > 0))
+  ];
+  const nodeByVmid = new Map();
+  let resourceLookupError = null;
+  let resources = [];
+
+  try {
+    resources = await fetchProxmoxVmResources(envSettings);
+  } catch (error) {
+    resourceLookupError = formatProxmoxError(error);
+  }
+
+  for (const vmid of requestedVmids) {
+    const match = resources.find(resource => Number(resource.vmid) === vmid);
+    const node = String(match?.node ?? '').trim();
+    if (node) {
+      nodeByVmid.set(vmid, node);
+    }
+  }
+
+  for (const vmid of requestedVmids.filter(vmid => !nodeByVmid.has(vmid))) {
+    const { match, failures } = await resolveVmByDirectConfigLookup(envSettings, vmid);
+    if (match?.node) {
+      nodeByVmid.set(vmid, match.node);
+      continue;
+    }
+
+    const details = [
+      resourceLookupError ? `cluster resource lookup failed: ${resourceLookupError}` : null,
+      failures.length ? `direct lookup failed: ${failures.map(failure => `${failure.node}: ${failure.message}`).join('; ')}` : null
+    ].filter(Boolean);
+    throw new Error(
+      `Unable to resolve Proxmox node for VMID ${vmid}${details.length ? ` (${details.join('; ')})` : ''}`
+    );
+  }
+
+  return nodeByVmid;
+};
+
+const invokeVmPowerAction = async (envSettings, node, vmid, action) => {
   const actionUrl = new URL(
-    `nodes/${envSettings.proxmox_node}/qemu/${vmid}/status/${action}`,
+    `nodes/${node}/qemu/${vmid}/status/${action}`,
     `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
   );
   await requestJson({
@@ -377,6 +598,7 @@ export function startTerraformWorker(connection) {
       const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.labInstanceId);
       try {
         console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
+        const terraformParallelism = resolveTerraformParallelism();
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -405,12 +627,15 @@ export function startTerraformWorker(connection) {
           const sanitized = sanitizeSettingsInput(rawSettings);
           const envSettings = readTerraformEnvSettings();
           merged = { ...defaultTerraformSettings, ...sanitized, ...envSettings };
+          assertRequiredTerraformEnvSettings(merged);
+          merged.proxmox_nodes = await resolveProxmoxTargetNodes(merged);
+          merged.proxmox_parallel = terraformParallelism;
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
           if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
-              envSettings,
+              merged,
               job.data.blueprint.vms
             );
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
@@ -449,7 +674,6 @@ export function startTerraformWorker(connection) {
               'windows_admin_password must be set on the blueprint before deploying a Windows template with Cloudbase-Init wait'
             );
           }
-          assertRequiredTerraformEnvSettings(merged);
           delete merged.network_gateway;
           await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2));
           preparedVarFile = sanitizedVarsPath;
@@ -457,9 +681,18 @@ export function startTerraformWorker(connection) {
           if (action === 'start' || action === 'stop') {
             const desiredAction = action === 'start' ? 'start' : 'shutdown';
             const blueprintVms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
-            for (const vm of blueprintVms) {
-              await invokeVmPowerAction(envSettings, vm.vmid, desiredAction);
-            }
+            const vmNodeByVmid = await resolveVmNodesByVmid(
+              merged,
+              blueprintVms.map(vm => vm.vmid)
+            );
+            await runWithConcurrency(blueprintVms, terraformParallelism, async vm => {
+              await invokeVmPowerAction(
+                merged,
+                vmNodeByVmid.get(Number(vm.vmid)),
+                vm.vmid,
+                desiredAction
+              );
+            });
 
             await safeUpdateLifecycleStatus(
               job.data.labInstanceId,
@@ -507,18 +740,18 @@ export function startTerraformWorker(connection) {
         if (action === 'destroy') {
           planOutput = await runCommand(
             'terraform',
-            ['destroy', '-auto-approve', '-input=false', `-var-file=${preparedVarFile}`],
+            ['destroy', '-auto-approve', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
             { cwd: terraformDir, env, signal: abortController.signal }
           );
         } else {
           planOutput = await runCommand(
             'terraform',
-            ['plan', '-out=tfplan', '-input=false', `-var-file=${preparedVarFile}`],
+            ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
             { cwd: terraformDir, env, signal: abortController.signal }
           );
           await runCommand(
             'terraform',
-            ['apply', '-auto-approve', 'tfplan'],
+            ['apply', '-auto-approve', `-parallelism=${terraformParallelism}`, 'tfplan'],
             { cwd: terraformDir, env, signal: abortController.signal }
           );
         }
@@ -539,7 +772,7 @@ export function startTerraformWorker(connection) {
             throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
           }
 
-          for (const target of linuxReadinessTargets) {
+          await runWithConcurrency(linuxReadinessTargets, terraformParallelism, async target => {
             console.log(`Waiting for Linux guest ${target.name} (${target.host}) to finish cloud-init`);
             await waitForLinuxSshAndCloudInit({
               host: target.host,
@@ -547,7 +780,7 @@ export function startTerraformWorker(connection) {
               password: linuxPassword,
               signal: abortController.signal
             });
-          }
+          });
         }
 
         const customizationTargets = Array.isArray(job.data?.blueprint?.vms)

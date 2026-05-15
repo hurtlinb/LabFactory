@@ -37,6 +37,17 @@ variable "proxmox_tls_insecure" {
   default     = true
 }
 
+variable "proxmox_parallel" {
+  description = "Allowed simultaneous Proxmox provider operations."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.proxmox_parallel >= 1
+    error_message = "proxmox_parallel must be at least 1."
+  }
+}
+
 variable "proxmox_node" {
   description = "Proxmox node on which the VM should be created."
   type        = string
@@ -44,6 +55,17 @@ variable "proxmox_node" {
   validation {
     condition     = length(trimspace(var.proxmox_node)) > 0
     error_message = "proxmox_node must not be empty."
+  }
+}
+
+variable "proxmox_nodes" {
+  description = "Optional Proxmox nodes used to distribute VMs. Leave empty to use proxmox_node."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for node in var.proxmox_nodes : length(trimspace(node)) > 0])
+    error_message = "proxmox_nodes must not contain empty node names."
   }
 }
 
