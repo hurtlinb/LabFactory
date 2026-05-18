@@ -19,6 +19,7 @@
     enabled: false
   },
   currentUser: null,
+  activeDeploymentDetailsId: null,
   currentBlueprint: createEmptyBlueprint()
 };
 
@@ -763,14 +764,11 @@ function renderLifecycleLabs() {
         const actions = resolveLifecycleActions(deployment.status);
         const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
         const hasWarning = deployment.status === 'mixed';
-        const totalCount = Number(deployment.totalVmCount ?? 0);
-        const createdCount = Number(deployment.createdCount ?? 0);
-        const customizedCount = Number(deployment.customizedCount ?? 0);
+        const startedCount = Number(deployment.startedCount ?? deployment.createdCount ?? 0);
+        const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
         const statusLabel =
-          deployment.status === 'queued' || deployment.status === 'deploying'
-            ? `${deployment.status} ${createdCount}/${totalCount}`
-            : deployment.status === 'customizing'
-              ? `${deployment.status} ${customizedCount}/${totalCount}`
+          ['queued', 'deploying', 'customizing'].includes(deployment.status)
+            ? `${deployment.status} ${readyCount}/${startedCount}`
               : escapeHtml(deployment.status || 'idle');
         const actionMarkup = actions.busy
           ? '<span class="loading-spinner" aria-hidden="true"></span>'
@@ -909,17 +907,33 @@ function renderDeploymentVmDetails(payload) {
 
 async function openDeploymentDetails(deploymentId) {
   if (!deploymentDetailsDialog || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) return;
+  state.activeDeploymentDetailsId = deploymentId;
   deploymentDetailsTitle.textContent = 'Deployment';
   deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs...</p>';
   deploymentDetailsStatus.hidden = true;
-  deploymentDetailsDialog.showModal();
+  if (!deploymentDetailsDialog.open) {
+    deploymentDetailsDialog.showModal();
+  }
+
+  await refreshOpenDeploymentDetails({ replaceOnError: true });
+}
+
+async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
+  const deploymentId = state.activeDeploymentDetailsId;
+  if (!deploymentId || !deploymentDetailsDialog?.open || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) {
+    return;
+  }
 
   try {
     const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
+    if (state.activeDeploymentDetailsId !== deploymentId || !deploymentDetailsDialog.open) return;
     deploymentDetailsTitle.textContent = `#${payload.deployment.deploymentNumber} ${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
     renderDeploymentVmDetails(payload);
+    deploymentDetailsStatus.hidden = true;
   } catch (error) {
-    deploymentVmDetailsList.innerHTML = '<p class="placeholder">Unable to load deployment VMs.</p>';
+    if (replaceOnError) {
+      deploymentVmDetailsList.innerHTML = '<p class="placeholder">Unable to load deployment VMs.</p>';
+    }
     showMessage(deploymentDetailsStatus, error.message, 'danger', 5000);
   }
 }
@@ -1422,6 +1436,8 @@ async function refreshLifecycleLabs() {
     return {
       ...deployment,
       createdCount: Math.max(Number(previous.createdCount ?? 0), Number(deployment.createdCount ?? 0)),
+      startedCount: Math.max(Number(previous.startedCount ?? 0), Number(deployment.startedCount ?? 0)),
+      readyCount: Math.max(Number(previous.readyCount ?? 0), Number(deployment.readyCount ?? 0)),
       customizedCount: Math.max(Number(previous.customizedCount ?? 0), Number(deployment.customizedCount ?? 0))
     };
   });
@@ -2027,6 +2043,10 @@ closeDeploymentDetailsButton?.addEventListener('click', () => {
   deploymentDetailsDialog?.close();
 });
 
+deploymentDetailsDialog?.addEventListener('close', () => {
+  state.activeDeploymentDetailsId = null;
+});
+
 deploymentDetailsDialog?.addEventListener('click', event => {
   const rect = deploymentDetailsDialog.getBoundingClientRect();
   const isOutside =
@@ -2163,6 +2183,7 @@ async function bootstrap() {
     refreshJobs();
     refreshWorkers();
     refreshLifecycleLabs();
+    refreshOpenDeploymentDetails();
   }, 5000);
   setInterval(() => {
     loadConnectionStatuses();

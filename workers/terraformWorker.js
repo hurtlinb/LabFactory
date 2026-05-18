@@ -1,11 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import http from 'node:http';
 import https from 'node:https';
 import { Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { runCommand } from '../lib/runCommand.js';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { ansibleQueueName } from './ansibleWorker.js';
 import {
   assertRequiredTerraformEnvSettings,
@@ -17,6 +18,9 @@ import {
 const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const LINUX_SSH_WAIT_RETRY_MS = 5000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
+const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
+const WINDOWS_WINRM_WAIT_RETRY_MS = 5000;
+const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 60;
 const DEFAULT_TERRAFORM_PARALLELISM = 10;
 const MAX_TERRAFORM_PARALLELISM = 64;
 
@@ -207,6 +211,31 @@ const fetchProxmoxVmResources = async envSettings => {
     ...proxmoxRequestOptions(envSettings)
   });
   return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+const fetchStorageContent = async (envSettings, node, storage) => {
+  const apiUrl = new URL(
+    `nodes/${node}/storage/${encodeURIComponent(storage)}/content`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  const payload = await requestJson({
+    url: apiUrl,
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+const deleteStorageVolume = async (envSettings, node, storage, volid) => {
+  const apiUrl = new URL(
+    `nodes/${node}/storage/${encodeURIComponent(storage)}/content/${encodeURIComponent(volid)}`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  await requestJson({
+    url: apiUrl,
+    method: 'DELETE',
+    ...proxmoxRequestOptions(envSettings)
+  });
 };
 
 const resolveVmByDirectConfigLookup = async (envSettings, vmid) => {
@@ -438,6 +467,151 @@ const resolveVmNodesByVmid = async (envSettings, vmids) => {
   return nodeByVmid;
 };
 
+const proxmoxCloudInitVolumeName = vmid => `vm-${Number(vmid)}-cloudinit`;
+
+const getStorageVolumeName = volid => {
+  const withoutStorage = String(volid ?? '').split(':').slice(1).join(':');
+  return withoutStorage.split('/').filter(Boolean).pop() ?? '';
+};
+
+const getVmPresenceInProxmox = async (envSettings, vmid, resources = null) => {
+  const numericVmid = Number(vmid);
+  let knownResources = resources;
+  if (!Array.isArray(knownResources)) {
+    try {
+      knownResources = await fetchProxmoxVmResources(envSettings);
+    } catch (error) {
+      console.warn(`Unable to fetch Proxmox VM resources before VMID ${numericVmid} cleanup (${formatProxmoxError(error)})`);
+      knownResources = null;
+    }
+  }
+
+  if (Array.isArray(knownResources) && knownResources.some(resource => Number(resource.vmid) === numericVmid)) {
+    return true;
+  }
+
+  const { match, failures } = await resolveVmByDirectConfigLookup(envSettings, numericVmid);
+  if (match) {
+    return true;
+  }
+
+  if (!Array.isArray(knownResources) && failures.length) {
+    return null;
+  }
+
+  return false;
+};
+
+const getCloudInitCleanupCandidates = ({ envSettings, vmDefinitions, vmids = null }) => {
+  const targetNodes = normalizeProxmoxNodeList(envSettings.proxmox_nodes);
+  if (!targetNodes.length) {
+    return [];
+  }
+
+  const requestedVmids = Array.isArray(vmids) && vmids.length
+    ? new Set(vmids.map(vmid => Number(vmid)).filter(vmid => Number.isInteger(vmid)))
+    : null;
+  const cloudInitStorages = [
+    ...new Set((Array.isArray(vmDefinitions) ? vmDefinitions : [])
+      .map(vm => String(vm.cloudinit_storage ?? '').trim())
+      .filter(Boolean))
+  ];
+
+  return (Array.isArray(vmDefinitions) ? vmDefinitions : [])
+    .filter(vm => !requestedVmids || requestedVmids.has(Number(vm.vmid)))
+    .flatMap(vm =>
+      targetNodes.flatMap(node =>
+        cloudInitStorages.map(storage => ({
+          vmid: Number(vm.vmid),
+          storage,
+          node
+        }))
+      )
+    )
+    .filter(candidate =>
+      Number.isInteger(candidate.vmid) &&
+      candidate.vmid > 0 &&
+      candidate.storage &&
+      candidate.node
+    );
+};
+
+const cleanupOrphanedCloudInitVolumes = async (envSettings, vmDefinitions, { vmids = null, reason = 'preflight' } = {}) => {
+  const candidates = getCloudInitCleanupCandidates({ envSettings, vmDefinitions, vmids });
+  if (!candidates.length) {
+    return;
+  }
+
+  const resources = await fetchProxmoxVmResources(envSettings).catch(error => {
+    console.warn(`Unable to fetch Proxmox VM resources before Cloud-Init cleanup (${formatProxmoxError(error)})`);
+    return [];
+  });
+
+  await runWithConcurrency(candidates, Math.min(resolveTerraformParallelism(), 8), async candidate => {
+    const presence = await getVmPresenceInProxmox(envSettings, candidate.vmid, resources);
+    if (presence !== false) {
+      if (presence === null) {
+        console.warn(`Skipping Cloud-Init cleanup for VMID ${candidate.vmid}: unable to prove that the VM is absent`);
+      }
+      return;
+    }
+
+    let content;
+    try {
+      content = await fetchStorageContent(envSettings, candidate.node, candidate.storage);
+    } catch (error) {
+      console.warn(
+        `Unable to inspect storage ${candidate.storage} on ${candidate.node} for VMID ${candidate.vmid} Cloud-Init cleanup; trying direct volume delete (${formatProxmoxError(error)})`
+      );
+      content = [];
+    }
+
+    const expectedName = proxmoxCloudInitVolumeName(candidate.vmid);
+    const orphan = content.find(volume =>
+      String(volume?.volid ?? '').startsWith(`${candidate.storage}:`) &&
+      getStorageVolumeName(volume?.volid) === expectedName
+    );
+    const volidsToDelete = [
+      orphan?.volid,
+      `${candidate.storage}:${expectedName}`
+    ].filter(Boolean);
+
+    for (const volid of [...new Set(volidsToDelete)]) {
+      console.log(
+        `Deleting orphaned Cloud-Init volume ${volid} for absent VMID ${candidate.vmid} on ${candidate.node}/${candidate.storage} (${reason})`
+      );
+      try {
+        await deleteStorageVolume(envSettings, candidate.node, candidate.storage, volid);
+      } catch (error) {
+        if (error?.statusCode === 404 || error?.statusCode === 500 && /does not exist|no such|not found|unable to parse/i.test(formatProxmoxError(error))) {
+          continue;
+        }
+        throw error;
+      }
+    }
+  });
+};
+
+const stripAnsi = value => String(value ?? '').replace(/\u001b\[[0-9;]*m/g, '');
+
+const extractCloudInitConflictVmids = error => {
+  const output = stripAnsi(`${error?.stdout ?? ''}\n${error?.stderr ?? ''}\n${error?.message ?? ''}`);
+  if (!/vm-\d+-cloudinit[\s\S]*already exists/i.test(output)) {
+    return [];
+  }
+
+  const vmids = [];
+  const pattern = /vm-(\d+)-cloudinit/gi;
+  let match;
+  while ((match = pattern.exec(output))) {
+    const vmid = Number(match[1]);
+    if (Number.isInteger(vmid) && !vmids.includes(vmid)) {
+      vmids.push(vmid);
+    }
+  }
+  return vmids;
+};
+
 const invokeVmPowerAction = async (envSettings, node, vmid, action) => {
   const actionUrl = new URL(
     `nodes/${node}/qemu/${vmid}/status/${action}`,
@@ -461,6 +635,8 @@ const safeUpdateLifecycleStatus = async (blueprintId, status, details = {}) => {
 const workspaceNameFor = blueprintId => `blueprint-${String(blueprintId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 const isLinuxOsType = osType => !isWindowsOsType(osType);
+const getWindowsAdminUsername = language =>
+  (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
 
 const parseVlanMaskBits = mask => {
   const match = /^\/(\d{1,2})$/.exec(String(mask || '').trim());
@@ -523,7 +699,50 @@ const buildCloudInitIpConfig = ({ subnetBase, mask, ipLastOctet, gatewayIp }) =>
   return `ip=${address}${mask},gw=${gateway}`;
 };
 
+const buildStaticVmIpAddress = vm => {
+  if (vm.ipLastOctet == null || !vm.subnetBase) {
+    return null;
+  }
+
+  const subnetParts = String(vm.subnetBase).split('.').slice(0, 3);
+  if (subnetParts.length !== 3 || subnetParts.some(part => !/^\d{1,3}$/.test(part))) {
+    return null;
+  }
+
+  return `${subnetParts.join('.')}.${Number(vm.ipLastOctet)}`;
+};
+
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-Init
+  hosts: windows_readiness_targets
+  gather_facts: false
+  tasks:
+    - name: Check Cloudbase-Init done flag
+      ansible.windows.win_powershell:
+        script: |
+          if (-not (Test-Path -LiteralPath 'C:\\ProgramData\\cloudbase-init\\done.flag')) {
+            Write-Error 'Cloudbase-Init has not finished'
+            exit 1
+          }
+`;
+
+const buildWindowsReadinessInventory = ({ host, user, password }) => `all:
+  children:
+    windows_readiness_targets:
+      hosts:
+        target:
+          ansible_host: ${JSON.stringify(host)}
+          ansible_user: ${JSON.stringify(user)}
+          ansible_password: ${JSON.stringify(password)}
+          ansible_connection: winrm
+          ansible_port: 5986
+          ansible_winrm_scheme: https
+          ansible_winrm_transport: basic
+          ansible_winrm_server_cert_validation: ignore
+          ansible_winrm_operation_timeout_sec: 30
+          ansible_winrm_read_timeout_sec: 45
+`;
 
 const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => {
   const startedAt = Date.now();
@@ -570,6 +789,80 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
   );
 };
 
+const waitForWindowsWinrmAndCloudbaseInit = async ({ host, user, password, signal }) => {
+  const startedAt = Date.now();
+  const tempToken = `${process.pid}-${Date.now()}-${String(host).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+  const inventoryPath = path.join(tmpdir(), `labfactory-windows-readiness-${tempToken}.yml`);
+  const playbookPath = path.join(tmpdir(), `labfactory-windows-readiness-${tempToken}.playbook.yml`);
+
+  await writeFile(inventoryPath, buildWindowsReadinessInventory({ host, user, password }), 'utf8');
+  await writeFile(playbookPath, windowsCloudbaseReadinessPlaybook, 'utf8');
+
+  try {
+    while (Date.now() - startedAt < WINDOWS_WINRM_WAIT_TIMEOUT_MS) {
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error ? signal.reason : new Error('Windows readiness wait aborted');
+      }
+
+      try {
+        await runCommand(
+          'timeout',
+          [
+            `${WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS}s`,
+            'ansible-playbook',
+            '--inventory',
+            inventoryPath,
+            playbookPath
+          ],
+          {
+            cwd: terraformDir,
+            env: { ...process.env },
+            signal
+          }
+        );
+        return;
+      } catch {
+        await sleep(WINDOWS_WINRM_WAIT_RETRY_MS);
+      }
+    }
+
+    throw new Error(`Timed out waiting for Windows guest ${host} to accept WinRM and finish Cloudbase-Init`);
+  } finally {
+    await Promise.all([
+      rm(inventoryPath, { force: true }),
+      rm(playbookPath, { force: true })
+    ]);
+  }
+};
+
+const createDeploymentReadinessReporter = job => {
+  const totalVmCount = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms.length : 0;
+  const readyVmids = new Set();
+
+  const publish = async () => {
+    if (!job.data?.deploymentId) return;
+    await job.updateProgress({
+      type: 'guest-readiness',
+      deploymentId: job.data.deploymentId,
+      runId: job.data.runId,
+      totalVmCount,
+      readyCount: readyVmids.size,
+      readyVmids: Array.from(readyVmids).sort((a, b) => a - b)
+    });
+  };
+
+  return {
+    publish,
+    markReady: async vmid => {
+      const numericVmid = Number(vmid);
+      if (Number.isInteger(numericVmid)) {
+        readyVmids.add(numericVmid);
+      }
+      await publish();
+    }
+  };
+};
+
 export const terraformQueueName = 'terraform-workflows';
 
 export function startTerraformWorker(connection) {
@@ -581,6 +874,7 @@ export function startTerraformWorker(connection) {
     async job => {
       const abortController = new AbortController();
       activeAbortControllers.set(String(job.id), abortController);
+      const readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
         ...process.env,
         TF_IN_AUTOMATION: '1',
@@ -744,25 +1038,94 @@ export function startTerraformWorker(connection) {
             { cwd: terraformDir, env, signal: abortController.signal }
           );
         } else {
-          planOutput = await runCommand(
-            'terraform',
-            ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
-            { cwd: terraformDir, env, signal: abortController.signal }
+          if (action === 'deploy') {
+            await cleanupOrphanedCloudInitVolumes(merged, merged.vm_definitions);
+          }
+
+          const planAndApply = async () => {
+            const output = await runCommand(
+              'terraform',
+              ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
+              { cwd: terraformDir, env, signal: abortController.signal }
+            );
+            await runCommand(
+              'terraform',
+              ['apply', '-auto-approve', `-parallelism=${terraformParallelism}`, 'tfplan'],
+              { cwd: terraformDir, env, signal: abortController.signal }
+            );
+            return output;
+          };
+
+          try {
+            planOutput = await planAndApply();
+          } catch (error) {
+            const conflictVmids = action === 'deploy' ? extractCloudInitConflictVmids(error) : [];
+            if (!conflictVmids.length) {
+              throw error;
+            }
+
+            console.warn(
+              `Terraform apply hit orphaned Cloud-Init RBD volumes for VMIDs ${conflictVmids.join(', ')}; cleaning and retrying once`
+            );
+            await cleanupOrphanedCloudInitVolumes(merged, merged.vm_definitions, {
+              vmids: conflictVmids,
+              reason: 'terraform-apply-conflict'
+            });
+            planOutput = await planAndApply();
+          }
+        }
+
+        if (action === 'deploy') {
+          await readinessReporter.publish();
+        }
+
+        const windowsReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
+          ? job.data.blueprint.vms
+              .filter(vm => isWindowsOsType(vm.osType))
+              .map(vm => ({
+                vmid: vm.vmid,
+                name: vm.name,
+                host: buildStaticVmIpAddress(vm),
+                user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language)
+              }))
+          : [];
+
+        const windowsReadinessTargetsWithoutHost = windowsReadinessTargets.filter(target => !target.host);
+        if (action === 'deploy' && windowsReadinessTargetsWithoutHost.length > 0) {
+          throw new Error(
+            `Unable to determine a static IPv4 address for Windows readiness checks: ${windowsReadinessTargetsWithoutHost
+              .map(target => target.name)
+              .join(', ')}`
           );
-          await runCommand(
-            'terraform',
-            ['apply', '-auto-approve', `-parallelism=${terraformParallelism}`, 'tfplan'],
-            { cwd: terraformDir, env, signal: abortController.signal }
-          );
+        }
+
+        if (action === 'deploy' && windowsReadinessTargets.length > 0) {
+          const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+          if (!windowsPassword) {
+            throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
+          }
+
+          await runWithConcurrency(windowsReadinessTargets, terraformParallelism, async target => {
+            console.log(`Waiting for Windows guest ${target.name} (${target.host}) to finish Cloudbase-Init over WinRM`);
+            await waitForWindowsWinrmAndCloudbaseInit({
+              host: target.host,
+              user: target.user,
+              password: windowsPassword,
+              signal: abortController.signal
+            });
+            await readinessReporter.markReady(target.vmid);
+          });
         }
 
         const linuxReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
           ? job.data.blueprint.vms
               .filter(vm => isLinuxOsType(vm.osType) && vm.ipLastOctet != null && vm.subnetBase)
               .map(vm => ({
+                vmid: vm.vmid,
                 name: vm.name,
-                host: `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
+                host: buildStaticVmIpAddress(vm)
               }))
+              .filter(target => target.host)
           : [];
 
         if (action === 'deploy' && linuxReadinessTargets.length > 0) {
@@ -780,6 +1143,7 @@ export function startTerraformWorker(connection) {
               password: linuxPassword,
               signal: abortController.signal
             });
+            await readinessReporter.markReady(target.vmid);
           });
         }
 

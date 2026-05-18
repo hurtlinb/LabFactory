@@ -696,16 +696,21 @@ const mapDeployment = row => ({
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
 
-const deriveDeploymentProgress = ({ deployment, vmPlan, resourceByVmid }) => {
-  const totalVmCount = vmPlan.vms.length;
-  const createdCount = vmPlan.vms.filter(vm => resourceByVmid.has(Number(vm.vmid))).length;
+const deriveDeploymentProgress = async ({ deployment, vmPlan, resourceByVmid, readyVmids = new Set() }) => {
+  const vmStates = await buildDeploymentVmRuntimeStates({ deployment, vmPlan, resourceByVmid, readyVmids });
+  const totalVmCount = vmStates.length;
+  const createdCount = vmStates.filter(({ resource }) => Boolean(resource)).length;
+  const startedCount = vmStates.filter(({ resource }) => resource?.status === 'running').length;
+  const readyCount = vmStates.filter(({ guestReady }) => guestReady).length;
   const customizedCount = ['deployed', 'running', 'stopped', 'mixed'].includes(deployment.status)
     ? totalVmCount
-    : 0;
+    : readyCount;
 
   return {
     totalVmCount,
     createdCount,
+    startedCount,
+    readyCount,
     customizedCount
   };
 };
@@ -1007,7 +1012,7 @@ const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request
   throw lastError;
 };
 
-const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource }) => {
+const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestReady = false }) => {
   if (!resource) {
     if (['queued', 'deploying'].includes(deploymentStatus)) return 'cloning';
     if (deploymentStatus === 'destroying') return 'destroying';
@@ -1020,11 +1025,13 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource }) => {
   }
 
   if (resource.status === 'running') {
-    if (['queued', 'deploying'].includes(deploymentStatus) && isWindowsOsType(vm.osType)) {
-      return 'waiting for cloudbase-init';
+    if (shouldUseGuestReadinessProgress(deploymentStatus)) {
+      return guestReady
+        ? 'ready'
+        : isWindowsOsType(vm.osType) ? 'waiting for cloudbase-init' : 'waiting for cloud-init';
     }
     if (deploymentStatus === 'customizing') {
-      return 'customizing';
+      return guestReady ? 'ready' : 'customizing';
     }
     if (deploymentStatus === 'starting') {
       return 'starting';
@@ -1046,6 +1053,40 @@ const buildDeploymentVmIpAddress = vm => {
   }
 
   return `${parts[0]}.${parts[1]}.${parts[2]}.${Number(vm.ipLastOctet)}`;
+};
+
+const shouldUseGuestReadinessProgress = deploymentStatus =>
+  ['queued', 'deploying'].includes(deploymentStatus);
+
+const fetchDeploymentReadyVmids = async deployment => {
+  if (!shouldUseGuestReadinessProgress(deployment.status) || !deployment.lastJobId) {
+    return new Set();
+  }
+
+  try {
+    const job = await queues.terraform.getJob(String(deployment.lastJobId));
+    const progress = job?.progress;
+    const readyVmids = Array.isArray(progress?.readyVmids) ? progress.readyVmids : [];
+    return new Set(readyVmids.map(Number).filter(vmid => Number.isInteger(vmid)));
+  } catch (error) {
+    console.warn(`Unable to fetch Terraform readiness progress for deployment ${deployment.id}`, error);
+    return new Set();
+  }
+};
+
+const buildDeploymentVmRuntimeStates = async ({ deployment, vmPlan, resourceByVmid, readyVmids = new Set() }) => {
+  return vmPlan.vms.map(vm => {
+    const resource = resourceByVmid.get(Number(vm.vmid)) ?? null;
+    const isKnownReady = readyVmids.has(Number(vm.vmid));
+    const isFinishedDeploymentReady =
+      ['deployed', 'running', 'mixed', 'customizing'].includes(deployment.status) &&
+      resource?.status === 'running';
+    return {
+      vm,
+      resource,
+      guestReady: isKnownReady || isFinishedDeploymentReady
+    };
+  });
 };
 
 const fetchDeploymentRows = async () => {
@@ -1478,9 +1519,10 @@ app.get(
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+      const readyVmids = await fetchDeploymentReadyVmids(deployment);
       deployments.push({
         ...deployment,
-        ...deriveDeploymentProgress({ deployment, vmPlan, resourceByVmid })
+        ...(await deriveDeploymentProgress({ deployment, vmPlan, resourceByVmid, readyVmids }))
       });
     }
 
@@ -1594,6 +1636,9 @@ app.get(
       console.error(`Unable to fetch Proxmox VM resources for deployment ${deployment.id}`, error);
     }
 
+    const readyVmids = await fetchDeploymentReadyVmids(deployment);
+    const vmStates = await buildDeploymentVmRuntimeStates({ deployment, vmPlan, resourceByVmid, readyVmids });
+
     res.json({
       deployment: {
         id: deployment.id,
@@ -1603,8 +1648,7 @@ app.get(
         blueprintName: deployment.blueprint.name,
         classroomName: deployment.classroom.name
       },
-      vms: vmPlan.vms.map(vm => {
-        const resource = resourceByVmid.get(Number(vm.vmid)) ?? null;
+      vms: vmStates.map(({ vm, resource, guestReady }) => {
         return {
           id: vm.id,
           name: vm.name,
@@ -1615,8 +1659,10 @@ app.get(
           state: inferDeploymentVmStatus({
             deploymentStatus: deployment.status,
             vm,
-            resource
+            resource,
+            guestReady
           }),
+          guestReady,
           proxmoxStatus: resource?.status ?? null,
           node: resource?.node ?? null
         };
