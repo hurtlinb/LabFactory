@@ -1161,6 +1161,33 @@ select:focus {
   max-height: min(60vh, 640px);
 }
 
+.workstation-detail-list {
+  display: grid;
+  gap: 16px;
+}
+
+.workstation-detail-card {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.52);
+}
+
+.workstation-detail-head {
+  align-items: center;
+}
+
+.workstation-detail-summary {
+  display: grid;
+  gap: 2px;
+}
+
+.workstation-detail-summary .muted {
+  margin: 0;
+}
+
 .vm-state-table td:first-child,
 .vm-state-table th:first-child {
   width: 28px;
@@ -1195,6 +1222,7 @@ select:focus {
 
 .vm-state-dot[data-state='waiting for cloudbase-init'],
 .vm-state-dot[data-state='waiting for cloud-init'],
+.vm-state-dot[data-state='redeploy queued'],
 .vm-state-dot[data-state='cloning'],
 .vm-state-dot[data-state='customizing'],
 .vm-state-dot[data-state='starting'],

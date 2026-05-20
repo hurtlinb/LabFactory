@@ -856,53 +856,133 @@ function renderLifecycleLabs() {
   });
 }
 
+function isDeploymentBusy(status) {
+  return ['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying'].includes(status);
+}
+
+function getDeploymentWorkstationNumber(vm) {
+  const rawValue = String(vm?.workstationNumber ?? vm?.id ?? '').trim();
+  const match = rawValue.match(/^(\d+)/);
+  return match?.[1] ?? 'n/a';
+}
+
+function renderDeploymentVmRows(vms) {
+  return vms
+    .map(
+      vm => `
+        <tr>
+          <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
+          <td class="vm-state-name-cell">
+            <strong>${escapeHtml(vm.name)}</strong>
+            <span class="muted">${vm.node ? escapeHtml(vm.node) : ''}</span>
+          </td>
+          <td>${vm.vmid}</td>
+          <td>${escapeHtml(getOsLabel(vm.osType))}</td>
+          <td>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</td>
+          <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
+          <td>${escapeHtml(vm.state || 'unknown')}</td>
+          <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
+        </tr>
+      `
+    )
+    .join('');
+}
+
+async function redeployDeploymentWorkstation(deploymentId, workstationNumber, button) {
+  if (!deploymentDetailsStatus) return;
+  button.disabled = true;
+  try {
+    await fetchJson(`/api/lifecycle/deployments/${deploymentId}/workstations/${workstationNumber}/redeploy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    await Promise.all([refreshLifecycleLabs(), refreshOpenDeploymentDetails()]);
+    showMessage(deploymentDetailsStatus, `Workplace ${workstationNumber} redeploy queued.`, 'success', 5000);
+  } catch (error) {
+    showMessage(deploymentDetailsStatus, error.message, 'danger', 5000);
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+    }
+  }
+}
+
 function renderDeploymentVmDetails(payload) {
   if (!deploymentVmDetailsList) return;
+  const deployment = payload?.deployment ?? {};
   const vms = Array.isArray(payload?.vms) ? payload.vms : [];
   if (!vms.length) {
     deploymentVmDetailsList.innerHTML = '<p class="placeholder">No VMs found for this deployment.</p>';
     return;
   }
 
+  const workstationGroups = new Map();
+  for (const vm of vms) {
+    const workstationNumber = getDeploymentWorkstationNumber(vm);
+    if (!workstationGroups.has(workstationNumber)) {
+      workstationGroups.set(workstationNumber, []);
+    }
+    workstationGroups.get(workstationNumber).push(vm);
+  }
+  const orderedWorkstations = [...workstationGroups.keys()].sort((left, right) => Number(left) - Number(right));
+  const activeWorkstationNumbers = new Set(Array.isArray(deployment.activeWorkstationNumbers) ? deployment.activeWorkstationNumbers : []);
+  const canRedeployWorkstations = Boolean(deployment.canRedeployWorkstations) && !isDeploymentBusy(deployment.status);
+
   deploymentVmDetailsList.innerHTML = `
-    <div class="table-wrap vm-state-table-wrap">
-      <table class="queue-table vm-state-table">
-        <thead>
-          <tr>
-            <th></th>
-            <th>VM</th>
-            <th>VMID</th>
-            <th>OS</th>
-            <th>VLAN</th>
-            <th>IP</th>
-            <th>State</th>
-            <th>Proxmox</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${vms
-            .map(
-              vm => `
-                <tr>
-                  <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
-                  <td class="vm-state-name-cell">
-                    <strong>${escapeHtml(vm.name)}</strong>
-                    <span class="muted">${vm.node ? escapeHtml(vm.node) : ''}</span>
-                  </td>
-                  <td>${vm.vmid}</td>
-                  <td>${escapeHtml(getOsLabel(vm.osType))}</td>
-                  <td>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</td>
-                  <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
-                  <td>${escapeHtml(vm.state || 'unknown')}</td>
-                  <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
-                </tr>
-              `
-            )
-            .join('')}
-        </tbody>
-      </table>
+    <div class="workstation-detail-list">
+      ${orderedWorkstations
+        .map(workstationNumber => {
+          const workstationVms = workstationGroups.get(workstationNumber) ?? [];
+          const isActiveWorkstation = activeWorkstationNumbers.has(workstationNumber);
+          const actionMarkup = canRedeployWorkstations
+            ? `<button class="btn btn-secondary workstation-redeploy-button" type="button" data-deployment-id="${escapeHtmlAttr(deployment.id || '')}" data-workstation-number="${escapeHtmlAttr(workstationNumber)}">Redeploy VMs</button>`
+            : isActiveWorkstation
+              ? '<button class="btn btn-secondary" type="button" disabled>Redeploying...</button>'
+              : '';
+
+          return `
+            <section class="workstation-detail-card">
+              <div class="panel-head workstation-detail-head">
+                <div class="workstation-detail-summary">
+                  <strong>Workplace ${escapeHtml(workstationNumber)}</strong>
+                  <p class="muted">${workstationVms.length} VM</p>
+                </div>
+                ${actionMarkup}
+              </div>
+              <div class="table-wrap vm-state-table-wrap">
+                <table class="queue-table vm-state-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>VM</th>
+                      <th>VMID</th>
+                      <th>OS</th>
+                      <th>VLAN</th>
+                      <th>IP</th>
+                      <th>State</th>
+                      <th>Proxmox</th>
+                    </tr>
+                  </thead>
+                  <tbody>${renderDeploymentVmRows(workstationVms)}</tbody>
+                </table>
+              </div>
+            </section>
+          `;
+        })
+        .join('')}
     </div>
   `;
+
+  deploymentVmDetailsList.querySelectorAll('.workstation-redeploy-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      await redeployDeploymentWorkstation(
+        button.dataset.deploymentId,
+        button.dataset.workstationNumber,
+        button
+      );
+    });
+  });
 }
 
 async function openDeploymentDetails(deploymentId) {
@@ -927,7 +1007,7 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
   try {
     const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
     if (state.activeDeploymentDetailsId !== deploymentId || !deploymentDetailsDialog.open) return;
-    deploymentDetailsTitle.textContent = `#${payload.deployment.deploymentNumber} ${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
+    deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
     renderDeploymentVmDetails(payload);
     deploymentDetailsStatus.hidden = true;
   } catch (error) {
@@ -939,7 +1019,7 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
 }
 
 function resolveLifecycleActions(status) {
-  if (['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying'].includes(status)) {
+  if (isDeploymentBusy(status)) {
     return { busy: true, items: [] };
   }
   if (status === 'destroyed') {

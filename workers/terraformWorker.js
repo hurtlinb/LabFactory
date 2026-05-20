@@ -21,6 +21,13 @@ const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
 const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const WINDOWS_WINRM_WAIT_RETRY_MS = 5000;
 const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 60;
+const VM_POWER_STATE_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
+const VM_POWER_STATE_WAIT_RETRY_MS = 5000;
+const STOP_STATE_CONFIRMATION_TIMEOUT_MS = 60 * 1000;
+const STOP_STATE_RECHECK_DELAY_MS = 30 * 1000;
+const STOP_STATE_MAX_RETRIES = 40;
+const PROXMOX_TASK_WAIT_TIMEOUT_MS = 10 * 60 * 1000;
+const PROXMOX_TASK_WAIT_RETRY_MS = 2000;
 const DEFAULT_TERRAFORM_PARALLELISM = 10;
 const MAX_TERRAFORM_PARALLELISM = 64;
 
@@ -52,6 +59,9 @@ const formatProxmoxError = error =>
   String(error?.proxmoxMessage ?? error?.message ?? error)
     .replace(/\s+/g, ' ')
     .trim();
+
+const isProxmoxVmMissingMessage = message =>
+  /does not exist|no such file or directory|not found|non[ -]?existent/i.test(String(message ?? '').trim());
 
 const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true }) =>
   new Promise((resolve, reject) => {
@@ -136,6 +146,16 @@ const mergeVmTags = (...tagValues) => {
   return tags.length ? tags.join(';') : null;
 };
 
+const normalizeVmids = value =>
+  [...new Set(
+    (Array.isArray(value) ? value : [])
+      .map(vmid => Number(vmid))
+      .filter(vmid => Number.isInteger(vmid))
+  )].sort((left, right) => left - right);
+
+const buildTerraformReplaceArgs = vmids =>
+  normalizeVmids(vmids).map(vmid => `-replace=proxmox_vm_qemu.lab_vm["${vmid}"]`);
+
 const fetchVmConfig = async (envSettings, node, vmid) => {
   const apiUrl = new URL(
     `nodes/${node}/qemu/${vmid}/config`,
@@ -213,6 +233,19 @@ const fetchProxmoxVmResources = async envSettings => {
   return Array.isArray(payload?.data) ? payload.data : [];
 };
 
+const fetchVmCurrentStatus = async (envSettings, node, vmid) => {
+  const apiUrl = new URL(
+    `nodes/${node}/qemu/${vmid}/status/current`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  const payload = await requestJson({
+    url: apiUrl,
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return payload?.data ?? {};
+};
+
 const fetchStorageContent = async (envSettings, node, storage) => {
   const apiUrl = new URL(
     `nodes/${node}/storage/${encodeURIComponent(storage)}/content`,
@@ -226,16 +259,53 @@ const fetchStorageContent = async (envSettings, node, storage) => {
   return Array.isArray(payload?.data) ? payload.data : [];
 };
 
+const fetchProxmoxTaskStatus = async (envSettings, node, upid) => {
+  const apiUrl = new URL(
+    `nodes/${node}/tasks/${encodeURIComponent(upid)}/status`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  const payload = await requestJson({
+    url: apiUrl,
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return payload?.data ?? {};
+};
+
+const waitForProxmoxTask = async (envSettings, node, upid, { timeoutMs = PROXMOX_TASK_WAIT_TIMEOUT_MS } = {}) => {
+  const normalizedUpid = String(upid ?? '').trim();
+  if (!normalizedUpid) {
+    return;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const status = await fetchProxmoxTaskStatus(envSettings, node, normalizedUpid);
+    const state = String(status?.status ?? '').trim().toLowerCase();
+    if (state === 'stopped') {
+      const exitStatus = String(status?.exitstatus ?? '').trim();
+      if (!exitStatus || exitStatus.toUpperCase() === 'OK') {
+        return;
+      }
+      throw new Error(`Proxmox task ${normalizedUpid} failed with exit status ${exitStatus}`);
+    }
+    await sleep(PROXMOX_TASK_WAIT_RETRY_MS);
+  }
+
+  throw new Error(`Timed out waiting for Proxmox task ${normalizedUpid} on node ${node}`);
+};
+
 const deleteStorageVolume = async (envSettings, node, storage, volid) => {
   const apiUrl = new URL(
     `nodes/${node}/storage/${encodeURIComponent(storage)}/content/${encodeURIComponent(volid)}`,
     `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
   );
-  await requestJson({
+  const payload = await requestJson({
     url: apiUrl,
     method: 'DELETE',
     ...proxmoxRequestOptions(envSettings)
   });
+  return payload?.data ?? null;
 };
 
 const resolveVmByDirectConfigLookup = async (envSettings, vmid) => {
@@ -426,7 +496,24 @@ const updateLifecycleStatus = async (blueprintId, status, details = {}) => {
   );
 };
 
-const resolveVmNodesByVmid = async (envSettings, vmids) => {
+const fetchDeploymentLifecycleState = async deploymentId => {
+  if (!deploymentId) return null;
+  const result = await dbPool.query(
+    `SELECT id, status, last_job_id, last_run_id
+       FROM lab_deployments
+      WHERE id = $1`,
+    [deploymentId]
+  );
+  if (!result.rowCount) return null;
+  return {
+    id: result.rows[0].id,
+    status: result.rows[0].status,
+    lastJobId: result.rows[0].last_job_id ?? null,
+    lastRunId: result.rows[0].last_run_id ?? null
+  };
+};
+
+const resolveVmNodesByVmid = async (envSettings, vmids, { allowMissing = false } = {}) => {
   const requestedVmids = [
     ...new Set(vmids.map(vmid => Number(vmid)).filter(vmid => Number.isInteger(vmid) && vmid > 0))
   ];
@@ -455,6 +542,14 @@ const resolveVmNodesByVmid = async (envSettings, vmids) => {
       continue;
     }
 
+    const missingEverywhere =
+      failures.length > 0 &&
+      failures.every(failure => isProxmoxVmMissingMessage(failure.message));
+    if (allowMissing && missingEverywhere) {
+      console.warn(`Skipping power action for missing VMID ${vmid}: VM not found on any Proxmox node`);
+      continue;
+    }
+
     const details = [
       resourceLookupError ? `cluster resource lookup failed: ${resourceLookupError}` : null,
       failures.length ? `direct lookup failed: ${failures.map(failure => `${failure.node}: ${failure.message}`).join('; ')}` : null
@@ -467,91 +562,169 @@ const resolveVmNodesByVmid = async (envSettings, vmids) => {
   return nodeByVmid;
 };
 
-const proxmoxCloudInitVolumeName = vmid => `vm-${Number(vmid)}-cloudinit`;
+const waitForVmPowerState = async ({ envSettings, vmids, desiredState, signal, timeoutMs = VM_POWER_STATE_WAIT_TIMEOUT_MS, returnOnTimeout = false }) => {
+  const targetVmids = [...new Set(
+    (Array.isArray(vmids) ? vmids : [])
+      .map(vmid => Number(vmid))
+      .filter(vmid => Number.isInteger(vmid) && vmid > 0)
+  )];
+  if (!targetVmids.length) {
+    return true;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error('VM power state wait aborted');
+    }
+
+    let resources = [];
+    try {
+      resources = await fetchProxmoxVmResources(envSettings);
+    } catch {
+      resources = [];
+    }
+
+    let allMatch = true;
+    if (desiredState === 'stopped') {
+      const resourceByVmid = new Map(
+        resources.map(resource => [Number(resource.vmid), resource])
+      );
+      const candidateVmids = targetVmids.filter(vmid => {
+        const state = String(resourceByVmid.get(vmid)?.status ?? '').trim().toLowerCase();
+        return state && state !== 'stopped';
+      });
+      const nodeByVmid = await resolveVmNodesByVmid(envSettings, candidateVmids, { allowMissing: true });
+
+      const currentStates = await Promise.all(
+        candidateVmids.map(async vmid => {
+          const node = nodeByVmid.get(vmid);
+          if (!node) {
+            const resourceState = String(resourceByVmid.get(vmid)?.status ?? '').trim().toLowerCase();
+            if (resourceState && resourceState !== 'stopped') {
+              console.log(`Ignoring stale Proxmox resource state for missing VMID ${vmid}: ${resourceState}`);
+            }
+            return { vmid, state: 'missing' };
+          }
+          try {
+            const current = await fetchVmCurrentStatus(envSettings, node, vmid);
+            return {
+              vmid,
+              state: String(current?.status ?? current?.qmpstatus ?? '').trim().toLowerCase() || 'unknown'
+            };
+          } catch (error) {
+            const message = formatProxmoxError(error);
+            if (isProxmoxVmMissingMessage(message)) {
+              return { vmid, state: 'missing' };
+            }
+            return { vmid, state: `error:${message}` };
+          }
+        })
+      );
+
+      const blockingStates = currentStates.filter(entry =>
+        !['stopped', 'missing'].includes(entry.state)
+      );
+      allMatch = blockingStates.length === 0;
+      if (!allMatch) {
+        console.log(
+          `Still waiting for VM stop states: ${blockingStates.map(entry => `${entry.vmid}=${entry.state}`).join(', ')}`
+        );
+      }
+    } else {
+      allMatch = targetVmids.every(vmid => {
+        const state = resources.find(resource => Number(resource.vmid) === vmid)?.status ?? null;
+        return state === desiredState;
+      });
+    }
+
+    if (allMatch) {
+      return true;
+    }
+
+    await sleep(VM_POWER_STATE_WAIT_RETRY_MS);
+  }
+
+  if (returnOnTimeout) {
+    return false;
+  }
+
+  throw new Error(`Timed out waiting for VM power state "${desiredState}" for VMIDs ${targetVmids.join(', ')}`);
+};
 
 const getStorageVolumeName = volid => {
   const withoutStorage = String(volid ?? '').split(':').slice(1).join(':');
   return withoutStorage.split('/').filter(Boolean).pop() ?? '';
 };
 
-const getVmPresenceInProxmox = async (envSettings, vmid, resources = null) => {
+const isVmAbsentFromProxmox = async (envSettings, vmid, resources = null) => {
   const numericVmid = Number(vmid);
-  let knownResources = resources;
-  if (!Array.isArray(knownResources)) {
-    try {
-      knownResources = await fetchProxmoxVmResources(envSettings);
-    } catch (error) {
-      console.warn(`Unable to fetch Proxmox VM resources before VMID ${numericVmid} cleanup (${formatProxmoxError(error)})`);
-      knownResources = null;
-    }
+  if (!Number.isInteger(numericVmid) || numericVmid <= 0) {
+    return false;
   }
 
-  if (Array.isArray(knownResources) && knownResources.some(resource => Number(resource.vmid) === numericVmid)) {
-    return true;
+  if (Array.isArray(resources) && resources.some(resource => Number(resource.vmid) === numericVmid)) {
+    return false;
   }
 
   const { match, failures } = await resolveVmByDirectConfigLookup(envSettings, numericVmid);
   if (match) {
-    return true;
+    return false;
   }
 
-  if (!Array.isArray(knownResources) && failures.length) {
+  if (!Array.isArray(resources) && failures.length > 0) {
     return null;
   }
 
-  return false;
+  return true;
 };
 
-const getCloudInitCleanupCandidates = ({ envSettings, vmDefinitions, vmids = null }) => {
-  const targetNodes = normalizeProxmoxNodeList(envSettings.proxmox_nodes);
+const buildDestroyedVmVolumeCleanupCandidates = ({ envSettings, vmDefinitions }) => {
+  const targetNodes = normalizeProxmoxNodeList(envSettings.proxmox_nodes).length
+    ? normalizeProxmoxNodeList(envSettings.proxmox_nodes)
+    : normalizeProxmoxNodeList(envSettings.proxmox_node);
   if (!targetNodes.length) {
     return [];
   }
 
-  const requestedVmids = Array.isArray(vmids) && vmids.length
-    ? new Set(vmids.map(vmid => Number(vmid)).filter(vmid => Number.isInteger(vmid)))
-    : null;
-  const cloudInitStorages = [
-    ...new Set((Array.isArray(vmDefinitions) ? vmDefinitions : [])
-      .map(vm => String(vm.cloudinit_storage ?? '').trim())
-      .filter(Boolean))
-  ];
-
   return (Array.isArray(vmDefinitions) ? vmDefinitions : [])
-    .filter(vm => !requestedVmids || requestedVmids.has(Number(vm.vmid)))
-    .flatMap(vm =>
-      targetNodes.flatMap(node =>
-        cloudInitStorages.map(storage => ({
-          vmid: Number(vm.vmid),
-          storage,
-          node
-        }))
-      )
-    )
+    .flatMap((vm, index) => {
+      const storages = [
+        String(vm.disk_storage ?? '').trim(),
+        String(vm.cloudinit_storage ?? '').trim()
+      ].filter(Boolean);
+      const uniqueStorages = [...new Set(storages)];
+      const node = targetNodes[index % targetNodes.length];
+      return uniqueStorages.map(storage => ({
+        vmid: Number(vm.vmid),
+        node,
+        storage
+      }));
+    })
     .filter(candidate =>
       Number.isInteger(candidate.vmid) &&
       candidate.vmid > 0 &&
-      candidate.storage &&
-      candidate.node
+      candidate.node &&
+      candidate.storage
     );
 };
 
-const cleanupOrphanedCloudInitVolumes = async (envSettings, vmDefinitions, { vmids = null, reason = 'preflight' } = {}) => {
-  const candidates = getCloudInitCleanupCandidates({ envSettings, vmDefinitions, vmids });
+const cleanupDestroyedVmVolumes = async (envSettings, vmDefinitions) => {
+  const candidates = buildDestroyedVmVolumeCleanupCandidates({ envSettings, vmDefinitions });
   if (!candidates.length) {
     return;
   }
 
   const resources = await fetchProxmoxVmResources(envSettings).catch(error => {
-    console.warn(`Unable to fetch Proxmox VM resources before Cloud-Init cleanup (${formatProxmoxError(error)})`);
-    return [];
+    console.warn(`Unable to fetch Proxmox VM resources before post-destroy cleanup (${formatProxmoxError(error)})`);
+    return null;
   });
 
   await runWithConcurrency(candidates, Math.min(resolveTerraformParallelism(), 8), async candidate => {
-    const presence = await getVmPresenceInProxmox(envSettings, candidate.vmid, resources);
-    if (presence !== false) {
-      if (presence === null) {
-        console.warn(`Skipping Cloud-Init cleanup for VMID ${candidate.vmid}: unable to prove that the VM is absent`);
+    const isAbsent = await isVmAbsentFromProxmox(envSettings, candidate.vmid, resources);
+    if (isAbsent !== true) {
+      if (isAbsent === null) {
+        console.warn(`Skipping post-destroy volume cleanup for VMID ${candidate.vmid}: unable to prove that the VM is absent`);
       }
       return;
     }
@@ -561,27 +734,24 @@ const cleanupOrphanedCloudInitVolumes = async (envSettings, vmDefinitions, { vmi
       content = await fetchStorageContent(envSettings, candidate.node, candidate.storage);
     } catch (error) {
       console.warn(
-        `Unable to inspect storage ${candidate.storage} on ${candidate.node} for VMID ${candidate.vmid} Cloud-Init cleanup; trying direct volume delete (${formatProxmoxError(error)})`
+        `Unable to inspect storage ${candidate.storage} on ${candidate.node} for post-destroy cleanup of VMID ${candidate.vmid} (${formatProxmoxError(error)})`
       );
-      content = [];
+      return;
     }
 
-    const expectedName = proxmoxCloudInitVolumeName(candidate.vmid);
-    const orphan = content.find(volume =>
-      String(volume?.volid ?? '').startsWith(`${candidate.storage}:`) &&
-      getStorageVolumeName(volume?.volid) === expectedName
-    );
-    const volidsToDelete = [
-      orphan?.volid,
-      `${candidate.storage}:${expectedName}`
-    ].filter(Boolean);
+    const volumePrefix = `vm-${candidate.vmid}-`;
+    const volidsToDelete = content
+      .map(volume => String(volume?.volid ?? '').trim())
+      .filter(volid =>
+        volid.startsWith(`${candidate.storage}:`) &&
+        getStorageVolumeName(volid).startsWith(volumePrefix)
+      );
 
     for (const volid of [...new Set(volidsToDelete)]) {
-      console.log(
-        `Deleting orphaned Cloud-Init volume ${volid} for absent VMID ${candidate.vmid} on ${candidate.node}/${candidate.storage} (${reason})`
-      );
+      console.log(`Deleting orphaned volume ${volid} after destroy for VMID ${candidate.vmid} on ${candidate.node}/${candidate.storage}`);
       try {
-        await deleteStorageVolume(envSettings, candidate.node, candidate.storage, volid);
+        const taskId = await deleteStorageVolume(envSettings, candidate.node, candidate.storage, volid);
+        await waitForProxmoxTask(envSettings, candidate.node, taskId);
       } catch (error) {
         if (error?.statusCode === 404 || error?.statusCode === 500 && /does not exist|no such|not found|unable to parse/i.test(formatProxmoxError(error))) {
           continue;
@@ -590,26 +760,6 @@ const cleanupOrphanedCloudInitVolumes = async (envSettings, vmDefinitions, { vmi
       }
     }
   });
-};
-
-const stripAnsi = value => String(value ?? '').replace(/\u001b\[[0-9;]*m/g, '');
-
-const extractCloudInitConflictVmids = error => {
-  const output = stripAnsi(`${error?.stdout ?? ''}\n${error?.stderr ?? ''}\n${error?.message ?? ''}`);
-  if (!/vm-\d+-cloudinit[\s\S]*already exists/i.test(output)) {
-    return [];
-  }
-
-  const vmids = [];
-  const pattern = /vm-(\d+)-cloudinit/gi;
-  let match;
-  while ((match = pattern.exec(output))) {
-    const vmid = Number(match[1]);
-    if (Number.isInteger(vmid) && !vmids.includes(vmid)) {
-      vmids.push(vmid);
-    }
-  }
-  return vmids;
 };
 
 const invokeVmPowerAction = async (envSettings, node, vmid, action) => {
@@ -747,8 +897,18 @@ const buildWindowsReadinessInventory = ({ host, user, password }) => `all:
 const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => {
   const startedAt = Date.now();
   let lastError = null;
-  const remoteCommand =
-    "test -f /var/lib/cloud/instance/boot-finished || (command -v cloud-init >/dev/null 2>&1 && cloud-init status --wait >/dev/null 2>&1) || true";
+  const remoteCommand = [
+    "if test -f /var/lib/cloud/instance/boot-finished; then exit 0; fi",
+    "if ! command -v cloud-init >/dev/null 2>&1; then exit 0; fi",
+    "status_json=''",
+    "if test -r /run/cloud-init/status.json; then status_json=$(cat /run/cloud-init/status.json 2>/dev/null || true); fi",
+    "if printf '%s' \"$status_json\" | grep -qiE '\"status\"[[:space:]]*:[[:space:]]*\"(done|disabled|not run)\"'; then exit 0; fi",
+    "if printf '%s' \"$status_json\" | grep -qiE '\"extended_status\"[[:space:]]*:[[:space:]]*\"degraded done\"'; then exit 0; fi",
+    "status_text=$(cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true)",
+    "if printf '%s' \"$status_text\" | grep -qiE 'status:[[:space:]]*(done|disabled|not run)'; then exit 0; fi",
+    "if printf '%s' \"$status_text\" | grep -qiE 'extended_status:[[:space:]]*degraded done'; then exit 0; fi",
+    "cloud-init status --wait >/dev/null 2>&1"
+  ].join('; ');
 
   while (Date.now() - startedAt < LINUX_SSH_WAIT_TIMEOUT_MS) {
     if (signal?.aborted) {
@@ -836,7 +996,16 @@ const waitForWindowsWinrmAndCloudbaseInit = async ({ host, user, password, signa
 };
 
 const createDeploymentReadinessReporter = job => {
-  const totalVmCount = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms.length : 0;
+  const targetVmids = normalizeVmids(
+    Array.isArray(job.data?.replaceVmids) && job.data.replaceVmids.length > 0
+      ? job.data.replaceVmids
+      : Array.isArray(job.data?.blueprint?.vms)
+        ? job.data.blueprint.vms.map(vm => vm.vmid)
+        : []
+  );
+  const totalVmCount = targetVmids.length;
+  const targetVmidSet = new Set(targetVmids);
+  const startedVmids = new Set();
   const readyVmids = new Set();
 
   const publish = async () => {
@@ -846,16 +1015,32 @@ const createDeploymentReadinessReporter = job => {
       deploymentId: job.data.deploymentId,
       runId: job.data.runId,
       totalVmCount,
+      startedCount: startedVmids.size,
       readyCount: readyVmids.size,
+      targetVmids,
+      startedVmids: Array.from(startedVmids).sort((a, b) => a - b),
       readyVmids: Array.from(readyVmids).sort((a, b) => a - b)
     });
   };
 
   return {
     publish,
+    markStarted: async vmid => {
+      const numericVmid = Number(vmid);
+      if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
+        startedVmids.add(numericVmid);
+      }
+      await publish();
+    },
+    markStartedAll: async () => {
+      for (const vmid of targetVmidSet) {
+        startedVmids.add(vmid);
+      }
+      await publish();
+    },
     markReady: async vmid => {
       const numericVmid = Number(vmid);
-      if (Number.isInteger(numericVmid)) {
+      if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
         readyVmids.add(numericVmid);
       }
       await publish();
@@ -868,6 +1053,7 @@ export const terraformQueueName = 'terraform-workflows';
 export function startTerraformWorker(connection) {
   const activeAbortControllers = new Map();
   const ansibleQueue = new Queue(ansibleQueueName, { connection });
+  const terraformQueue = new Queue(terraformQueueName, { connection });
 
   const worker = new Worker(
     terraformQueueName,
@@ -893,6 +1079,8 @@ export function startTerraformWorker(connection) {
       try {
         console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
         const terraformParallelism = resolveTerraformParallelism();
+        const replaceVmids = normalizeVmids(job.data?.replaceVmids);
+        const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(replaceVmids) : [];
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -906,6 +1094,9 @@ export function startTerraformWorker(connection) {
           jobId: String(job.id),
           runId: job.data.runId
         });
+        if (action === 'deploy') {
+          await readinessReporter.publish();
+        }
 
       let preparedVarFile;
       let merged;
@@ -975,18 +1166,101 @@ export function startTerraformWorker(connection) {
           if (action === 'start' || action === 'stop') {
             const desiredAction = action === 'start' ? 'start' : 'shutdown';
             const blueprintVms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
-            const vmNodeByVmid = await resolveVmNodesByVmid(
-              merged,
-              blueprintVms.map(vm => vm.vmid)
-            );
-            await runWithConcurrency(blueprintVms, terraformParallelism, async vm => {
-              await invokeVmPowerAction(
+            const stopVerificationOnly = action === 'stop' && job.data?.stopVerificationOnly === true;
+
+            if (stopVerificationOnly) {
+              const currentDeploymentState = await fetchDeploymentLifecycleState(job.data.labInstanceId);
+              const currentRunId = String(currentDeploymentState?.lastRunId ?? '').trim();
+              const expectedRunId = String(job.data.runId ?? '').trim();
+              if (
+                !currentDeploymentState
+                || currentDeploymentState.status !== 'stopping'
+                || (expectedRunId && currentRunId && currentRunId !== expectedRunId)
+              ) {
+                console.log(
+                  `Skipping stale stop verification for deployment ${deploymentLabel} (status=${currentDeploymentState?.status ?? 'missing'}, runId=${currentRunId || 'n/a'})`
+                );
+                return {
+                  planOutput: '',
+                  labInstanceId: job.data.labInstanceId,
+                  runId: job.data.runId,
+                  status: 'stop-verification-skipped'
+                };
+              }
+            }
+
+            if (!stopVerificationOnly) {
+              const vmNodeByVmid = await resolveVmNodesByVmid(
                 merged,
-                vmNodeByVmid.get(Number(vm.vmid)),
-                vm.vmid,
-                desiredAction
+                blueprintVms.map(vm => vm.vmid),
+                { allowMissing: action === 'stop' }
               );
-            });
+              const powerActionTargets = blueprintVms.filter(vm => vmNodeByVmid.has(Number(vm.vmid)));
+              await runWithConcurrency(powerActionTargets, terraformParallelism, async vm => {
+                await invokeVmPowerAction(
+                  merged,
+                  vmNodeByVmid.get(Number(vm.vmid)),
+                  vm.vmid,
+                  desiredAction
+                );
+              });
+            }
+
+            if (action === 'stop') {
+              const allStopped = await waitForVmPowerState({
+                envSettings: merged,
+                vmids: blueprintVms.map(vm => vm.vmid),
+                desiredState: 'stopped',
+                signal: abortController.signal,
+                timeoutMs: STOP_STATE_CONFIRMATION_TIMEOUT_MS,
+                returnOnTimeout: true
+              });
+
+              if (!allStopped) {
+                const stopRetryCount = Number(job.data?.stopRetryCount ?? 0);
+                if (stopRetryCount < STOP_STATE_MAX_RETRIES) {
+                  const followupJob = await terraformQueue.add(
+                    'stop',
+                    {
+                      ...job.data,
+                      action: 'stop',
+                      stopVerificationOnly: true,
+                      stopRetryCount: stopRetryCount + 1
+                    },
+                    {
+                      attempts: 1,
+                      delay: STOP_STATE_RECHECK_DELAY_MS
+                    }
+                  );
+                  await safeUpdateLifecycleStatus(
+                    job.data.labInstanceId,
+                    'stopping',
+                    {
+                      action,
+                      jobId: String(followupJob.id),
+                      runId: job.data.runId
+                    }
+                  );
+                  console.log(
+                    `Stop still in progress for deployment ${deploymentLabel}; scheduled verification retry ${stopRetryCount + 1}/${STOP_STATE_MAX_RETRIES} in ${Math.round(STOP_STATE_RECHECK_DELAY_MS / 1000)}s`
+                  );
+                } else {
+                  console.warn(`Stop still in progress for deployment ${deploymentLabel} after ${STOP_STATE_MAX_RETRIES} verification retries; keeping status stopping`);
+                  await safeUpdateLifecycleStatus(job.data.labInstanceId, 'stopping', {
+                    action,
+                    jobId: String(job.id),
+                    runId: job.data.runId
+                  });
+                }
+
+                return {
+                  planOutput: '',
+                  labInstanceId: job.data.labInstanceId,
+                  runId: job.data.runId,
+                  status: 'stop-pending'
+                };
+              }
+            }
 
             await safeUpdateLifecycleStatus(
               job.data.labInstanceId,
@@ -1010,6 +1284,12 @@ export function startTerraformWorker(connection) {
             `Unable to prepare terraform vars (looked at ${terraformVarsPath}): ${err.message}`
           );
         }
+
+        const blueprintVms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
+        const scopedBlueprintVms =
+          replaceVmids.length > 0
+            ? blueprintVms.filter(vm => replaceVmids.includes(Number(vm.vmid)))
+            : blueprintVms;
 
         await runCommand('terraform', ['init', '-input=false'], {
           cwd: terraformDir,
@@ -1037,15 +1317,14 @@ export function startTerraformWorker(connection) {
             ['destroy', '-auto-approve', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
             { cwd: terraformDir, env, signal: abortController.signal }
           );
+          await cleanupDestroyedVmVolumes(merged, merged.vm_definitions).catch(error => {
+            console.warn(`Post-destroy volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
+          });
         } else {
-          if (action === 'deploy') {
-            await cleanupOrphanedCloudInitVolumes(merged, merged.vm_definitions);
-          }
-
           const planAndApply = async () => {
             const output = await runCommand(
               'terraform',
-              ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
+              ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`, ...replaceArgs],
               { cwd: terraformDir, env, signal: abortController.signal }
             );
             await runCommand(
@@ -1059,28 +1338,16 @@ export function startTerraformWorker(connection) {
           try {
             planOutput = await planAndApply();
           } catch (error) {
-            const conflictVmids = action === 'deploy' ? extractCloudInitConflictVmids(error) : [];
-            if (!conflictVmids.length) {
-              throw error;
-            }
-
-            console.warn(
-              `Terraform apply hit orphaned Cloud-Init RBD volumes for VMIDs ${conflictVmids.join(', ')}; cleaning and retrying once`
-            );
-            await cleanupOrphanedCloudInitVolumes(merged, merged.vm_definitions, {
-              vmids: conflictVmids,
-              reason: 'terraform-apply-conflict'
-            });
-            planOutput = await planAndApply();
+            throw error;
           }
         }
 
         if (action === 'deploy') {
-          await readinessReporter.publish();
+          await readinessReporter.markStartedAll();
         }
 
         const windowsReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? job.data.blueprint.vms
+          ? scopedBlueprintVms
               .filter(vm => isWindowsOsType(vm.osType))
               .map(vm => ({
                 vmid: vm.vmid,
@@ -1104,21 +1371,10 @@ export function startTerraformWorker(connection) {
           if (!windowsPassword) {
             throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
           }
-
-          await runWithConcurrency(windowsReadinessTargets, terraformParallelism, async target => {
-            console.log(`Waiting for Windows guest ${target.name} (${target.host}) to finish Cloudbase-Init over WinRM`);
-            await waitForWindowsWinrmAndCloudbaseInit({
-              host: target.host,
-              user: target.user,
-              password: windowsPassword,
-              signal: abortController.signal
-            });
-            await readinessReporter.markReady(target.vmid);
-          });
         }
 
         const linuxReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? job.data.blueprint.vms
+          ? scopedBlueprintVms
               .filter(vm => isLinuxOsType(vm.osType) && vm.ipLastOctet != null && vm.subnetBase)
               .map(vm => ({
                 vmid: vm.vmid,
@@ -1127,6 +1383,11 @@ export function startTerraformWorker(connection) {
               }))
               .filter(target => target.host)
           : [];
+        const skippedLinuxReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
+          ? scopedBlueprintVms
+              .filter(vm => isLinuxOsType(vm.osType))
+              .filter(vm => !linuxReadinessTargets.some(target => Number(target.vmid) === Number(vm.vmid)))
+          : [];
 
         if (action === 'deploy' && linuxReadinessTargets.length > 0) {
           const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
@@ -1134,21 +1395,62 @@ export function startTerraformWorker(connection) {
           if (!linuxPassword) {
             throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
           }
+        }
 
-          await runWithConcurrency(linuxReadinessTargets, terraformParallelism, async target => {
-            console.log(`Waiting for Linux guest ${target.name} (${target.host}) to finish cloud-init`);
-            await waitForLinuxSshAndCloudInit({
-              host: target.host,
-              user: linuxUser,
-              password: linuxPassword,
-              signal: abortController.signal
-            });
-            await readinessReporter.markReady(target.vmid);
-          });
+        if (action === 'deploy') {
+          const readinessTasks = [];
+
+          if (windowsReadinessTargets.length > 0) {
+            const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+            readinessTasks.push(
+              runWithConcurrency(windowsReadinessTargets, terraformParallelism, async target => {
+                console.log(`Waiting for Windows guest ${target.name} (${target.host}) to finish Cloudbase-Init over WinRM`);
+                await waitForWindowsWinrmAndCloudbaseInit({
+                  host: target.host,
+                  user: target.user,
+                  password: windowsPassword,
+                  signal: abortController.signal
+                });
+                await readinessReporter.markReady(target.vmid);
+              })
+            );
+          }
+
+          if (linuxReadinessTargets.length > 0) {
+            const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
+            const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+            readinessTasks.push(
+              runWithConcurrency(linuxReadinessTargets, terraformParallelism, async target => {
+                console.log(`Waiting for Linux guest ${target.name} (${target.host}) to finish cloud-init`);
+                await waitForLinuxSshAndCloudInit({
+                  host: target.host,
+                  user: linuxUser,
+                  password: linuxPassword,
+                  signal: abortController.signal
+                });
+                await readinessReporter.markReady(target.vmid);
+              })
+            );
+          }
+
+          if (skippedLinuxReadinessTargets.length > 0) {
+            readinessTasks.push(
+              (async () => {
+                for (const target of skippedLinuxReadinessTargets) {
+                  console.warn(
+                    `Skipping cloud-init readiness check for Linux guest ${target.name} (${target.vmid}) because no static IPv4 address is available; treating it as ready`
+                  );
+                  await readinessReporter.markReady(target.vmid);
+                }
+              })()
+            );
+          }
+
+          await Promise.all(readinessTasks);
         }
 
         const customizationTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? job.data.blueprint.vms
+          ? scopedBlueprintVms
               .filter(
                 vm =>
                   (

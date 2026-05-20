@@ -696,12 +696,58 @@ const mapDeployment = row => ({
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
 
-const deriveDeploymentProgress = async ({ deployment, vmPlan, resourceByVmid, readyVmids = new Set() }) => {
-  const vmStates = await buildDeploymentVmRuntimeStates({ deployment, vmPlan, resourceByVmid, readyVmids });
+const deploymentBusyStatuses = new Set(['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying']);
+const workstationRedeployableStatuses = new Set(['running']);
+
+const parseVmidsToSet = value =>
+  new Set(
+    (Array.isArray(value) ? value : [])
+      .map(vmid => Number(vmid))
+      .filter(vmid => Number.isInteger(vmid))
+  );
+
+const resolveWorkstationNumberFromVmId = vmId => {
+  const match = String(vmId ?? '').match(/^(\d+)-/);
+  return match?.[1] ?? null;
+};
+
+const deriveTargetWorkstationNumbers = (vmPlan, targetVmids) => {
+  if (!(targetVmids instanceof Set) || !targetVmids.size) {
+    return [];
+  }
+
+  return [...new Set(
+    vmPlan.vms
+      .filter(vm => targetVmids.has(Number(vm.vmid)))
+      .map(vm => resolveWorkstationNumberFromVmId(vm.id))
+      .filter(Boolean)
+  )].sort((left, right) => Number(left) - Number(right));
+};
+
+const deriveDeploymentProgress = async ({
+  deployment,
+  vmPlan,
+  resourceByVmid,
+  readyVmids = new Set(),
+  startedVmids = new Set(),
+  operationTargetVmids = null
+}) => {
+  const vmStates = await buildDeploymentVmRuntimeStates({
+    deployment,
+    vmPlan,
+    resourceByVmid,
+    readyVmids,
+    startedVmids,
+    operationTargetVmids
+  });
+  const progressVmStates =
+    shouldUseGuestReadinessProgress(deployment.status) && operationTargetVmids instanceof Set && operationTargetVmids.size > 0
+      ? vmStates.filter(({ vm }) => operationTargetVmids.has(Number(vm.vmid)))
+      : vmStates;
   const totalVmCount = vmStates.length;
-  const createdCount = vmStates.filter(({ resource }) => Boolean(resource)).length;
-  const startedCount = vmStates.filter(({ resource }) => resource?.status === 'running').length;
-  const readyCount = vmStates.filter(({ guestReady }) => guestReady).length;
+  const createdCount = progressVmStates.filter(({ resource }) => Boolean(resource)).length;
+  const startedCount = progressVmStates.filter(({ guestStarted }) => guestStarted).length;
+  const readyCount = progressVmStates.filter(({ guestReady }) => guestReady).length;
   const customizedCount = ['deployed', 'running', 'stopped', 'mixed'].includes(deployment.status)
     ? totalVmCount
     : readyCount;
@@ -1012,7 +1058,7 @@ const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request
   throw lastError;
 };
 
-const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestReady = false }) => {
+const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted = false, guestReady = false }) => {
   if (!resource) {
     if (['queued', 'deploying'].includes(deploymentStatus)) return 'cloning';
     if (deploymentStatus === 'destroying') return 'destroying';
@@ -1025,7 +1071,10 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestReady = 
   }
 
   if (resource.status === 'running') {
-    if (shouldUseGuestReadinessProgress(deploymentStatus)) {
+    if (shouldUseGuestReadinessProgress(deploymentStatus) && vm.isTrackedGuestReadiness !== false) {
+      if (!guestStarted) {
+        return 'redeploy queued';
+      }
       return guestReady
         ? 'ready'
         : isWindowsOsType(vm.osType) ? 'waiting for cloudbase-init' : 'waiting for cloud-init';
@@ -1058,32 +1107,69 @@ const buildDeploymentVmIpAddress = vm => {
 const shouldUseGuestReadinessProgress = deploymentStatus =>
   ['queued', 'deploying'].includes(deploymentStatus);
 
-const fetchDeploymentReadyVmids = async deployment => {
+const fetchDeploymentReadinessProgress = async deployment => {
   if (!shouldUseGuestReadinessProgress(deployment.status) || !deployment.lastJobId) {
-    return new Set();
+    return {
+      readyVmids: new Set(),
+      startedVmids: new Set(),
+      targetVmids: null
+    };
   }
 
   try {
     const job = await queues.terraform.getJob(String(deployment.lastJobId));
     const progress = job?.progress;
-    const readyVmids = Array.isArray(progress?.readyVmids) ? progress.readyVmids : [];
-    return new Set(readyVmids.map(Number).filter(vmid => Number.isInteger(vmid)));
+    return {
+      readyVmids: parseVmidsToSet(progress?.readyVmids),
+      startedVmids: parseVmidsToSet(progress?.startedVmids),
+      targetVmids: Array.isArray(progress?.targetVmids) ? parseVmidsToSet(progress.targetVmids) : null
+    };
   } catch (error) {
     console.warn(`Unable to fetch Terraform readiness progress for deployment ${deployment.id}`, error);
-    return new Set();
+    return {
+      readyVmids: new Set(),
+      startedVmids: new Set(),
+      targetVmids: null
+    };
   }
 };
 
-const buildDeploymentVmRuntimeStates = async ({ deployment, vmPlan, resourceByVmid, readyVmids = new Set() }) => {
+const buildDeploymentVmRuntimeStates = async ({
+  deployment,
+  vmPlan,
+  resourceByVmid,
+  readyVmids = new Set(),
+  startedVmids = new Set(),
+  operationTargetVmids = null
+}) => {
   return vmPlan.vms.map(vm => {
     const resource = resourceByVmid.get(Number(vm.vmid)) ?? null;
     const isKnownReady = readyVmids.has(Number(vm.vmid));
+    const isKnownStarted = startedVmids.has(Number(vm.vmid));
+    const isTrackedGuestReadiness =
+      !shouldUseGuestReadinessProgress(deployment.status)
+      || !(operationTargetVmids instanceof Set)
+      || operationTargetVmids.has(Number(vm.vmid));
     const isFinishedDeploymentReady =
       ['deployed', 'running', 'mixed', 'customizing'].includes(deployment.status) &&
       resource?.status === 'running';
+    const guestStarted =
+      isFinishedDeploymentReady ||
+      (
+        resource?.status === 'running' &&
+        (
+          !shouldUseGuestReadinessProgress(deployment.status)
+          || !isTrackedGuestReadiness
+          || isKnownStarted
+        )
+      );
     return {
-      vm,
+      vm: {
+        ...vm,
+        isTrackedGuestReadiness
+      },
       resource,
+      guestStarted,
       guestReady: isKnownReady || isFinishedDeploymentReady
     };
   });
@@ -1187,15 +1273,17 @@ const resetTransientLifecycleStates = async () => {
 };
 
 const deriveDeploymentStatusFromResources = (currentStatus, expectedVmids, resourceByVmid) => {
-  if (TRANSIENT_DEPLOYMENT_STATUSES.has(currentStatus)) {
-    return currentStatus;
-  }
-
   const states = expectedVmids
     .map(vmid => resourceByVmid.get(Number(vmid))?.status ?? null)
     .filter(Boolean);
 
   if (!states.length) {
+    if (currentStatus === 'destroying') {
+      return 'destroyed';
+    }
+    if (TRANSIENT_DEPLOYMENT_STATUSES.has(currentStatus)) {
+      return currentStatus;
+    }
     if (['idle', 'failed', 'destroyed'].includes(currentStatus)) {
       return currentStatus;
     }
@@ -1203,10 +1291,18 @@ const deriveDeploymentStatusFromResources = (currentStatus, expectedVmids, resou
   }
 
   const allRunning = states.length === expectedVmids.length && states.every(state => state === 'running');
-  if (allRunning) return 'running';
-
   const allStopped = states.length === expectedVmids.length && states.every(state => state === 'stopped');
-  if (allStopped) return 'stopped';
+  const allVisibleStopped = states.every(state => state === 'stopped');
+
+  if (currentStatus === 'starting' && allRunning) return 'running';
+  if (currentStatus === 'stopping' && allVisibleStopped) return 'stopped';
+
+  if (TRANSIENT_DEPLOYMENT_STATUSES.has(currentStatus)) {
+    return currentStatus;
+  }
+
+  if (allRunning) return 'running';
+  if (allStopped || allVisibleStopped) return 'stopped';
 
   return 'mixed';
 };
@@ -1519,10 +1615,26 @@ app.get(
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
-      const readyVmids = await fetchDeploymentReadyVmids(deployment);
-      deployments.push({
+      const effectiveDeploymentStatus = deriveDeploymentStatusFromResources(
+        deployment.status,
+        vmPlan.vms.map(vm => vm.vmid),
+        resourceByVmid
+      );
+      const runtimeDeployment = {
         ...deployment,
-        ...(await deriveDeploymentProgress({ deployment, vmPlan, resourceByVmid, readyVmids }))
+        status: effectiveDeploymentStatus
+      };
+      const readinessProgress = await fetchDeploymentReadinessProgress(runtimeDeployment);
+      deployments.push({
+        ...runtimeDeployment,
+        ...(await deriveDeploymentProgress({
+          deployment: runtimeDeployment,
+          vmPlan,
+          resourceByVmid,
+          readyVmids: readinessProgress.readyVmids,
+          startedVmids: readinessProgress.startedVmids,
+          operationTargetVmids: readinessProgress.targetVmids
+        }))
       });
     }
 
@@ -1636,37 +1748,136 @@ app.get(
       console.error(`Unable to fetch Proxmox VM resources for deployment ${deployment.id}`, error);
     }
 
-    const readyVmids = await fetchDeploymentReadyVmids(deployment);
-    const vmStates = await buildDeploymentVmRuntimeStates({ deployment, vmPlan, resourceByVmid, readyVmids });
+    const effectiveDeploymentStatus = deriveDeploymentStatusFromResources(
+      deployment.status,
+      vmPlan.vms.map(vm => vm.vmid),
+      resourceByVmid
+    );
+    const runtimeDeployment = {
+      ...deployment,
+      status: effectiveDeploymentStatus
+    };
+
+    const readinessProgress = await fetchDeploymentReadinessProgress(runtimeDeployment);
+    const vmStates = await buildDeploymentVmRuntimeStates({
+      deployment: runtimeDeployment,
+      vmPlan,
+      resourceByVmid,
+      readyVmids: readinessProgress.readyVmids,
+      startedVmids: readinessProgress.startedVmids,
+      operationTargetVmids: readinessProgress.targetVmids
+    });
+    const activeWorkstationNumbers = deriveTargetWorkstationNumbers(vmPlan, readinessProgress.targetVmids);
 
     res.json({
       deployment: {
         id: deployment.id,
         deploymentNumber: deployment.deploymentNumber,
-        status: deployment.status,
+        status: effectiveDeploymentStatus,
+        lastAction: deployment.lastAction,
         teacher: deployment.teacher,
         blueprintName: deployment.blueprint.name,
-        classroomName: deployment.classroom.name
+        classroomName: deployment.classroom.name,
+        canRedeployWorkstations: workstationRedeployableStatuses.has(effectiveDeploymentStatus),
+        busy: deploymentBusyStatuses.has(effectiveDeploymentStatus),
+        activeWorkstationNumbers
       },
-      vms: vmStates.map(({ vm, resource, guestReady }) => {
+      vms: vmStates.map(({ vm, resource, guestStarted, guestReady }) => {
         return {
           id: vm.id,
           name: vm.name,
           vmid: vm.vmid,
+          workstationNumber: resolveWorkstationNumberFromVmId(vm.id),
           osType: vm.osType,
           vlanTag: vm.vlanTag,
           ipAddress: buildDeploymentVmIpAddress(vm),
           state: inferDeploymentVmStatus({
-            deploymentStatus: deployment.status,
+            deploymentStatus: effectiveDeploymentStatus,
             vm,
             resource,
+            guestStarted,
             guestReady
           }),
+          guestStarted,
           guestReady,
           proxmoxStatus: resource?.status ?? null,
           node: resource?.node ?? null
         };
       })
+    });
+  })
+);
+
+app.post(
+  '/api/lifecycle/deployments/:id/workstations/:workstationNumber/redeploy',
+  wrapAsync(async (req, res) => {
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    if (deploymentBusyStatuses.has(deployment.status)) {
+      res.status(409).json({ error: 'deployment already has an operation in progress' });
+      return;
+    }
+
+    if (!workstationRedeployableStatuses.has(deployment.status)) {
+      res.status(409).json({ error: 'workstation redeploy is only available when the lab is running' });
+      return;
+    }
+
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const requestedWorkstationNumber = Number(req.params.workstationNumber);
+    if (!Number.isInteger(requestedWorkstationNumber) || requestedWorkstationNumber < 1 || requestedWorkstationNumber > classroom.workstationCount) {
+      res.status(400).json({ error: 'invalid workstation number' });
+      return;
+    }
+
+    const workstationNumber = String(requestedWorkstationNumber).padStart(2, '0');
+    const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const workstationVms = terraformBlueprintPayload.vms.filter(vm => resolveWorkstationNumberFromVmId(vm.id) === workstationNumber);
+    if (!workstationVms.length) {
+      res.status(404).json({ error: 'workstation not found in deployment plan' });
+      return;
+    }
+
+    const runId = `deployment-${deployment.id}-workstation-${workstationNumber}-${Date.now()}`;
+    const job = await queues.terraform.add(
+      'apply',
+      {
+        action: 'deploy',
+        labInstanceId: deployment.id,
+        deploymentNumber: deployment.deploymentNumber,
+        runId,
+        deploymentId: deployment.id,
+        blueprint: terraformBlueprintPayload,
+        windowsAdminPassword: String(terraformBlueprintPayload.windowsAdminPassword ?? '').trim(),
+        linuxDefaultUsername: String(terraformBlueprintPayload.linuxDefaultUsername ?? '').trim() || 'ubuntu',
+        replaceVmids: workstationVms.map(vm => Number(vm.vmid)),
+        redeployWorkstationNumber: workstationNumber
+      },
+      {
+        attempts: 1,
+        ...queueRetention
+      }
+    );
+
+    const updated = await updateDeploymentState({
+      deploymentId: deployment.id,
+      action: 'deploy',
+      status: 'queued',
+      jobId: String(job.id),
+      runId
+    });
+
+    res.json({
+      ok: true,
+      deployment: updated,
+      workstationNumber,
+      jobId: job.id,
+      runId
     });
   })
 );
