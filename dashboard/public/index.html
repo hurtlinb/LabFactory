@@ -353,8 +353,10 @@
 
         <article class="panel danger-panel">
           <p class="eyebrow danger-eyebrow">danger zone</p>
-          <div class="inline-actions section-actions">
+          <div class="inline-actions section-actions danger-actions">
             <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
+            <button type="button" id="cleanOrphanedDisksButton" class="btn btn-secondary">Clean orphaned disks</button>
+            <div id="dangerZoneStatus" class="status-message" hidden></div>
           </div>
         </article>
       </section>

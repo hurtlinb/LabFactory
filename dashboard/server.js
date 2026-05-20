@@ -83,14 +83,25 @@ const wrapAsync =
     });
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+const parsePositiveNumber = (value, fallback) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+};
 const PROXMOX_VM_RESOURCE_TIMEOUT_MS = 8000;
 const PROXMOX_VM_RESOURCE_MAX_ATTEMPTS = 3;
 const PROXMOX_VM_RESOURCE_RETRY_DELAYS_MS = [500, 1500];
 const PROXMOX_VM_RESOURCE_LOG_INTERVAL_MS = 60_000;
+const ORPHANED_DISK_CLEANUP_POOL = String(process.env.PROXMOX_ORPHANED_DISK_POOL || 'ceph-pool').trim();
+const ORPHANED_DISK_CLEANUP_TIMEOUT_MS = parsePositiveNumber(
+  process.env.PROXMOX_ORPHANED_DISK_CLEANUP_TIMEOUT_MS,
+  120_000
+);
+const ORPHANED_DISK_CLEANUP_TASK_RETRY_MS = 1000;
 let lastProxmoxVmResourceErrorLog = {
   at: 0,
   key: ''
 };
+let orphanedDiskCleanupRunning = false;
 
 const createErrorWithCode = (message, code) => {
   const error = new Error(message);
@@ -422,15 +433,20 @@ const writeTerraformSettings = async settings => {
   await fs.writeFile(terraformSettingsPath, JSON.stringify(settings, null, 2));
 };
 
-const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, timeoutMs = 0 }) =>
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, timeoutMs = 0, body = null }) =>
   new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
+    const requestHeaders = { ...headers };
+    const requestBody = body == null ? null : typeof body === 'string' ? body : JSON.stringify(body);
+    if (requestBody != null && !Object.keys(requestHeaders).some(header => header.toLowerCase() === 'content-length')) {
+      requestHeaders['Content-Length'] = Buffer.byteLength(requestBody);
+    }
     const request = transport.request(
       target,
       {
         method,
-        headers,
+        headers: requestHeaders,
         rejectUnauthorized
       },
       response => {
@@ -441,11 +457,14 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
         });
         response.on('end', () => {
           if ((response.statusCode ?? 500) >= 400) {
-            reject(new Error(`HTTP ${response.statusCode}: ${body}`));
+            const error = new Error(`HTTP ${response.statusCode}: ${body}`);
+            error.statusCode = response.statusCode;
+            error.responseBody = body;
+            reject(error);
             return;
           }
           try {
-            resolve(JSON.parse(body));
+            resolve(body ? JSON.parse(body) : {});
           } catch (error) {
             reject(error);
           }
@@ -458,7 +477,7 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
         request.destroy(createErrorWithCode(`Request timed out after ${timeoutMs}ms`, 'ETIMEDOUT'));
       });
     }
-    request.end();
+    request.end(requestBody ?? undefined);
   });
 
 const proxmoxRequestOptions = envSettings => ({
@@ -467,6 +486,223 @@ const proxmoxRequestOptions = envSettings => ({
   },
   rejectUnauthorized: !envSettings.proxmox_tls_insecure
 });
+
+const parseNodeList = value => {
+  const values = Array.isArray(value) ? value : String(value ?? '').split(',');
+  return [...new Set(values.map(item => String(item).trim()).filter(Boolean))];
+};
+
+const getStorageVolumeName = volid => {
+  const withoutStorage = String(volid ?? '').split(':').slice(1).join(':');
+  return withoutStorage.split('/').filter(Boolean).pop() ?? '';
+};
+
+const parseVmidFromVolume = volume => {
+  const explicitVmid = Number(volume?.vmid);
+  if (Number.isInteger(explicitVmid) && explicitVmid > 0) {
+    return explicitVmid;
+  }
+
+  const imageName = getStorageVolumeName(volume?.volid);
+  const match = /^vm-(\d+)-/.exec(imageName);
+  const parsed = Number(match?.[1]);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const isStorageImageVolume = volume => {
+  const content = String(volume?.content ?? '').trim().toLowerCase();
+  return !content || content === 'images';
+};
+
+const buildProxmoxApiUrl = (envSettings, apiPath) =>
+  new URL(
+    String(apiPath ?? '').replace(/^\/+/, ''),
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+
+const requestProxmoxJson = async (envSettings, apiPath, options = {}) => {
+  const body = options.body ?? null;
+  const headers = {
+    ...proxmoxRequestOptions(envSettings).headers,
+    ...(body == null ? {} : { 'Content-Type': 'application/json' }),
+    ...(options.headers ?? {})
+  };
+  return requestJson({
+    url: buildProxmoxApiUrl(envSettings, apiPath),
+    method: options.method ?? 'GET',
+    headers,
+    rejectUnauthorized: !envSettings.proxmox_tls_insecure,
+    timeoutMs: options.timeoutMs ?? 0,
+    body
+  });
+};
+
+const isQemuResource = resource => {
+  const type = String(resource?.type ?? '').trim().toLowerCase();
+  const id = String(resource?.id ?? '').trim().toLowerCase();
+  return type === 'qemu' || id.startsWith('qemu/');
+};
+
+const fetchQemuConfigs = async (envSettings, resources) => {
+  const configs = [];
+  for (const resource of resources.filter(isQemuResource)) {
+    const node = String(resource?.node ?? '').trim();
+    const vmid = Number(resource?.vmid);
+    if (!node || !Number.isInteger(vmid)) {
+      continue;
+    }
+    const payload = await requestProxmoxJson(
+      envSettings,
+      `nodes/${encodeURIComponent(node)}/qemu/${vmid}/config`,
+      { timeoutMs: ORPHANED_DISK_CLEANUP_TIMEOUT_MS }
+    );
+    configs.push({
+      node,
+      vmid,
+      config: payload?.data ?? {}
+    });
+  }
+
+  return configs;
+};
+
+const fetchStorageContent = async (envSettings, node, storage) => {
+  const payload = await requestProxmoxJson(
+    envSettings,
+    `nodes/${encodeURIComponent(node)}/storage/${encodeURIComponent(storage)}/content`,
+    { timeoutMs: ORPHANED_DISK_CLEANUP_TIMEOUT_MS }
+  );
+  return Array.isArray(payload?.data) ? payload.data : [];
+};
+
+const deleteStorageVolume = async (envSettings, node, storage, volid) => {
+  const payload = await requestProxmoxJson(
+    envSettings,
+    `nodes/${encodeURIComponent(node)}/storage/${encodeURIComponent(storage)}/content/${encodeURIComponent(volid)}`,
+    {
+      method: 'DELETE',
+      timeoutMs: ORPHANED_DISK_CLEANUP_TIMEOUT_MS
+    }
+  );
+  return payload?.data ?? null;
+};
+
+const fetchProxmoxTaskStatus = async (envSettings, node, upid) => {
+  const payload = await requestProxmoxJson(
+    envSettings,
+    `nodes/${node}/tasks/${encodeURIComponent(upid)}/status`
+  );
+  return payload?.data ?? {};
+};
+
+const waitForProxmoxTask = async (envSettings, node, upid) => {
+  const normalizedUpid = String(upid ?? '').trim();
+  if (!normalizedUpid) {
+    return;
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < ORPHANED_DISK_CLEANUP_TIMEOUT_MS) {
+    const status = await fetchProxmoxTaskStatus(envSettings, node, normalizedUpid);
+    const state = String(status?.status ?? '').trim().toLowerCase();
+    if (state === 'stopped') {
+      const exitStatus = String(status?.exitstatus ?? '').trim();
+      if (!exitStatus || exitStatus.toUpperCase() === 'OK') {
+        return;
+      }
+      const error = new Error(`Proxmox task ${normalizedUpid} failed with exit status ${exitStatus}`);
+      error.exitStatus = exitStatus;
+      error.upid = normalizedUpid;
+      throw error;
+    }
+    await sleep(ORPHANED_DISK_CLEANUP_TASK_RETRY_MS);
+  }
+
+  throw new Error(`Timed out waiting for Proxmox task ${normalizedUpid} on node ${node}`);
+};
+
+const cleanOrphanedDisksOnProxmoxNode = async () => {
+  const envSettings = readTerraformEnvSettings();
+  assertRequiredTerraformEnvSettings(envSettings);
+  const configuredNodes = parseNodeList(envSettings.proxmox_nodes);
+  const targetNodes = configuredNodes.length ? configuredNodes : parseNodeList(envSettings.proxmox_node);
+  const targetNode = targetNodes[0] || '';
+  if (!targetNode) {
+    throw new Error('No Proxmox node configured for orphaned disk cleanup');
+  }
+  if (!ORPHANED_DISK_CLEANUP_POOL) {
+    throw new Error('No Proxmox RBD pool configured for orphaned disk cleanup');
+  }
+
+  const resources = await fetchClusterVmResources({ context: 'orphaned disk cleanup VM inventory' });
+  const existingVmids = new Set(
+    resources
+      .map(resource => Number(resource?.vmid))
+      .filter(vmid => Number.isInteger(vmid) && vmid > 0)
+  );
+  const qemuConfigs = await fetchQemuConfigs(envSettings, resources);
+  const configTexts = qemuConfigs.map(({ config }) => JSON.stringify(config));
+  const storageContent = await fetchStorageContent(envSettings, targetNode, ORPHANED_DISK_CLEANUP_POOL);
+  const skippedVolumes = [];
+  const candidateVolumes = [];
+
+  for (const volume of storageContent) {
+    const volid = String(volume?.volid ?? '').trim();
+    if (!volid.startsWith(`${ORPHANED_DISK_CLEANUP_POOL}:`) || !isStorageImageVolume(volume)) {
+      continue;
+    }
+
+    const imageName = getStorageVolumeName(volid);
+    if (!imageName) {
+      skippedVolumes.push({ volid, reason: 'missing image name' });
+      continue;
+    }
+
+    const vmid = parseVmidFromVolume(volume);
+    if (vmid != null && existingVmids.has(vmid)) {
+      skippedVolumes.push({ volid, reason: `VMID ${vmid} still exists` });
+      continue;
+    }
+
+    if (configTexts.some(configText => configText.includes(imageName) || configText.includes(volid))) {
+      skippedVolumes.push({ volid, reason: 'referenced by a VM config' });
+      continue;
+    }
+
+    candidateVolumes.push(volid);
+  }
+
+  const deletedVolumes = [];
+  for (const volid of candidateVolumes) {
+    try {
+      const taskId = await deleteStorageVolume(envSettings, targetNode, ORPHANED_DISK_CLEANUP_POOL, volid);
+      await waitForProxmoxTask(envSettings, targetNode, taskId);
+      deletedVolumes.push(volid);
+    } catch (error) {
+      const message = error?.exitStatus || error?.message || 'delete failed';
+      if (/still has watchers|image has watchers|watcher/i.test(message)) {
+        skippedVolumes.push({ volid, reason: 'image still has watchers' });
+        continue;
+      }
+      throw error;
+    }
+  }
+
+  const stdoutLines = [
+    ...deletedVolumes.map(volid => `Suppression de ${volid}`),
+    ...skippedVolumes.map(volume => `Ignored ${volume.volid}: ${volume.reason}`),
+    `Clean orphaned disks completed: ${deletedVolumes.length} deleted, ${skippedVolumes.length} ignored`
+  ];
+
+  return {
+    node: targetNode,
+    pool: ORPHANED_DISK_CLEANUP_POOL,
+    deletedVolumes,
+    skippedVolumes,
+    stdout: stdoutLines.join('\n'),
+    stderr: ''
+  };
+};
 
 const runMigrations = async () => {
   await dbPool.query(`
@@ -2472,6 +2708,29 @@ app.post('/api/settings/terraform', async (req, res) => {
     res.status(400).json({ error: err.message ?? 'unable to persist terraform settings' });
   }
 });
+
+app.post(
+  '/api/settings/clean-orphaned-disks',
+  wrapAsync(async (req, res) => {
+    if (orphanedDiskCleanupRunning) {
+      res.status(409).json({ error: 'orphaned disk cleanup already running' });
+      return;
+    }
+
+    orphanedDiskCleanupRunning = true;
+    try {
+      const result = await cleanOrphanedDisksOnProxmoxNode();
+      res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error('Unable to clean orphaned disks', err);
+      res.status(500).json({
+        error: err?.stderr?.trim() || err?.message || 'unable to clean orphaned disks'
+      });
+    } finally {
+      orphanedDiskCleanupRunning = false;
+    }
+  })
+);
 
 app.post('/api/control', async (req, res) => {
   const { worker, action } = req.body;

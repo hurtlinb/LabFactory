@@ -139,6 +139,8 @@ The `Jobs` page provides:
 
 The `Settings` page also contains a `Clear job history` button to remove completed and failed jobs from BullMQ history.
 
+The danger zone also contains a `Clean orphaned disks` button. It uses the Proxmox API token to inspect QEMU VM configs, list volumes in `PROXMOX_ORPHANED_DISK_POOL` (`ceph-pool` by default), and remove pool volumes that are not referenced by any VM config. Volumes whose VMID still exists in Proxmox or whose RBD image still has watchers are ignored. The cleanup uses direct Proxmox REST API calls on the first node from `PROXMOX_NODES` or `PROXMOX_NODE`; the `nodes/{node}/execute` endpoint is not used because Proxmox restricts it to `root@pam`.
+
 ## Terraform Behavior
 Terraform is used for deployment and destruction.
 

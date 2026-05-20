@@ -304,6 +304,11 @@ select {
   max-width: 52ch;
 }
 
+.danger-actions {
+  align-items: flex-start;
+  flex-direction: column;
+}
+
 .panel-wide {
   min-height: 620px;
 }

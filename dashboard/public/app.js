@@ -91,7 +91,9 @@ const courseForm = document.getElementById('courseForm');
 const courseSubmitButton = document.getElementById('courseSubmitButton');
 const refreshLabsStateButton = document.getElementById('refreshLabsStateButton');
 const clearJobHistoryButton = document.getElementById('clearJobHistoryButton');
+const cleanOrphanedDisksButton = document.getElementById('cleanOrphanedDisksButton');
 const settingsStatus = document.getElementById('settingsStatus');
+const dangerZoneStatus = document.getElementById('dangerZoneStatus');
 const postgresStatusIndicator = document.getElementById('postgresStatusIndicator');
 const postgresStatusLabel = document.getElementById('postgresStatusLabel');
 const proxmoxStatusIndicator = document.getElementById('proxmoxStatusIndicator');
@@ -2116,6 +2118,37 @@ clearJobHistoryButton?.addEventListener('click', async () => {
     showMessage(globalStatus, error.message, 'danger');
   } finally {
     clearJobHistoryButton.disabled = false;
+  }
+});
+
+cleanOrphanedDisksButton?.addEventListener('click', async () => {
+  const targetStatus = dangerZoneStatus || globalStatus;
+  const confirmed = window.confirm(
+    'Clean orphaned disks from the configured Ceph pool? This deletes RBD images that are not referenced by VM configs.'
+  );
+  if (!confirmed) return;
+
+  cleanOrphanedDisksButton.disabled = true;
+  showMessage(targetStatus, 'Cleaning orphaned disks...', 'success', 120000);
+  try {
+    const result = await fetchJson('/api/settings/clean-orphaned-disks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const deletedCount = Array.isArray(result.deletedVolumes) ? result.deletedVolumes.length : 0;
+    const skippedCount = Array.isArray(result.skippedVolumes) ? result.skippedVolumes.length : 0;
+    showMessage(
+      targetStatus,
+      deletedCount === 0 && skippedCount === 0
+        ? 'No orphaned disks found.'
+        : `Deleted ${deletedCount} orphaned disk${deletedCount === 1 ? '' : 's'}; ignored ${skippedCount}.`,
+      'success',
+      8000
+    );
+  } catch (error) {
+    showMessage(targetStatus, error.message, 'danger', 10000);
+  } finally {
+    cleanOrphanedDisksButton.disabled = false;
   }
 });
 
