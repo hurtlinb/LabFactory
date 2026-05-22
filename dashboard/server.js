@@ -425,7 +425,7 @@ const readTerraformSettings = async () => {
 
 const readPublicTerraformSettings = async () => {
   const settings = await readTerraformSettings();
-  return sanitizeSettingsInput(settings);
+  return { ...defaultTerraformSettings, ...sanitizeSettingsInput(settings) };
 };
 
 const writeTerraformSettings = async settings => {

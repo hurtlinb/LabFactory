@@ -63,15 +63,46 @@ const formatProxmoxError = error =>
 const isProxmoxVmMissingMessage = message =>
   /does not exist|no such file or directory|not found|non[ -]?existent/i.test(String(message ?? '').trim());
 
-const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true }) =>
+const encodeRequestBody = body => {
+  if (body === null || body === undefined) {
+    return null;
+  }
+  if (body instanceof URLSearchParams) {
+    return {
+      content: body.toString(),
+      contentType: 'application/x-www-form-urlencoded'
+    };
+  }
+  if (typeof body === 'string') {
+    return { content: body, contentType: null };
+  }
+  return {
+    content: new URLSearchParams(
+      Object.entries(body)
+        .filter(([, value]) => value !== null && value !== undefined)
+        .map(([key, value]) => [key, String(value)])
+    ).toString(),
+    contentType: 'application/x-www-form-urlencoded'
+  };
+};
+
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null }) =>
   new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
+    const requestBody = encodeRequestBody(body);
+    const requestHeaders = { ...headers };
+    if (requestBody?.contentType && !Object.keys(requestHeaders).some(header => header.toLowerCase() === 'content-type')) {
+      requestHeaders['Content-Type'] = requestBody.contentType;
+    }
+    if (requestBody && !Object.keys(requestHeaders).some(header => header.toLowerCase() === 'content-length')) {
+      requestHeaders['Content-Length'] = Buffer.byteLength(requestBody.content);
+    }
     const request = transport.request(
       target,
       {
         method,
-        headers,
+        headers: requestHeaders,
         rejectUnauthorized
       },
       response => {
@@ -94,6 +125,9 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
       }
     );
     request.on('error', reject);
+    if (requestBody) {
+      request.write(requestBody.content);
+    }
     request.end();
   });
 
@@ -774,6 +808,40 @@ const invokeVmPowerAction = async (envSettings, node, vmid, action) => {
   });
 };
 
+const isProxmoxHaResourceMissing = error =>
+  error?.statusCode === 404 || /no such resource|does not exist|not found/i.test(formatProxmoxError(error));
+
+const setVmHaState = async (envSettings, vmid, state) => {
+  const sid = `vm:${Number(vmid)}`;
+  const apiUrl = new URL(
+    `cluster/ha/resources/${encodeURIComponent(sid)}`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  await requestJson({
+    url: apiUrl,
+    method: 'PUT',
+    body: { state },
+    ...proxmoxRequestOptions(envSettings)
+  });
+};
+
+const requestVmPowerState = async (envSettings, node, vmid, action) => {
+  const haState = action === 'start' ? 'started' : action === 'shutdown' ? 'stopped' : null;
+  if (haState) {
+    try {
+      await setVmHaState(envSettings, vmid, haState);
+      console.log(`Requested Proxmox HA state "${haState}" for VMID ${vmid}`);
+      return;
+    } catch (error) {
+      if (!isProxmoxHaResourceMissing(error)) {
+        throw error;
+      }
+    }
+  }
+
+  await invokeVmPowerAction(envSettings, node, vmid, action);
+};
+
 const safeUpdateLifecycleStatus = async (blueprintId, status, details = {}) => {
   try {
     await updateLifecycleStatus(blueprintId, status, details);
@@ -1197,7 +1265,7 @@ export function startTerraformWorker(connection) {
               );
               const powerActionTargets = blueprintVms.filter(vm => vmNodeByVmid.has(Number(vm.vmid)));
               await runWithConcurrency(powerActionTargets, terraformParallelism, async vm => {
-                await invokeVmPowerAction(
+                await requestVmPowerState(
                   merged,
                   vmNodeByVmid.get(Number(vm.vmid)),
                   vm.vmid,

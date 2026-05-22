@@ -7,6 +7,7 @@
   "vm_sockets": 1,
   "vm_memory": 2048,
   "vm_onboot": false,
+  "vm_ha_state": "started",
   "vm_description": "Clone du template LabFactory.",
   "vm_scsi_hw": "virtio-scsi-pci",
   "vm_full_clone": false,

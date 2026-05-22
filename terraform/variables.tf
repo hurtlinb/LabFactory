@@ -164,6 +164,17 @@ variable "vm_onboot" {
   default     = false
 }
 
+variable "vm_ha_state" {
+  description = "Requested Proxmox HA state for each deployed VM. Use an empty string to leave HA unmanaged."
+  type        = string
+  default     = "started"
+
+  validation {
+    condition     = contains(["started", "stopped", "enabled", "disabled", "ignored", ""], lower(trimspace(var.vm_ha_state)))
+    error_message = "vm_ha_state must be one of started, stopped, enabled, disabled, ignored, or an empty string."
+  }
+}
+
 variable "vm_pool" {
   description = "Optional pool to add the VM to. Leave empty to skip."
   type        = string
