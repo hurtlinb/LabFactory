@@ -21,6 +21,7 @@ const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
 const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const WINDOWS_WINRM_WAIT_RETRY_MS = 5000;
 const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 60;
+const WINDOWS_WINRM_STABLE_RECHECK_MS = 30000;
 const VM_POWER_STATE_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
 const VM_POWER_STATE_WAIT_RETRY_MS = 5000;
 const STOP_STATE_CONFIRMATION_TIMEOUT_MS = 60 * 1000;
@@ -189,6 +190,9 @@ const normalizeVmids = value =>
 
 const buildTerraformReplaceArgs = vmids =>
   normalizeVmids(vmids).map(vmid => `-replace=proxmox_vm_qemu.lab_vm["${vmid}"]`);
+
+const buildTerraformTargetArgs = vmids =>
+  normalizeVmids(vmids).map(vmid => `-target=proxmox_vm_qemu.lab_vm["${vmid}"]`);
 
 const fetchVmConfig = async (envSettings, node, vmid) => {
   const apiUrl = new URL(
@@ -516,8 +520,9 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
 };
 
 const updateLifecycleStatus = async (blueprintId, status, details = {}) => {
-  if (!blueprintId) return;
-  await dbPool.query(
+  if (!blueprintId) return false;
+  const expectedRunId = details.runId == null ? null : String(details.runId);
+  const result = await dbPool.query(
     `UPDATE lab_deployments
      SET
        status = $2,
@@ -525,9 +530,12 @@ const updateLifecycleStatus = async (blueprintId, status, details = {}) => {
        last_job_id = $4,
        last_run_id = $5,
        updated_at = NOW()
-     WHERE id = $1`,
-    [blueprintId, status, details.action ?? 'deploy', details.jobId ?? null, details.runId ?? null]
+     WHERE id = $1
+       AND ($6::text IS NULL OR last_run_id = $6)
+     RETURNING id`,
+    [blueprintId, status, details.action ?? 'deploy', details.jobId ?? null, details.runId ?? null, expectedRunId]
   );
+  return result.rowCount > 0;
 };
 
 const fetchDeploymentLifecycleState = async deploymentId => {
@@ -811,6 +819,14 @@ const invokeVmPowerAction = async (envSettings, node, vmid, action) => {
 const isProxmoxHaResourceMissing = error =>
   error?.statusCode === 404 || /no such resource|does not exist|not found/i.test(formatProxmoxError(error));
 
+const isProxmoxHaResourceAlreadyExists = error =>
+  /already exists|resource.*exists|duplicate/i.test(formatProxmoxError(error));
+
+const normalizeVmHaState = value => {
+  const state = String(value ?? '').trim().toLowerCase();
+  return ['started', 'stopped', 'enabled', 'disabled', 'ignored'].includes(state) ? state : '';
+};
+
 const setVmHaState = async (envSettings, vmid, state) => {
   const sid = `vm:${Number(vmid)}`;
   const apiUrl = new URL(
@@ -823,6 +839,46 @@ const setVmHaState = async (envSettings, vmid, state) => {
     body: { state },
     ...proxmoxRequestOptions(envSettings)
   });
+};
+
+const createVmHaResource = async (envSettings, vmid, state) => {
+  const sid = `vm:${Number(vmid)}`;
+  const apiUrl = new URL(
+    'cluster/ha/resources',
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  await requestJson({
+    url: apiUrl,
+    method: 'POST',
+    body: { sid, state },
+    ...proxmoxRequestOptions(envSettings)
+  });
+};
+
+const ensureVmHaState = async (envSettings, vmid, state) => {
+  const normalizedState = normalizeVmHaState(state);
+  if (!normalizedState) {
+    return false;
+  }
+
+  try {
+    await setVmHaState(envSettings, vmid, normalizedState);
+  } catch (error) {
+    if (!isProxmoxHaResourceMissing(error)) {
+      throw error;
+    }
+
+    try {
+      await createVmHaResource(envSettings, vmid, normalizedState);
+    } catch (createError) {
+      if (!isProxmoxHaResourceAlreadyExists(createError)) {
+        throw createError;
+      }
+      await setVmHaState(envSettings, vmid, normalizedState);
+    }
+  }
+
+  return true;
 };
 
 const requestVmPowerState = async (envSettings, node, vmid, action) => {
@@ -844,15 +900,23 @@ const requestVmPowerState = async (envSettings, node, vmid, action) => {
 
 const safeUpdateLifecycleStatus = async (blueprintId, status, details = {}) => {
   try {
-    await updateLifecycleStatus(blueprintId, status, details);
+    const updated = await updateLifecycleStatus(blueprintId, status, details);
+    if (!updated && blueprintId) {
+      console.warn(
+        `Skipping stale lifecycle status update to ${status} for ${blueprintId} (runId=${details.runId ?? 'n/a'})`
+      );
+    }
+    return updated;
   } catch (error) {
     console.error(`Unable to update lifecycle status to ${status} for ${blueprintId}`, error);
+    return false;
   }
 };
 
 const workspaceNameFor = blueprintId => `blueprint-${String(blueprintId).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 const isLinuxOsType = osType => !isWindowsOsType(osType);
+const isLinuxCloudInitOsType = osType => ['ubuntu'].includes(String(osType ?? '').trim().toLowerCase());
 const getWindowsAdminUsername = language =>
   (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
 
@@ -936,13 +1000,30 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
   hosts: windows_readiness_targets
   gather_facts: false
   tasks:
-    - name: Check Cloudbase-Init done flag
+    - name: Check Cloudbase-Init completion for current boot
       ansible.windows.win_powershell:
         script: |
-          if (-not (Test-Path -LiteralPath 'C:\\ProgramData\\cloudbase-init\\done.flag')) {
+          $flag = 'C:\\ProgramData\\cloudbase-init\\done.flag'
+          if (-not (Test-Path -LiteralPath $flag)) {
             Write-Error 'Cloudbase-Init has not finished'
             exit 1
           }
+
+          $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
+          $flagTime = (Get-Item -LiteralPath $flag).LastWriteTime
+          if ($flagTime -lt $bootTime) {
+            Write-Error "Cloudbase-Init done flag is stale: $flagTime is before boot $bootTime"
+            exit 1
+          }
+
+          $cloudbaseServices = Get-Service -Name 'cloudbase-init','cloudbaseinit' -ErrorAction SilentlyContinue
+          $activeServices = @($cloudbaseServices | Where-Object { $_.Status -in @('StartPending', 'Running', 'ContinuePending') })
+          if ($activeServices.Count -gt 0) {
+            Write-Error "Cloudbase-Init service is still active: $($activeServices.Name -join ', ')"
+            exit 1
+          }
+
+          Write-Output "Cloudbase-Init completed at $flagTime and WinRM is reachable"
 `;
 
 const buildWindowsReadinessInventory = ({ host, user, password }) => `all:
@@ -966,16 +1047,21 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
   const startedAt = Date.now();
   let lastError = null;
   const remoteCommand = [
-    "if test -f /var/lib/cloud/instance/boot-finished; then exit 0; fi",
-    "if ! command -v cloud-init >/dev/null 2>&1; then exit 0; fi",
+    "if ! command -v cloud-init >/dev/null 2>&1; then echo 'cloud-init command not found' >&2; exit 1; fi",
+    "boot_finished=/var/lib/cloud/instance/boot-finished",
+    "if test -f \"$boot_finished\"; then exit 0; fi",
+    "status_text=$(cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true)",
+    "if printf '%s' \"$status_text\" | grep -qiE '(^|[[:space:]])status:[[:space:]]*(done|degraded done)([[:space:]]|$)'; then exit 0; fi",
+    "if printf '%s' \"$status_text\" | grep -qiE '(^|[[:space:]])extended_status:[[:space:]]*(done|degraded done)([[:space:]]|$)'; then exit 0; fi",
+    "status_json=$(cloud-init status --format=json 2>/dev/null || true)",
+    "if printf '%s' \"$status_json\" | grep -qiE '\"status\"[[:space:]]*:[[:space:]]*\"(done|degraded done)\"'; then exit 0; fi",
+    "if printf '%s' \"$status_json\" | grep -qiE '\"extended_status\"[[:space:]]*:[[:space:]]*\"(done|degraded done)\"'; then exit 0; fi",
     "status_json=''",
     "if test -r /run/cloud-init/status.json; then status_json=$(cat /run/cloud-init/status.json 2>/dev/null || true); fi",
-    "if printf '%s' \"$status_json\" | grep -qiE '\"status\"[[:space:]]*:[[:space:]]*\"(done|disabled|not run)\"'; then exit 0; fi",
+    "if printf '%s' \"$status_json\" | grep -qiE '\"status\"[[:space:]]*:[[:space:]]*\"done\"'; then exit 0; fi",
     "if printf '%s' \"$status_json\" | grep -qiE '\"extended_status\"[[:space:]]*:[[:space:]]*\"degraded done\"'; then exit 0; fi",
-    "status_text=$(cloud-init status --long 2>/dev/null || cloud-init status 2>/dev/null || true)",
-    "if printf '%s' \"$status_text\" | grep -qiE 'status:[[:space:]]*(done|disabled|not run)'; then exit 0; fi",
-    "if printf '%s' \"$status_text\" | grep -qiE 'extended_status:[[:space:]]*degraded done'; then exit 0; fi",
-    "cloud-init status --wait >/dev/null 2>&1"
+    "printf '%s\\n' \"cloud-init is not done: $status_text\" >&2",
+    "exit 1"
   ].join('; ');
 
   while (Date.now() - startedAt < LINUX_SSH_WAIT_TIMEOUT_MS) {
@@ -1022,6 +1108,8 @@ const waitForWindowsWinrmAndCloudbaseInit = async ({ host, user, password, signa
   const tempToken = `${process.pid}-${Date.now()}-${String(host).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
   const inventoryPath = path.join(tmpdir(), `labfactory-windows-readiness-${tempToken}.yml`);
   const playbookPath = path.join(tmpdir(), `labfactory-windows-readiness-${tempToken}.playbook.yml`);
+  let lastError = null;
+  let hasStableSuccess = false;
 
   await writeFile(inventoryPath, buildWindowsReadinessInventory({ host, user, password }), 'utf8');
   await writeFile(playbookPath, windowsCloudbaseReadinessPlaybook, 'utf8');
@@ -1048,19 +1136,145 @@ const waitForWindowsWinrmAndCloudbaseInit = async ({ host, user, password, signa
             signal
           }
         );
-        return;
-      } catch {
+        if (hasStableSuccess) {
+          return;
+        }
+        hasStableSuccess = true;
+        await sleep(WINDOWS_WINRM_STABLE_RECHECK_MS);
+      } catch (error) {
+        lastError = error;
+        hasStableSuccess = false;
         await sleep(WINDOWS_WINRM_WAIT_RETRY_MS);
       }
     }
 
-    throw new Error(`Timed out waiting for Windows guest ${host} to accept WinRM and finish Cloudbase-Init`);
+    throw new Error(
+      `Timed out waiting for Windows guest ${host} to accept stable WinRM and finish Cloudbase-Init${lastError ? `: ${lastError.message}` : ''}`
+    );
   } finally {
     await Promise.all([
       rm(inventoryPath, { force: true }),
       rm(playbookPath, { force: true })
     ]);
   }
+};
+
+const buildWindowsReadinessTargets = blueprintVms =>
+  (Array.isArray(blueprintVms) ? blueprintVms : [])
+    .filter(vm => isWindowsOsType(vm.osType))
+    .map(vm => ({
+      vmid: vm.vmid,
+      name: vm.name,
+      host: buildStaticVmIpAddress(vm),
+      user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language)
+    }));
+
+const buildLinuxReadinessTargets = blueprintVms =>
+  (Array.isArray(blueprintVms) ? blueprintVms : [])
+    .filter(vm => isLinuxCloudInitOsType(vm.osType) && vm.ipLastOctet != null && vm.subnetBase)
+    .map(vm => ({
+      vmid: vm.vmid,
+      name: vm.name,
+      host: buildStaticVmIpAddress(vm)
+    }))
+    .filter(target => target.host);
+
+const buildLinuxReadinessTargetsWithoutHost = (blueprintVms, linuxReadinessTargets) =>
+  (Array.isArray(blueprintVms) ? blueprintVms : [])
+    .filter(vm => isLinuxCloudInitOsType(vm.osType))
+    .filter(vm => !linuxReadinessTargets.some(target => Number(target.vmid) === Number(vm.vmid)));
+
+const activateVmHaAfterReadiness = async ({ action, merged, target }) => {
+  const haState = normalizeVmHaState(merged.vm_ha_state);
+  if (action !== 'deploy' || !haState) {
+    return;
+  }
+
+  await ensureVmHaState(merged, target.vmid, haState);
+  console.log(`Activated Proxmox HA state "${haState}" for VMID ${target.vmid} after guest readiness`);
+};
+
+const waitForGuestReadiness = async ({
+  action,
+  targets,
+  merged,
+  job,
+  terraformParallelism,
+  abortController,
+  readinessReporter
+}) => {
+  const windowsReadinessTargets = buildWindowsReadinessTargets(targets);
+  const windowsReadinessTargetsWithoutHost = windowsReadinessTargets.filter(target => !target.host);
+  if (windowsReadinessTargetsWithoutHost.length > 0) {
+    throw new Error(
+      `Unable to determine a static IPv4 address for Windows readiness checks: ${windowsReadinessTargetsWithoutHost
+        .map(target => target.name)
+        .join(', ')}`
+    );
+  }
+
+  if (windowsReadinessTargets.length > 0) {
+    const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    if (!windowsPassword) {
+      throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
+    }
+  }
+
+  const linuxReadinessTargets = buildLinuxReadinessTargets(targets);
+  const linuxReadinessTargetsWithoutHost = buildLinuxReadinessTargetsWithoutHost(targets, linuxReadinessTargets);
+  if (linuxReadinessTargetsWithoutHost.length > 0) {
+    throw new Error(
+      `Unable to determine a static IPv4 address for Linux readiness checks: ${linuxReadinessTargetsWithoutHost
+        .map(target => target.name)
+        .join(', ')}`
+    );
+  }
+
+  if (linuxReadinessTargets.length > 0) {
+    const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    if (!linuxPassword) {
+      throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
+    }
+  }
+
+  const readinessTasks = [];
+
+  if (windowsReadinessTargets.length > 0) {
+    const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    readinessTasks.push(
+      runWithConcurrency(windowsReadinessTargets, terraformParallelism, async target => {
+        console.log(`Waiting for Windows guest ${target.name} (${target.host}) to respond over WinRM during ${action}`);
+        await waitForWindowsWinrmAndCloudbaseInit({
+          host: target.host,
+          user: target.user,
+          password: windowsPassword,
+          signal: abortController.signal
+        });
+        await activateVmHaAfterReadiness({ action, merged, target });
+        await readinessReporter.markReady(target.vmid);
+      })
+    );
+  }
+
+  if (linuxReadinessTargets.length > 0) {
+    const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
+    const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    readinessTasks.push(
+      runWithConcurrency(linuxReadinessTargets, terraformParallelism, async target => {
+        console.log(`Waiting for Linux guest ${target.name} (${target.host}) to respond over SSH during ${action}`);
+        await waitForLinuxSshAndCloudInit({
+          host: target.host,
+          user: linuxUser,
+          password: linuxPassword,
+          signal: abortController.signal
+        });
+        await activateVmHaAfterReadiness({ action, merged, target });
+        await readinessReporter.markReady(target.vmid);
+      })
+    );
+  }
+
+  await Promise.all(readinessTasks);
 };
 
 const createDeploymentReadinessReporter = job => {
@@ -1109,6 +1323,7 @@ const createDeploymentReadinessReporter = job => {
     markReady: async vmid => {
       const numericVmid = Number(vmid);
       if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
+        startedVmids.add(numericVmid);
         readyVmids.add(numericVmid);
       }
       await publish();
@@ -1149,6 +1364,7 @@ export function startTerraformWorker(connection) {
         const terraformParallelism = resolveTerraformParallelism();
         const replaceVmids = normalizeVmids(job.data?.replaceVmids);
         const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(replaceVmids) : [];
+        const targetArgs = action === 'deploy' && replaceVmids.length > 0 ? buildTerraformTargetArgs(replaceVmids) : [];
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -1157,11 +1373,20 @@ export function startTerraformWorker(connection) {
               : action === 'stop'
                 ? 'stopping'
                 : 'deploying';
-        await safeUpdateLifecycleStatus(job.data.labInstanceId, inProgressStatus, {
+        const statusClaimed = await safeUpdateLifecycleStatus(job.data.labInstanceId, inProgressStatus, {
           action,
           jobId: String(job.id),
           runId: job.data.runId
         });
+        if (!statusClaimed) {
+          console.log(`Skipping stale Terraform job ${job.id} for deployment ${deploymentLabel} (${action})`);
+          return {
+            planOutput: '',
+            labInstanceId: job.data.labInstanceId,
+            runId: job.data.runId,
+            status: 'stale-job-skipped'
+          };
+        }
         if (action === 'deploy') {
           await readinessReporter.publish();
         }
@@ -1330,6 +1555,25 @@ export function startTerraformWorker(connection) {
               }
             }
 
+            if (action === 'start') {
+              await waitForVmPowerState({
+                envSettings: merged,
+                vmids: blueprintVms.map(vm => vm.vmid),
+                desiredState: 'running',
+                signal: abortController.signal
+              });
+              await readinessReporter.markStartedAll();
+              await waitForGuestReadiness({
+                action,
+                targets: blueprintVms,
+                merged,
+                job,
+                terraformParallelism,
+                abortController,
+                readinessReporter
+              });
+            }
+
             await safeUpdateLifecycleStatus(
               job.data.labInstanceId,
               action === 'start' ? 'running' : 'stopped',
@@ -1392,7 +1636,7 @@ export function startTerraformWorker(connection) {
           const planAndApply = async () => {
             const output = await runCommand(
               'terraform',
-              ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`, ...replaceArgs],
+              ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`, ...replaceArgs, ...targetArgs],
               { cwd: terraformDir, env, signal: abortController.signal }
             );
             await runCommand(
@@ -1412,109 +1656,15 @@ export function startTerraformWorker(connection) {
 
         if (action === 'deploy') {
           await readinessReporter.markStartedAll();
-        }
-
-        const windowsReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? scopedBlueprintVms
-              .filter(vm => isWindowsOsType(vm.osType))
-              .map(vm => ({
-                vmid: vm.vmid,
-                name: vm.name,
-                host: buildStaticVmIpAddress(vm),
-                user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language)
-              }))
-          : [];
-
-        const windowsReadinessTargetsWithoutHost = windowsReadinessTargets.filter(target => !target.host);
-        if (action === 'deploy' && windowsReadinessTargetsWithoutHost.length > 0) {
-          throw new Error(
-            `Unable to determine a static IPv4 address for Windows readiness checks: ${windowsReadinessTargetsWithoutHost
-              .map(target => target.name)
-              .join(', ')}`
-          );
-        }
-
-        if (action === 'deploy' && windowsReadinessTargets.length > 0) {
-          const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
-          if (!windowsPassword) {
-            throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
-          }
-        }
-
-        const linuxReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? scopedBlueprintVms
-              .filter(vm => isLinuxOsType(vm.osType) && vm.ipLastOctet != null && vm.subnetBase)
-              .map(vm => ({
-                vmid: vm.vmid,
-                name: vm.name,
-                host: buildStaticVmIpAddress(vm)
-              }))
-              .filter(target => target.host)
-          : [];
-        const skippedLinuxReadinessTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? scopedBlueprintVms
-              .filter(vm => isLinuxOsType(vm.osType))
-              .filter(vm => !linuxReadinessTargets.some(target => Number(target.vmid) === Number(vm.vmid)))
-          : [];
-
-        if (action === 'deploy' && linuxReadinessTargets.length > 0) {
-          const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
-          const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
-          if (!linuxPassword) {
-            throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
-          }
-        }
-
-        if (action === 'deploy') {
-          const readinessTasks = [];
-
-          if (windowsReadinessTargets.length > 0) {
-            const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
-            readinessTasks.push(
-              runWithConcurrency(windowsReadinessTargets, terraformParallelism, async target => {
-                console.log(`Waiting for Windows guest ${target.name} (${target.host}) to finish Cloudbase-Init over WinRM`);
-                await waitForWindowsWinrmAndCloudbaseInit({
-                  host: target.host,
-                  user: target.user,
-                  password: windowsPassword,
-                  signal: abortController.signal
-                });
-                await readinessReporter.markReady(target.vmid);
-              })
-            );
-          }
-
-          if (linuxReadinessTargets.length > 0) {
-            const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
-            const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
-            readinessTasks.push(
-              runWithConcurrency(linuxReadinessTargets, terraformParallelism, async target => {
-                console.log(`Waiting for Linux guest ${target.name} (${target.host}) to finish cloud-init`);
-                await waitForLinuxSshAndCloudInit({
-                  host: target.host,
-                  user: linuxUser,
-                  password: linuxPassword,
-                  signal: abortController.signal
-                });
-                await readinessReporter.markReady(target.vmid);
-              })
-            );
-          }
-
-          if (skippedLinuxReadinessTargets.length > 0) {
-            readinessTasks.push(
-              (async () => {
-                for (const target of skippedLinuxReadinessTargets) {
-                  console.warn(
-                    `Skipping cloud-init readiness check for Linux guest ${target.name} (${target.vmid}) because no static IPv4 address is available; treating it as ready`
-                  );
-                  await readinessReporter.markReady(target.vmid);
-                }
-              })()
-            );
-          }
-
-          await Promise.all(readinessTasks);
+          await waitForGuestReadiness({
+            action,
+            targets: scopedBlueprintVms,
+            merged,
+            job,
+            terraformParallelism,
+            abortController,
+            readinessReporter
+          });
         }
 
         const customizationTargets = Array.isArray(job.data?.blueprint?.vms)

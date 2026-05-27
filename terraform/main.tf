@@ -83,7 +83,6 @@ resource "proxmox_vm_qemu" "lab_vm" {
 
   memory             = var.vm_memory
   start_at_node_boot = var.vm_onboot
-  hastate            = trimspace(var.vm_ha_state) == "" ? null : lower(trimspace(var.vm_ha_state))
   pool               = var.vm_pool == "" ? null : var.vm_pool
 
   clone      = each.value.clone_source

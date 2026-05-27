@@ -20,8 +20,9 @@ const dbPool = new Pool({
 export const ansibleQueueName = 'ansible-workflows';
 
 const updateDeploymentStatus = async (deploymentId, status, details = {}) => {
-  if (!deploymentId) return;
-  await dbPool.query(
+  if (!deploymentId) return false;
+  const expectedRunId = details.runId == null ? null : String(details.runId);
+  const result = await dbPool.query(
     `UPDATE lab_deployments
      SET
        status = $2,
@@ -29,16 +30,26 @@ const updateDeploymentStatus = async (deploymentId, status, details = {}) => {
        last_job_id = $4,
        last_run_id = $5,
        updated_at = NOW()
-     WHERE id = $1`,
-    [deploymentId, status, details.action ?? 'customize', details.jobId ?? null, details.runId ?? null]
+     WHERE id = $1
+       AND ($6::text IS NULL OR last_run_id = $6)
+     RETURNING id`,
+    [deploymentId, status, details.action ?? 'customize', details.jobId ?? null, details.runId ?? null, expectedRunId]
   );
+  return result.rowCount > 0;
 };
 
 const safeUpdateDeploymentStatus = async (deploymentId, status, details = {}) => {
   try {
-    await updateDeploymentStatus(deploymentId, status, details);
+    const updated = await updateDeploymentStatus(deploymentId, status, details);
+    if (!updated && deploymentId) {
+      console.warn(
+        `Skipping stale deployment status update to ${status} for ${deploymentId} (runId=${details.runId ?? 'n/a'})`
+      );
+    }
+    return updated;
   } catch (error) {
     console.error(`Unable to update deployment status to ${status} for ${deploymentId}`, error);
+    return false;
   }
 };
 
@@ -194,11 +205,16 @@ export function startAnsibleWorker(connection) {
           'utf8'
         );
 
-        await safeUpdateDeploymentStatus(job.data.deploymentId, 'customizing', {
+        const statusClaimed = await safeUpdateDeploymentStatus(job.data.deploymentId, 'customizing', {
           action: 'customize',
           jobId: String(job.id),
           runId: job.data.runId
         });
+        if (!statusClaimed) {
+          await fs.rm(inventoryPath, { force: true });
+          console.log(`Skipping stale Ansible job ${job.id} for deployment ${deploymentLabel} (customize)`);
+          return { status: 'stale-job-skipped', extraVars };
+        }
 
         try {
           const commonArgs = ['--inventory', inventoryPath, '--extra-vars', JSON.stringify(extraVars)];

@@ -151,7 +151,7 @@ Important points:
 - the Proxmox API token must have `VM.Audit` on each template VMID, for example `/vms/<template-vmid>`, so the worker can read the template name and disk layout
 - each deployment uses its own Terraform workspace
 - VMs are distributed round-robin across `PROXMOX_NODES`; when it is empty, the worker discovers online Proxmox nodes and falls back to `PROXMOX_NODE`
-- VMs are registered in Proxmox HA by default with `vm_ha_state = "started"`; set `vm_ha_state` to an empty string to leave HA unmanaged
+- VMs are registered in Proxmox HA only after guest readiness checks pass, using `vm_ha_state = "started"` by default; set `vm_ha_state` to an empty string to leave HA unmanaged
 - Terraform and Telmate provider concurrency are controlled by `TERRAFORM_PARALLELISM` (`10` by default, capped at `64` by the worker)
 - deployment state is tracked in PostgreSQL
 

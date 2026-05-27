@@ -165,7 +165,7 @@ variable "vm_onboot" {
 }
 
 variable "vm_ha_state" {
-  description = "Requested Proxmox HA state for each deployed VM. Use an empty string to leave HA unmanaged."
+  description = "Requested Proxmox HA state for each deployed VM after guest readiness. Use an empty string to leave HA unmanaged."
   type        = string
   default     = "started"
 

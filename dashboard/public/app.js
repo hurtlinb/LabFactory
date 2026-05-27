@@ -766,12 +766,13 @@ function renderLifecycleLabs() {
         const actions = resolveLifecycleActions(deployment.status);
         const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
         const hasWarning = deployment.status === 'mixed';
-        const startedCount = Number(deployment.startedCount ?? deployment.createdCount ?? 0);
         const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
+        const totalVmCount = Number(deployment.totalVmCount ?? 0);
+        const displayStatus = deployment.displayStatus || deployment.status;
         const statusLabel =
-          ['queued', 'deploying', 'customizing'].includes(deployment.status)
-            ? `${deployment.status} ${readyCount}/${startedCount}`
-              : escapeHtml(deployment.status || 'idle');
+          ['queued', 'deploying', 'customizing', 'starting'].includes(displayStatus)
+            ? `${displayStatus} ${readyCount}/${totalVmCount}`
+              : escapeHtml(displayStatus || 'idle');
         const actionMarkup = actions.busy
           ? '<span class="loading-spinner" aria-hidden="true"></span>'
           : actions.items
@@ -1028,6 +1029,12 @@ function resolveLifecycleActions(status) {
     return {
       busy: false,
       items: [{ action: 'deploy', icon: '↑', label: 'Deploy lab' }]
+    };
+  }
+  if (!status || status === 'idle') {
+    return {
+      busy: false,
+      items: [{ action: 'deploy', icon: '⬆', label: 'Deploy lab' }]
     };
   }
   if (status === 'running') {
