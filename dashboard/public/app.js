@@ -130,6 +130,18 @@ const FALLBACK_LINUX_TIMEZONE_OPTIONS = [
   }
 ];
 
+const PAGE_TITLES = {
+  'dashboard':      { title: 'Dashboard',   breadcrumb: 'LabFactory' },
+  'blueprint':      { title: 'Blueprints',  breadcrumb: 'Labs' },
+  'lifecycle':      { title: 'Lifecycle',   breadcrumb: 'Labs' },
+  'admin-users':    { title: 'Users',       breadcrumb: 'Administration' },
+  'admin-courses':  { title: 'Courses',     breadcrumb: 'Administration' },
+  'models':         { title: 'VM Models',   breadcrumb: 'Administration' },
+  'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
+  'admin-settings': { title: 'Settings',    breadcrumb: 'Administration' },
+  'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
+};
+
 function getDragItemType(dataTransfer) {
   if (activeDragItem?.type) {
     return activeDragItem.type;
@@ -186,6 +198,13 @@ function setActiveView(view) {
   pages.forEach(page => {
     page.hidden = page.dataset.view !== view;
   });
+  const info = PAGE_TITLES[view];
+  if (info) {
+    const titleEl = document.getElementById('pageTitle');
+    const breadcrumbEl = document.getElementById('pageBreadcrumb');
+    if (titleEl) titleEl.textContent = info.title;
+    if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
+  }
   if (view !== 'blueprint') {
     state.isBlueprintWorkspaceVisible = false;
     renderBlueprintWorkspace();
@@ -391,85 +410,55 @@ function renderCourses() {
   });
 }
 
+function getOsGroup(osType) {
+  if (osType === 'windows-server') return 'Server';
+  if (osType === 'windows11') return 'Windows';
+  return 'Linux';
+}
+
+function getOsDotClass(osType) {
+  if (osType === 'windows-server') return 'dot-server';
+  if (osType === 'windows11') return 'dot-win';
+  return 'dot-linux';
+}
+
 function renderTemplates() {
   renderModelList();
 
-  const templateCards = state.templates.length
-    ? state.templates
-        .map(
-          template => `
-            <article class="template-card" draggable="true" data-template-id="${template.id}">
-              <div class="template-badge template-badge-image">
-                <img src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
-              </div>
-              <strong>${escapeHtml(template.name)}</strong>
-            </article>
-          `
-        )
-        .join('')
-    : '<p class="placeholder">No VM models yet.</p>';
+  const groupsHtml = state.templates.length ? `
+    <div class="vm-lib-group">
+      <p class="vm-lib-group-label">VMs</p>
+      ${state.templates.map(t => `
+        <article class="vm-lib-item" draggable="true" data-template-id="${t.id}">
+          <span class="vm-lib-name">${escapeHtml(t.name)}</span>
+          <span class="vm-lib-vmid">${t.proxmoxTemplateVmid}</span>
+        </article>`).join('')}
+    </div>` : '';
 
-  if (!state.templates.length) {
-    templatePalette.innerHTML = `
-      <section class="palette-group">
-        <div class="palette-group-head">
-          <p class="eyebrow">VM models</p>
-        </div>
-        <div class="palette-group-grid">
-          ${templateCards}
-        </div>
-      </section>
-      <section class="palette-group">
-        <div class="palette-group-head">
-          <p class="eyebrow">Customization</p>
-        </div>
-        <div class="palette-group-grid">
-          <article class="palette-label-card" draggable="true" data-customization-key="name">
-            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('name')}</span>
-            <strong>Hostname</strong>
-          </article>
-          <article class="palette-label-card" draggable="true" data-customization-key="timezone">
-            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
-            <strong>Timezone</strong>
-          </article>
-        </div>
-      </section>
-    `;
-  } else {
-    templatePalette.innerHTML = `
-      <section class="palette-group">
-        <div class="palette-group-head">
-          <p class="eyebrow">VM models</p>
-        </div>
-        <div class="palette-group-grid">
-          ${templateCards}
-        </div>
-      </section>
-      <section class="palette-group">
-        <div class="palette-group-head">
-          <p class="eyebrow">Customization</p>
-        </div>
-        <div class="palette-group-grid">
-          <article class="palette-label-card" draggable="true" data-customization-key="name">
-            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('name')}</span>
-            <strong>Hostname</strong>
-          </article>
-          <article class="palette-label-card" draggable="true" data-customization-key="timezone">
-            <span class="palette-label-tag" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
-            <strong>Timezone</strong>
-          </article>
-        </div>
-      </section>
-    `;
-  }
+  const custHtml = `
+    <div class="vm-lib-group">
+      <p class="vm-lib-group-label">Customization</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="name">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('name')}</span>
+        <span class="vm-lib-cust-name">Hostname</span>
+      </article>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="timezone">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
+        <span class="vm-lib-cust-name">Timezone</span>
+      </article>
+    </div>
+    <p class="vm-lib-hint">→ Drag to canvas</p>`;
 
-  templatePalette.querySelectorAll('.template-card').forEach(card => {
+  templatePalette.innerHTML = `
+    <div class="vm-lib-section">
+      ${groupsHtml || '<p class="vm-lib-group-label">VMs</p><p class="placeholder">No VM models yet.</p>'}
+      ${custHtml}
+    </div>`;
+
+  templatePalette.querySelectorAll('.vm-lib-item').forEach(card => {
     card.addEventListener('dragstart', event => {
       card.classList.add('dragging');
-      activeDragItem = {
-        type: 'template',
-        value: card.dataset.templateId
-      };
+      activeDragItem = { type: 'template', value: card.dataset.templateId };
       event.dataTransfer.setData('application/x-labfactory-item-type', 'template');
       event.dataTransfer.setData('text/plain', card.dataset.templateId);
     });
@@ -479,13 +468,10 @@ function renderTemplates() {
     });
   });
 
-  templatePalette.querySelectorAll('.palette-label-card').forEach(card => {
+  templatePalette.querySelectorAll('.vm-lib-cust').forEach(card => {
     card.addEventListener('dragstart', event => {
       card.classList.add('dragging');
-      activeDragItem = {
-        type: 'customization',
-        value: card.dataset.customizationKey
-      };
+      activeDragItem = { type: 'customization', value: card.dataset.customizationKey };
       event.dataTransfer.setData('application/x-labfactory-item-type', 'customization');
       event.dataTransfer.setData('application/x-labfactory-customization-key', card.dataset.customizationKey);
       event.dataTransfer.setData('text/plain', card.dataset.customizationKey);
@@ -753,6 +739,68 @@ function renderCanvas() {
   });
 }
 
+function renderLifecycleSteps(status) {
+  const s = String(status || 'idle');
+
+  const opMap = {
+    idle:        { label: 'Not started',       cls: 'op-idle',    icon: '↺' },
+    queued:      { label: 'Queued',            cls: 'op-busy',    icon: '↻' },
+    deploying:   { label: 'Deploying…',        cls: 'op-busy',    icon: '↻' },
+    customizing: { label: 'Configuring…',      cls: 'op-busy',    icon: '↻' },
+    deployed:    { label: 'Ready to start',    cls: 'op-stopped', icon: '▶' },
+    starting:    { label: 'Starting…',         cls: 'op-busy',    icon: '↻' },
+    running:     { label: 'Running',           cls: 'op-running', icon: '▶' },
+    mixed:       { label: 'Partially running', cls: 'op-warning', icon: '▶' },
+    stopping:    { label: 'Stopping…',         cls: 'op-busy',    icon: '↻' },
+    stopped:     { label: 'Stopped',           cls: 'op-stopped', icon: '■' },
+    destroying:  { label: 'Destroying…',       cls: 'op-busy',    icon: '↻' },
+    destroyed:   { label: 'Destroyed',         cls: 'op-idle',    icon: '✕' },
+    failed:      { label: 'Failed',            cls: 'op-warning', icon: '!' },
+  };
+  const op = opMap[s] || { label: s, cls: 'op-idle', icon: '?' };
+
+  const prepareState = ['queued', 'deploying', 'customizing'].includes(s) ? 'active'
+    : ['deployed', 'running', 'mixed', 'starting', 'stopping', 'stopped', 'destroying', 'destroyed'].includes(s) ? 'done'
+    : '';
+
+  const activeState = ['deployed', 'running', 'mixed', 'starting', 'stopping', 'stopped'].includes(s) ? 'active'
+    : ['destroying', 'destroyed'].includes(s) ? 'done'
+    : '';
+
+  const destroyState = s === 'destroying' ? 'active' : s === 'destroyed' ? 'done' : '';
+
+  const phases = [
+    {
+      state: prepareState,
+      icon: prepareState === 'done' ? '✓' : '↑',
+      label: 'Prepare',
+      sub: 'Clone + init',
+      circleClass: '',
+    },
+    {
+      state: activeState,
+      icon: activeState === 'done' ? '✓' : activeState === 'active' ? op.icon : '↺',
+      label: 'Active',
+      sub: activeState === 'active' ? op.label : 'Start / Stop',
+      circleClass: activeState === 'active' ? op.cls : '',
+    },
+    {
+      state: destroyState,
+      icon: destroyState === 'done' ? '✓' : '✕',
+      label: 'Destroy',
+      sub: 'Delete VMs',
+      circleClass: '',
+    },
+  ];
+
+  return `<div class="lc-steps">${phases.map(p => `
+    <div class="lc-step ${p.state}">
+      <div class="lc-circle ${p.circleClass}">${p.icon}</div>
+      <div class="lc-label">${p.label}</div>
+      <div class="lc-sub">${p.sub}</div>
+    </div>`).join('')}</div>`;
+}
+
 function renderLifecycleLabs() {
   if (!lifecycleList) return;
   if (!state.deployments.length) {
@@ -761,53 +809,56 @@ function renderLifecycleLabs() {
   }
 
   lifecycleList.innerHTML = state.deployments
-    .map(
-      deployment => {
-        const actions = resolveLifecycleActions(deployment.status);
-        const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
-        const hasWarning = deployment.status === 'mixed';
-        const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
-        const totalVmCount = Number(deployment.totalVmCount ?? 0);
-        const displayStatus = deployment.displayStatus || deployment.status;
-        const statusLabel =
-          ['queued', 'deploying', 'customizing', 'starting'].includes(displayStatus)
-            ? `${displayStatus} ${readyCount}/${totalVmCount}`
-              : escapeHtml(displayStatus || 'idle');
-        const actionMarkup = actions.busy
-          ? '<span class="loading-spinner" aria-hidden="true"></span>'
-          : actions.items
-              .map(
-                action =>
-                  `<button class="icon-btn lifecycle-action" type="button" data-action="${action.action}" data-deployment-id="${deployment.id}" aria-label="${action.label}" title="${action.label}">${action.icon}</button>`
-              )
-              .join('');
+    .map(deployment => {
+      const actions = resolveLifecycleActions(deployment.status);
+      const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
+      const hasWarning = deployment.status === 'mixed';
+      const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
+      const totalVmCount = Number(deployment.totalVmCount ?? 0);
 
-        return `
-        <article class="blueprint-item deployment-card" data-deployment-id="${deployment.id}">
-          <div class="panel-head">
+      const actionButtons = actions.busy
+        ? `<span class="loading-spinner" aria-hidden="true"></span>`
+        : actions.items
+            .map(a => `<button class="btn lifecycle-action" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${a.icon} ${a.label}</button>`)
+            .join('');
+
+      const deleteBtn = canDeleteDeployment
+        ? `<button class="btn btn-ghost delete-deployment-button" type="button" data-deployment-id="${deployment.id}">✕ Delete</button>`
+        : '';
+
+      const s = deployment.status || 'idle';
+      const statusPillClass = actions.busy ? 'status-pill-busy'
+        : ['running', 'deployed'].includes(s) ? 'status-pill-running'
+        : s === 'mixed' ? 'status-pill-mixed'
+        : s === 'stopped' ? 'status-pill-stopped'
+        : ['destroyed', 'idle'].includes(s) ? 'status-pill-destroyed'
+        : '';
+
+      return `
+        <article class="panel deployment-card" data-deployment-id="${deployment.id}">
+          <div class="panel-head deploy-head">
             <div>
-              <strong style="display:inline-flex; align-items:center; gap:8px;">
-                <span>${deployment.blueprint.course ? `${escapeHtml(String(deployment.blueprint.course.courseNumber))} - ` : ''}${escapeHtml(deployment.blueprint.name)} @ ${escapeHtml(deployment.classroom.name)} (${statusLabel})</span>
+              <p class="deploy-title">
+                ${deployment.blueprint.course ? `${escapeHtml(String(deployment.blueprint.course.courseNumber))} · ` : ''}${escapeHtml(deployment.blueprint.name)}
+                <span style="color:var(--muted);font-weight:400;">@</span>
+                ${escapeHtml(deployment.classroom.name)}
+                <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
-                ${actionMarkup}
-              </strong>
-              <p class="muted">${escapeHtml(deployment.blueprint.description || 'No description')}</p>
+              </p>
+              <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready · ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}</p>
             </div>
             <div class="inline-actions">
-              <span class="mini-pill">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
-              ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
-              <span class="pill">${deployment.totalVmCount} VM</span>
-              ${
-                canDeleteDeployment
-                  ? `<button class="icon-btn delete-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Delete deployment" title="Delete deployment">🗑</button>`
-                  : ''
-              }
+              <span class="pill ${statusPillClass}">${escapeHtml(s)}</span>
+              <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details →</button>
             </div>
           </div>
-        </article>
-      `;
-      }
-    )
+          ${renderLifecycleSteps(deployment.status)}
+          <div class="lc-actions">
+            ${actionButtons}
+            ${deleteBtn ? `<span class="lc-actions-spacer"></span>${deleteBtn}` : ''}
+          </div>
+        </article>`;
+    })
     .join('');
 
   lifecycleList.querySelectorAll('.lifecycle-action').forEach(button => {
@@ -821,11 +872,7 @@ function renderLifecycleLabs() {
         );
         await refreshLifecycleLabs();
         await refreshQueues();
-        showMessage(
-          globalStatus,
-          `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`,
-          'success'
-        );
+        showMessage(globalStatus, `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
       } finally {
@@ -839,9 +886,7 @@ function renderLifecycleLabs() {
       event.stopPropagation();
       button.disabled = true;
       try {
-        await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, {
-          method: 'DELETE'
-        });
+        await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, { method: 'DELETE' });
         await refreshLifecycleLabs();
         showMessage(globalStatus, 'Deployment deleted.', 'success');
       } catch (error) {
@@ -852,11 +897,169 @@ function renderLifecycleLabs() {
     });
   });
 
-  lifecycleList.querySelectorAll('.deployment-card').forEach(card => {
-    card.addEventListener('click', async () => {
-      await openDeploymentDetails(card.dataset.deploymentId);
+  lifecycleList.querySelectorAll('.view-details-btn').forEach(btn => {
+    btn.addEventListener('click', async event => {
+      event.stopPropagation();
+      await openDeploymentDetails(btn.dataset.deploymentId);
     });
   });
+}
+
+function renderDashboard() {
+  // Metrics
+  const active = state.deployments.filter(d =>
+    ['running', 'deployed', 'mixed', 'starting'].includes(d.status)
+  );
+  const totalVms = state.deployments.reduce((s, d) => s + Number(d.totalVmCount ?? 0), 0);
+
+  const elById = id => document.getElementById(id);
+
+  const labsCount = elById('dashLabsCount');
+  const labsSub   = elById('dashLabsSub');
+  if (labsCount) labsCount.textContent = active.length;
+  if (labsSub)   labsSub.textContent   = `${state.deployments.length} deployment${state.deployments.length !== 1 ? 's' : ''} total`;
+
+  const vmsCount = elById('dashVmsCount');
+  const vmsSub   = elById('dashVmsSub');
+  const totalSeats = state.classrooms.reduce((s, c) => s + (c.workstationCount || 0), 0);
+  if (vmsCount) vmsCount.textContent = totalVms;
+  if (vmsSub)   vmsSub.textContent   = `across ${totalSeats} configured seats`;
+
+  const bpCount = elById('dashBlueprintsCount');
+  const bpSub   = elById('dashBlueprintsSub');
+  if (bpCount) bpCount.textContent = state.blueprints.length;
+  if (bpSub)   bpSub.textContent   = `${state.courses.length} course${state.courses.length !== 1 ? 's' : ''} configured`;
+
+  const clCount = elById('dashClassroomsCount');
+  const clSub   = elById('dashClassroomsSub');
+  if (clCount) clCount.textContent = state.classrooms.length;
+  if (clSub)   clSub.textContent   = state.classrooms.slice(0, 3).map(c => c.name).join(', ') + (state.classrooms.length > 3 ? '…' : '') || 'No classrooms';
+
+  // Recent labs
+  const labsList = elById('dashRecentLabsList');
+  if (labsList) {
+    if (!state.deployments.length) {
+      labsList.innerHTML = '<p class="placeholder">No deployments yet.</p>';
+    } else {
+      labsList.innerHTML = state.deployments.slice(0, 5).map(d => {
+        const badgeClass =
+          ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
+          ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
+          d.status === 'stopped' ? 'dash-badge-stopped' : 'dash-badge-destroyed';
+        const badgeText =
+          ['running', 'deployed', 'mixed'].includes(d.status) ? 'Active' :
+          ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
+          d.status === 'stopped' ? 'Stopped' : escapeHtml(d.status || 'idle');
+        return `
+          <div class="dash-row">
+            <div class="dash-row-icon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="dash-row-info">
+              <p class="dash-row-name">${escapeHtml(d.blueprint.name)} — ${escapeHtml(d.classroom.name)}</p>
+              <p class="dash-row-meta">${d.totalVmCount} VMs · Lab #${d.deploymentNumber}</p>
+            </div>
+            <span class="dash-badge ${badgeClass}">${badgeText}</span>
+          </div>`;
+      }).join('');
+    }
+  }
+
+  // VM Models list
+  const modelsList = elById('dashModelsList');
+  if (modelsList) {
+    if (!state.templates.length) {
+      modelsList.innerHTML = '<p class="placeholder">No VM models yet.</p>';
+    } else {
+      modelsList.innerHTML = state.templates.slice(0, 5).map(t => {
+        const dotClass = getOsDotClass(t.osType);
+        return `
+          <div class="dash-row">
+            <div class="dash-row-icon">
+              <img src="${escapeHtmlAttr(getOsLogo(t.osType))}" alt="">
+            </div>
+            <div class="dash-row-info">
+              <p class="dash-row-name">${escapeHtml(t.name)}</p>
+              <p class="dash-row-meta">VMID ${t.proxmoxTemplateVmid} · ${getOsLabel(t.osType)}</p>
+            </div>
+            <span class="vm-lib-dot ${dotClass}"></span>
+          </div>`;
+      }).join('');
+    }
+  }
+
+  // Active lifecycle tracker
+  const lcCard  = elById('dashLifecycleCard');
+  const lcTitle = elById('dashLifecycleTitle');
+  const lcBadge = elById('dashLifecycleBadge');
+  const lcSteps = elById('dashLifecycleSteps');
+  const lcActs  = elById('dashLifecycleActions');
+
+  const activeDeploy = state.deployments.find(d =>
+    ['queued', 'deploying', 'customizing', 'deployed', 'starting', 'running', 'mixed', 'stopping'].includes(d.status)
+  );
+
+  if (lcCard) lcCard.hidden = !activeDeploy;
+
+  if (activeDeploy) {
+    if (lcTitle) lcTitle.textContent = `${activeDeploy.blueprint.name} · ${activeDeploy.classroom.name}`;
+    if (lcBadge) {
+      const ready = Number(activeDeploy.readyCount ?? 0);
+      const total = Number(activeDeploy.totalVmCount ?? 0);
+      lcBadge.textContent = `${ready}/${total} VMs`;
+    }
+    if (lcSteps) lcSteps.innerHTML = renderLifecycleSteps(activeDeploy.status);
+    if (lcActs) {
+      const acts = resolveLifecycleActions(activeDeploy.status);
+      if (acts.busy) {
+        lcActs.innerHTML = '<span class="loading-spinner"></span>';
+      } else {
+        lcActs.innerHTML = acts.items
+          .map(a => `<button class="btn lifecycle-action" type="button" data-action="${a.action}" data-deployment-id="${activeDeploy.id}">${a.icon} ${a.label}</button>`)
+          .join('');
+        lcActs.querySelectorAll('.lifecycle-action').forEach(btn => {
+          btn.addEventListener('click', async event => {
+            event.stopPropagation();
+            btn.disabled = true;
+            try {
+              const result = await fetchJson(`/api/lifecycle/deployments/${btn.dataset.deploymentId}/${btn.dataset.action}`, { method: 'POST' });
+              await refreshLifecycleLabs();
+              renderDashboard();
+              showMessage(globalStatus, `${btn.dataset.action} queued with job ${result.jobId}.`, 'success');
+            } catch (error) {
+              showMessage(globalStatus, error.message, 'danger');
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        });
+      }
+    }
+  }
+
+  // Per-seat grid (derive from classroom + deployment)
+  const seatCard  = elById('dashSeatCard');
+  const seatTitle = elById('dashSeatTitle');
+  const seatGrid  = elById('dashSeatGrid');
+
+  if (seatCard) seatCard.hidden = !activeDeploy;
+
+  if (activeDeploy && seatGrid) {
+    const classroom = state.classrooms.find(c => c.id === activeDeploy.classroom.id);
+    const seatCount = classroom?.workstationCount ?? Math.ceil(Number(activeDeploy.totalVmCount ?? 1) / 3);
+    const shown = Math.min(seatCount, 12);
+    const vmsPerSeat = seatCount > 0 ? Math.round(Number(activeDeploy.totalVmCount ?? 0) / seatCount) : 0;
+
+    if (seatTitle) seatTitle.textContent = `${activeDeploy.blueprint.name} · ${seatCount} workstation${seatCount !== 1 ? 's' : ''}`;
+
+    seatGrid.innerHTML = Array.from({ length: shown }, (_, i) => {
+      const num = String(i + 1).padStart(2, '0');
+      const tags = vmsPerSeat > 0
+        ? `<span class="seat-tag seat-tag-vm">${vmsPerSeat} VM</span>`
+        : '';
+      return `<div class="seat-cell"><p class="seat-num">Poste ${num}</p><div class="seat-tags">${tags}</div></div>`;
+    }).join('');
+  }
 }
 
 function isDeploymentBusy(status) {
@@ -1328,6 +1531,7 @@ function firstFieldError(errors) {
 async function loadTemplates() {
   state.templates = await fetchJson('/api/templates');
   renderTemplates();
+  renderDashboard();
 }
 
 function populateTemplateForm(template) {
@@ -1490,12 +1694,14 @@ async function loadConnectionStatuses() {
 async function loadClassrooms() {
   state.classrooms = await fetchJson('/api/classrooms');
   renderClassrooms();
+  renderDashboard();
 }
 
 async function loadBlueprints() {
   state.blueprints = await fetchJson('/api/blueprints');
   renderBlueprintList();
   renderDeploymentSelectors();
+  renderDashboard();
 }
 
 async function loadTeachers() {
@@ -1531,6 +1737,7 @@ async function refreshLifecycleLabs() {
     };
   });
   renderLifecycleLabs();
+  renderDashboard();
 }
 
 async function loadBlueprint(blueprintId) {
@@ -1893,6 +2100,9 @@ navButtons.forEach(button => {
     setActiveView(button.dataset.view);
   });
 });
+
+document.getElementById('dashGotoLifecycle')?.addEventListener('click', () => setActiveView('lifecycle'));
+document.getElementById('dashGotoModels')?.addEventListener('click', () => setActiveView('models'));
 
 [blueprintNameInput, blueprintDescriptionInput, blueprintCourseIdInput, blueprintWindowsAdminPasswordInput, blueprintLinuxDefaultUsernameInput].forEach(input => {
   input.addEventListener('input', () => {
@@ -2277,7 +2487,7 @@ vmTimezoneDialog?.addEventListener('close', () => {
 });
 
 async function bootstrap() {
-  setActiveView('blueprint');
+  setActiveView('dashboard');
   syncBlueprintFields();
   renderBlueprintWorkspace();
   renderTemplateEditor();

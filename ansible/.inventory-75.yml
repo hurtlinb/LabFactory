@@ -1,0 +1,246 @@
+all:
+  children:
+    linux_timezone_targets:
+      hosts:
+        linux_vm_1:
+          ansible_host: 10.10.2.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-01-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_2:
+          ansible_host: 10.10.3.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-02-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_3:
+          ansible_host: 10.10.4.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-03-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_4:
+          ansible_host: 10.10.5.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-04-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_5:
+          ansible_host: 10.10.6.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-05-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_6:
+          ansible_host: 10.10.7.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-06-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_7:
+          ansible_host: 10.10.8.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-07-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_8:
+          ansible_host: 10.10.9.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-08-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_9:
+          ansible_host: 10.10.10.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-09-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_10:
+          ansible_host: 10.10.11.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-10-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_11:
+          ansible_host: 10.10.12.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-11-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_12:
+          ansible_host: 10.10.13.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-12-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_13:
+          ansible_host: 10.10.14.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-13-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_14:
+          ansible_host: 10.10.15.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-14-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_15:
+          ansible_host: 10.10.16.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-15-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_16:
+          ansible_host: 10.10.17.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-16-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_17:
+          ansible_host: 10.10.18.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-17-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_18:
+          ansible_host: 10.10.19.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-18-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_19:
+          ansible_host: 10.10.20.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-19-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_20:
+          ansible_host: 10.10.21.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-20-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_21:
+          ansible_host: 10.10.22.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-21-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"
+        linux_vm_22:
+          ansible_host: 10.10.23.106
+          ansible_user: "ubuntu"
+          ansible_connection: ssh
+          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+          ansible_become: true
+          ansible_password: "Emf12345"
+          ansible_become_password: "Emf12345"
+          target_vm_name: "169-bhu-exercices-22-zzz"
+          target_timezone: "null"
+          target_hostname: "zzz"

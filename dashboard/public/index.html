@@ -1,4 +1,4 @@
-﻿<!doctype html>
+<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
@@ -7,44 +7,105 @@
   <link rel="icon" type="image/png" href="/assets/labfactory-logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="shell">
+
+    <!-- ── Sidebar navigation ────────────────────────────────── -->
     <aside class="sidebar">
-      <div class="brand-lockup">
-        <img
-          class="brand-wordmark"
-          src="/assets/labfactory-logoname.png"
-          alt="LabFactory"
-        >
+
+      <!-- Brand -->
+      <div class="sidebar-brand">
+        <div class="sidebar-logo-mark">
+          <img src="/assets/labfactory-logo.png" alt="LabFactory">
+        </div>
+        <span class="sidebar-logo-text">LabFactory</span>
       </div>
 
       <nav class="nav">
         <div class="nav-group">
           <p class="nav-group-title">Labs</p>
-          <button data-view="blueprint" class="active">Blueprints</button>
-          <button data-view="lifecycle">Lifecycle</button>
+          <button data-view="dashboard" class="active">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/>
+              <rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>
+            </svg>
+            Dashboard
+          </button>
+          <button data-view="blueprint">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9A1 1 0 0 0 21.4 6z"/>
+              <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/>
+              <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>
+            </svg>
+            Blueprints
+          </button>
+          <button data-view="lifecycle">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            Lifecycle
+          </button>
         </div>
         <div class="nav-group">
           <p class="nav-group-title">Administration</p>
-          <button data-view="admin-users">Users</button>
-          <button data-view="admin-courses">Courses</button>
-          <button data-view="models">VM Models</button>
-          <button data-view="classrooms">Classrooms</button>
-          <button data-view="admin-settings">Settings</button>
-          <button data-view="admin-queues">Jobs</button>
+          <button data-view="admin-users">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Users
+          </button>
+          <button data-view="admin-courses">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            Courses
+          </button>
+          <button data-view="models">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
+              <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
+              <line x1="6" x2="6.01" y1="6" y2="6"/>
+              <line x1="6" x2="6.01" y1="18" y2="18"/>
+            </svg>
+            VM Models
+          </button>
+          <button data-view="classrooms">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
+              <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+              <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+              <path d="M10 6h4"/><path d="M10 10h4"/>
+              <path d="M10 14h4"/><path d="M10 18h4"/>
+            </svg>
+            Classrooms
+          </button>
+          <button data-view="admin-settings">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            Settings
+          </button>
+          <button data-view="admin-queues">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+              <path d="M12 11h4"/><path d="M12 16h4"/>
+              <path d="M8 11h.01"/><path d="M8 16h.01"/>
+            </svg>
+            Jobs
+          </button>
         </div>
       </nav>
 
       <div class="sidebar-footer">
-        <div id="userSession" class="user-session" hidden>
-          <p class="eyebrow">Session</p>
-          <div id="userSessionName" class="user-session-name">Authenticated user</div>
-          <div id="userSessionMeta" class="user-session-meta"></div>
-          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
-        </div>
         <div id="connectionStatusList" class="sidebar-health-list" aria-live="polite">
           <div id="postgresStatusIndicator" class="sidebar-health" data-state="unknown">
             <span class="sidebar-health-icon" aria-hidden="true"></span>
@@ -56,426 +117,533 @@
           </div>
           <div id="terraformWorkerStatusIndicator" class="sidebar-health" data-state="unknown">
             <span class="sidebar-health-icon" aria-hidden="true"></span>
-            <span id="terraformWorkerStatusLabel">Terraform Worker</span>
+            <span id="terraformWorkerStatusLabel">Terraform</span>
           </div>
           <div id="ansibleWorkerStatusIndicator" class="sidebar-health" data-state="unknown">
             <span class="sidebar-health-icon" aria-hidden="true"></span>
-            <span id="ansibleWorkerStatusLabel">Ansible Worker</span>
+            <span id="ansibleWorkerStatusLabel">Ansible</span>
           </div>
         </div>
-        <span id="appVersion">Version --</span>
+
+        <div id="userSession" class="user-session" hidden>
+          <span id="userSessionName" class="user-session-name">User</span>
+          <span id="userSessionMeta" class="user-session-meta"></span>
+          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
+        </div>
+
+        <span id="appVersion" class="app-version">Version --</span>
       </div>
     </aside>
 
+    <!-- ── Main content ───────────────────────────────────────── -->
     <main class="main">
-      <div id="globalStatus" class="status-message" hidden></div>
 
-      <section class="page" data-view="models" hidden>
-        <div class="builder-grid">
+      <!-- Topbar -->
+      <div class="app-topbar">
+        <div class="page-header">
+          <p id="pageBreadcrumb" class="page-breadcrumb">Labs</p>
+          <h1 id="pageTitle" class="page-title">Blueprints</h1>
+        </div>
+      </div>
+
+      <!-- Scrollable content -->
+      <div class="main-content">
+        <div id="globalStatus" class="status-message" hidden></div>
+
+        <!-- ── Dashboard ─────────────────────────────────────── -->
+        <section class="page" data-view="dashboard" hidden>
+          <!-- Metrics row -->
+          <div class="dash-metrics">
+            <div class="dash-metric">
+              <p class="dash-metric-label">Active labs</p>
+              <p class="dash-metric-value accent" id="dashLabsCount">—</p>
+              <p class="dash-metric-sub" id="dashLabsSub">—</p>
+            </div>
+            <div class="dash-metric">
+              <p class="dash-metric-label">VMs deployed</p>
+              <p class="dash-metric-value" id="dashVmsCount">—</p>
+              <p class="dash-metric-sub" id="dashVmsSub">—</p>
+            </div>
+            <div class="dash-metric">
+              <p class="dash-metric-label">Blueprints</p>
+              <p class="dash-metric-value" id="dashBlueprintsCount">—</p>
+              <p class="dash-metric-sub" id="dashBlueprintsSub">—</p>
+            </div>
+            <div class="dash-metric">
+              <p class="dash-metric-label">Classrooms</p>
+              <p class="dash-metric-value" id="dashClassroomsCount">—</p>
+              <p class="dash-metric-sub" id="dashClassroomsSub">—</p>
+            </div>
+          </div>
+
+          <!-- Two-column: recent labs + VM models -->
+          <div class="dash-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <p class="eyebrow">Recent labs</p>
+                <button class="btn btn-ghost" type="button" id="dashGotoLifecycle">View all</button>
+              </div>
+              <div id="dashRecentLabsList" class="saved-list">
+                <p class="placeholder">Loading…</p>
+              </div>
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <p class="eyebrow">VM Models</p>
+                <button class="btn btn-ghost" type="button" id="dashGotoModels">Manage</button>
+              </div>
+              <div id="dashModelsList" class="saved-list">
+                <p class="placeholder">Loading…</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active lifecycle tracker -->
+          <div id="dashLifecycleCard" class="panel" hidden>
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Active lifecycle</p>
+                <h3 id="dashLifecycleTitle">—</h3>
+              </div>
+              <span id="dashLifecycleBadge" class="mini-pill">—</span>
+            </div>
+            <div id="dashLifecycleSteps"></div>
+            <div id="dashLifecycleActions" class="lc-actions"></div>
+          </div>
+
+          <!-- Per-seat grid -->
+          <div id="dashSeatCard" class="panel" hidden>
+            <div class="panel-head">
+              <p class="eyebrow">Workstation view</p>
+              <span id="dashSeatTitle" class="muted">—</span>
+            </div>
+            <div id="dashSeatGrid" class="seat-grid"></div>
+          </div>
+        </section>
+
+        <!-- ── VM Models ──────────────────────────────────────── -->
+        <section class="page" data-view="models" hidden>
+          <div class="builder-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">inventory</p>
+                </div>
+                <button id="newTemplateButton" class="btn btn-ghost" type="button">New</button>
+              </div>
+              <div id="modelList" class="saved-list">
+                <p class="placeholder">Loading models...</p>
+              </div>
+            </article>
+
+            <article id="templateEditorPanel" class="panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">VM Templates</p>
+                </div>
+              </div>
+              <p class="muted">Each model represents a Terraform clone operation for an existing Proxmox template.</p>
+              <form id="templateForm" class="stack">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="name" placeholder="VM Ubuntu 24.04" required>
+                </label>
+                <fieldset class="field os-fieldset">
+                  <legend>OS</legend>
+                  <div class="os-choice-grid">
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="windows11" required>
+                      <img src="/assets/os-windows11.png" alt="" aria-hidden="true">
+                      <span>Windows 11</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="windows-server" required>
+                      <img src="/assets/os-windows-server.png" alt="" aria-hidden="true">
+                      <span>Windows Server</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="ubuntu" required checked>
+                      <img src="/assets/os-ubuntu.png" alt="" aria-hidden="true">
+                      <span>Ubuntu</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="other" required>
+                      <img src="/assets/os-other.svg" alt="" aria-hidden="true">
+                      <span>Other</span>
+                    </label>
+                  </div>
+                </fieldset>
+                <div class="split">
+                  <label class="field">
+                    <span>Proxmox VMID</span>
+                    <input type="number" name="proxmoxTemplateVmid" min="1" placeholder="9002" required>
+                  </label>
+                  <label class="field">
+                    <span>Language</span>
+                    <select name="language" required>
+                      <option value="en" selected>EN</option>
+                      <option value="fr">FR</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="fullClone">
+                  <span>Use full clone instead of linked clone</span>
+                </label>
+                <div class="split">
+                  <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
+                  <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Blueprints ─────────────────────────────────────── -->
+        <section class="page" data-view="blueprint" hidden>
+          <div class="hero-grid">
+            <article class="panel panel-full">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">blueprints</p>
+                </div>
+                <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
+              </div>
+              <div id="blueprintList" class="saved-list">
+                <p class="placeholder">Loading blueprints...</p>
+              </div>
+            </article>
+          </div>
+
+          <div id="blueprintWorkspace" class="builder-grid" hidden>
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">palette</p>
+                </div>
+              </div>
+              <div id="templatePalette" class="template-palette">
+                <p class="placeholder">No VM models yet.</p>
+              </div>
+            </article>
+
+            <article class="panel panel-wide">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">workspace</p>
+                </div>
+                <div class="inline-actions">
+                  <span id="vmCount" class="pill">0 VM</span>
+                  <button id="saveBlueprintButton" class="btn btn-primary" type="button">Save blueprint</button>
+                </div>
+              </div>
+
+              <div id="dropzone" class="dropzone">
+                <div class="dropzone-copy">
+                  <p>Drop VM templates here</p>
+                  <span>Each drop creates a VM instance inside the lab blueprint.</span>
+                </div>
+                <div id="canvasVmList" class="canvas-vm-list"></div>
+              </div>
+
+              <form id="blueprintForm" class="stack">
+                <label class="field">
+                  <span>Blueprint name</span>
+                  <input id="blueprintName" type="text" name="name" placeholder="SOC analyst sandbox" required>
+                </label>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
+                </label>
+                <label class="field">
+                  <span>Course</span>
+                  <select id="blueprintCourseId" name="courseId" required>
+                    <option value="">Select a course</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Guest password</span>
+                  <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Used for Windows guest access and Linux SSH customization">
+                </label>
+                <label class="field">
+                  <span>Linux default username</span>
+                  <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
+                </label>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Classrooms ─────────────────────────────────────── -->
+        <section class="page" data-view="classrooms" hidden>
+          <div class="builder-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">inventory</p>
+                </div>
+                <button id="newClassroomButton" class="btn btn-ghost" type="button">New</button>
+              </div>
+              <div id="classroomList" class="saved-list">
+                <p class="placeholder">Loading classrooms...</p>
+              </div>
+            </article>
+
+            <article id="classroomEditorPanel" class="panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">classrooms</p>
+                </div>
+              </div>
+              <p class="muted">Each workstation gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
+              <form id="classroomForm" class="stack">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="name" placeholder="Room A-203" required>
+                </label>
+                <div class="split-3">
+                  <label class="field">
+                    <span>Workplaces</span>
+                    <input type="number" name="workstationCount" min="1" placeholder="24" required>
+                  </label>
+                  <label class="field">
+                    <span>Starting VLAN</span>
+                    <input type="number" name="startingVlan" min="1" placeholder="200" required>
+                  </label>
+                  <label class="field">
+                    <span>Starting subnet</span>
+                    <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
+                  </label>
+                </div>
+                <div class="split">
+                  <label class="field">
+                    <span>Gateway</span>
+                    <input type="text" name="networkGateway" placeholder="10.0.200.1" required>
+                  </label>
+                  <label class="field">
+                    <span>VLAN mask</span>
+                    <select name="networkVlanMask" required>
+                      <option value="/24">/24</option>
+                      <option value="/25">/25</option>
+                      <option value="/26">/26</option>
+                      <option value="/27">/27</option>
+                      <option value="/28">/28</option>
+                      <option value="/29">/29</option>
+                      <option value="/30">/30</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="split">
+                  <button id="classroomSubmitButton" class="btn btn-primary" type="submit">Add classroom</button>
+                  <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Lifecycle ──────────────────────────────────────── -->
+        <section class="page" data-view="lifecycle" hidden>
+          <div class="stack">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Prepare a lab</p>
+                </div>
+              </div>
+              <form id="deploymentForm" class="stack section-form">
+                <div class="split">
+                  <label class="field">
+                    <span>Blueprint</span>
+                    <select id="deploymentBlueprintSelect" name="blueprintId" required>
+                      <option value="">Select a blueprint</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Classroom</span>
+                    <select id="deploymentClassroomSelect" name="classroomId" required>
+                      <option value="">Select a classroom</option>
+                    </select>
+                  </label>
+                </div>
+                <button class="btn btn-primary" type="submit">Prepare</button>
+              </form>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Operations</p>
+                </div>
+              </div>
+              <div id="lifecycleList" class="saved-list">
+                <p class="placeholder">Loading deployments...</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Deployment details dialog ─────────────────────── -->
+        <dialog id="deploymentDetailsDialog" class="details-dialog">
+          <article class="details-card">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Deployment details</p>
+                <h3 id="deploymentDetailsTitle">Deployment</h3>
+              </div>
+              <button id="closeDeploymentDetailsButton" class="icon-btn" type="button" aria-label="Close deployment details">×</button>
+            </div>
+            <div id="deploymentDetailsStatus" class="status-message" hidden></div>
+            <div id="deploymentVmDetailsList" class="saved-list">
+              <p class="placeholder">Loading deployment VMs...</p>
+            </div>
+          </article>
+        </dialog>
+
+        <!-- ── Settings ───────────────────────────────────────── -->
+        <section class="page" data-view="admin-settings" hidden>
+          <article class="panel">
+            <p class="eyebrow">settings</p>
+            <div class="inline-actions section-actions">
+              <button type="button" id="refreshLabsStateButton" class="btn btn-secondary">Refresh labs state</button>
+              <div id="settingsStatus" class="status-message" hidden></div>
+            </div>
+          </article>
+
+          <article class="panel danger-panel">
+            <p class="eyebrow danger-eyebrow">danger zone</p>
+            <div class="inline-actions section-actions danger-actions">
+              <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
+              <button type="button" id="cleanOrphanedDisksButton" class="btn btn-secondary">Clean orphaned disks</button>
+              <div id="dangerZoneStatus" class="status-message" hidden></div>
+            </div>
+          </article>
+        </section>
+
+        <!-- ── Users ──────────────────────────────────────────── -->
+        <section class="page" data-view="admin-users" hidden>
           <article class="panel">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">inventory</p>
+                <p class="eyebrow">users</p>
+                <h3>Synchronized teachers</h3>
               </div>
-              <button id="newTemplateButton" class="btn btn-ghost" type="button">New</button>
             </div>
-            <div id="modelList" class="saved-list">
-              <p class="placeholder">Loading models...</p>
+            <div id="teacherList" class="saved-list">
+              <p class="placeholder">Loading users...</p>
             </div>
           </article>
+        </section>
 
-          <article id="templateEditorPanel" class="panel" hidden>
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">VM Templates</p>
-              </div>
-            </div>
-            <p class="muted">Each model represents a Terraform clone operation for an existing Proxmox template.</p>
-            <form id="templateForm" class="stack">
-              <label class="field">
-                <span>Name</span>
-                <input type="text" name="name" placeholder="VM Ubuntu 24.04" required>
-              </label>
-              <fieldset class="field os-fieldset">
-                <legend>OS</legend>
-                <div class="os-choice-grid">
-                  <label class="os-choice-card">
-                    <input type="radio" name="osType" value="windows11" required>
-                    <img src="/assets/os-windows11.png" alt="" aria-hidden="true">
-                    <span>Windows 11</span>
-                  </label>
-                  <label class="os-choice-card">
-                    <input type="radio" name="osType" value="windows-server" required>
-                    <img src="/assets/os-windows-server.png" alt="" aria-hidden="true">
-                    <span>Windows Server</span>
-                  </label>
-                  <label class="os-choice-card">
-                    <input type="radio" name="osType" value="ubuntu" required checked>
-                    <img src="/assets/os-ubuntu.png" alt="" aria-hidden="true">
-                    <span>Ubuntu</span>
-                  </label>
-                  <label class="os-choice-card">
-                    <input type="radio" name="osType" value="other" required>
-                    <img src="/assets/os-other.svg" alt="" aria-hidden="true">
-                    <span>Other</span>
-                  </label>
+        <!-- ── Courses ────────────────────────────────────────── -->
+        <section class="page" data-view="admin-courses" hidden>
+          <div class="builder-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">courses</p>
+                  <h3>Courses</h3>
                 </div>
-              </fieldset>
-              <div class="split">
-                <label class="field">
-                  <span>Proxmox VMID</span>
-                  <input type="number" name="proxmoxTemplateVmid" min="1" placeholder="9002" required>
-                </label>
-                <label class="field">
-                  <span>Language</span>
-                  <select name="language" required>
-                    <option value="en" selected>EN</option>
-                    <option value="fr">FR</option>
-                  </select>
-                </label>
               </div>
-              <label class="field">
-                <span>Description</span>
-                <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
-              </label>
-              <label class="checkbox">
-                <input type="checkbox" name="fullClone">
-                <span>Use full clone instead of linked clone</span>
-              </label>
-              <div class="split">
-                <button id="templateSubmitButton" class="btn btn-secondary" type="submit">Add model</button>
-                <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel edit</button>
+              <div id="courseList" class="saved-list">
+                <p class="placeholder">Loading courses...</p>
               </div>
-            </form>
-          </article>
-        </div>
-      </section>
+            </article>
 
-      <section class="page" data-view="blueprint">
-        <div class="hero-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">new course</p>
+                </div>
+              </div>
+              <form id="courseForm" class="stack">
+                <label class="field">
+                  <span>Course number</span>
+                  <input type="number" name="courseNumber" min="1" placeholder="101" required>
+                </label>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea name="description" rows="3" placeholder="Optional description"></textarea>
+                </label>
+                <button id="courseSubmitButton" class="btn btn-primary" type="submit">Add course</button>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Jobs / Queues ──────────────────────────────────── -->
+        <section class="page" data-view="admin-queues" hidden>
+          <div class="hero-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">queues</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="queue-table">
+                  <thead>
+                    <tr>
+                      <th>Queue</th>
+                      <th>Waiting</th>
+                      <th>Active</th>
+                      <th>Delayed</th>
+                      <th>Completed</th>
+                      <th>Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody id="queueTableBody">
+                    <tr><td colspan="6">Loading...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="terraformJobStatus" class="status-message" hidden></div>
+            </article>
+
+            <article class="panel">
+              <p class="eyebrow">workers</p>
+              <div id="workers" class="workers-grid">
+                <p class="placeholder">Loading workers...</p>
+              </div>
+            </article>
+          </div>
+
           <article class="panel panel-full">
             <div class="panel-head">
               <div>
-                <p class="eyebrow">blueprints</p>
-              </div>
-              <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
-            </div>
-            <div id="blueprintList" class="saved-list">
-              <p class="placeholder">Loading blueprints...</p>
-            </div>
-          </article>
-        </div>
-
-        <div id="blueprintWorkspace" class="builder-grid" hidden>
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">palette</p>
-              </div>
-            </div>
-            <div id="templatePalette" class="template-palette">
-              <p class="placeholder">No VM models yet.</p>
-            </div>
-          </article>
-
-          <article class="panel panel-wide">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">workspace</p>
-              </div>
-              <div class="inline-actions">
-                <span id="vmCount" class="pill">0 VM</span>
-                <button id="saveBlueprintButton" class="btn btn-primary" type="button">Save blueprint</button>
-              </div>
-            </div>
-
-            <div id="dropzone" class="dropzone">
-              <div class="dropzone-copy">
-                <p>Drop VM templates here</p>
-                <span>Each drop creates a VM instance inside the lab blueprint.</span>
-              </div>
-              <div id="canvasVmList" class="canvas-vm-list"></div>
-            </div>
-
-            <form id="blueprintForm" class="stack">
-              <label class="field">
-                <span>Blueprint name</span>
-                <input id="blueprintName" type="text" name="name" placeholder="SOC analyst sandbox" required>
-              </label>
-              <label class="field">
-                <span>Description</span>
-                <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
-              </label>
-              <label class="field">
-                <span>Course</span>
-                <select id="blueprintCourseId" name="courseId" required>
-                  <option value="">Select a course</option>
-                </select>
-              </label>
-              <label class="field">
-                <span>Guest password</span>
-                <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Used for Windows guest access and Linux SSH customization">
-              </label>
-              <label class="field">
-                <span>Linux default username</span>
-                <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
-              </label>
-            </form>
-          </article>
-        </div>
-      </section>
-
-      <section class="page" data-view="classrooms" hidden>
-        <div class="builder-grid">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">inventory</p>
-              </div>
-              <button id="newClassroomButton" class="btn btn-ghost" type="button">New</button>
-            </div>
-            <div id="classroomList" class="saved-list">
-              <p class="placeholder">Loading classrooms...</p>
-            </div>
-          </article>
-
-          <article id="classroomEditorPanel" class="panel" hidden>
-            <p class="eyebrow">classrooms</p>
-            <p class="muted">Each workstation gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
-            <form id="classroomForm" class="stack">
-              <label class="field">
-                <span>Name</span>
-                <input type="text" name="name" placeholder="Room A-203" required>
-              </label>
-              <div class="split">
-                <label class="field">
-                  <span>Workplaces</span>
-                  <input type="number" name="workstationCount" min="1" placeholder="24" required>
-                </label>
-                <label class="field">
-                  <span>Starting VLAN</span>
-                  <input type="number" name="startingVlan" min="1" placeholder="200" required>
-                </label>
-                <label class="field">
-                  <span>Starting subnet</span>
-                  <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
-                </label>
-              </div>
-              <div class="split">
-                <label class="field">
-                  <span>Gateway</span>
-                  <input type="text" name="networkGateway" placeholder="10.0.200.1" required>
-                </label>
-                <label class="field">
-                  <span>VLAN mask</span>
-                  <select name="networkVlanMask" required>
-                    <option value="/24">/24</option>
-                    <option value="/25">/25</option>
-                    <option value="/26">/26</option>
-                    <option value="/27">/27</option>
-                    <option value="/28">/28</option>
-                    <option value="/29">/29</option>
-                    <option value="/30">/30</option>
-                  </select>
-                </label>
-              </div>
-              <div class="split">
-                <button id="classroomSubmitButton" class="btn btn-secondary" type="submit">Add classroom</button>
-                <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button" hidden>Cancel edit</button>
-              </div>
-            </form>
-          </article>
-        </div>
-      </section>
-
-      <section class="page" data-view="lifecycle" hidden>
-        <div class="stack">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Prepare a lab</p>
-              </div>
-            </div>
-            <form id="deploymentForm" class="stack section-form">
-              <div class="split">
-                <label class="field">
-                  <select id="deploymentBlueprintSelect" name="blueprintId" required>
-                    <option value="">Select a blueprint</option>
-                  </select>
-                </label>
-                <label class="field">
-                  <select id="deploymentClassroomSelect" name="classroomId" required>
-                    <option value="">Select a classroom</option>
-                  </select>
-                </label>
-              </div>
-              <button class="btn btn-primary" type="submit">Prepare</button>
-            </form>
-          </article>
-
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">Operations</p>
-              </div>
-            </div>
-            <div id="lifecycleList" class="saved-list">
-              <p class="placeholder">Loading deployments...</p>
-            </div>
-          </article>
-        </div>
-      </section>
-
-      <dialog id="deploymentDetailsDialog" class="details-dialog">
-        <article class="details-card">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">Deployment details</p>
-              <h3 id="deploymentDetailsTitle">Deployment</h3>
-            </div>
-            <button id="closeDeploymentDetailsButton" class="icon-btn" type="button" aria-label="Close deployment details">×</button>
-          </div>
-          <div id="deploymentDetailsStatus" class="status-message" hidden></div>
-          <div id="deploymentVmDetailsList" class="saved-list">
-            <p class="placeholder">Loading deployment VMs...</p>
-          </div>
-        </article>
-      </dialog>
-
-      <section class="page" data-view="admin-settings" hidden>
-        <article class="panel">
-          <p class="eyebrow">settings</p>
-          <div class="inline-actions section-actions">
-            <button type="button" id="refreshLabsStateButton" class="btn btn-ghost">Refresh labs state</button>
-            <div id="settingsStatus" class="status-message" hidden></div>
-          </div>
-        </article>
-
-        <article class="panel danger-panel">
-          <p class="eyebrow danger-eyebrow">danger zone</p>
-          <div class="inline-actions section-actions danger-actions">
-            <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
-            <button type="button" id="cleanOrphanedDisksButton" class="btn btn-secondary">Clean orphaned disks</button>
-            <div id="dangerZoneStatus" class="status-message" hidden></div>
-          </div>
-        </article>
-      </section>
-
-      <section class="page" data-view="admin-users" hidden>
-        <article class="panel">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">users</p>
-              <h3>Synchronized teachers</h3>
-            </div>
-          </div>
-          <div id="teacherList" class="saved-list">
-            <p class="placeholder">Loading users...</p>
-          </div>
-        </article>
-      </section>
-
-      <section class="page" data-view="admin-courses" hidden>
-        <div class="builder-grid">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">courses</p>
-                <h3>Courses</h3>
-              </div>
-            </div>
-            <div id="courseList" class="saved-list">
-              <p class="placeholder">Loading courses...</p>
-            </div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">new course</p>
-              </div>
-            </div>
-            <form id="courseForm" class="stack">
-              <label class="field">
-                <span>Course number</span>
-                <input type="number" name="courseNumber" min="1" placeholder="101" required>
-              </label>
-              <label class="field">
-                <span>Description</span>
-                <textarea name="description" rows="3" placeholder="Optional description"></textarea>
-              </label>
-              <button id="courseSubmitButton" class="btn btn-secondary" type="submit">Add course</button>
-            </form>
-          </article>
-        </div>
-      </section>
-
-      <section class="page" data-view="admin-queues" hidden>
-        <div class="hero-grid">
-          <article class="panel">
-            <div class="panel-head">
-              <div>
-                <p class="eyebrow">queues</p>
+                <p class="eyebrow">jobs</p>
               </div>
             </div>
             <div class="table-wrap">
-              <table class="queue-table">
+              <table class="queue-table jobs-table">
                 <thead>
                   <tr>
+                    <th>Job</th>
                     <th>Queue</th>
-                    <th>Waiting</th>
-                    <th>Active</th>
-                    <th>Delayed</th>
-                    <th>Completed</th>
-                    <th>Failed</th>
+                    <th>Status</th>
+                    <th>Lab</th>
+                    <th>Action</th>
+                    <th>Duration</th>
+                    <th>Created</th>
+                    <th>Detail</th>
                   </tr>
                 </thead>
-                <tbody id="queueTableBody">
-                  <tr><td colspan="6">Loading...</td></tr>
+                <tbody id="jobsTableBody">
+                  <tr><td colspan="8">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
-            <div id="terraformJobStatus" class="status-message" hidden></div>
           </article>
-
-          <article class="panel">
-            <p class="eyebrow">workers</p>
-            <div id="workers" class="workers-grid">
-              <p class="placeholder">Loading workers...</p>
-            </div>
-          </article>
-        </div>
-
-        <article class="panel panel-full">
-          <div class="panel-head">
-            <div>
-              <p class="eyebrow">jobs</p>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table class="queue-table jobs-table">
-              <thead>
-                <tr>
-                  <th>Job</th>
-                  <th>Queue</th>
-                  <th>Status</th>
-                  <th>Lab</th>
-                  <th>Action</th>
-                  <th>Duration</th>
-                  <th>Created</th>
-                  <th>Detail</th>
-                </tr>
-              </thead>
-              <tbody id="jobsTableBody">
-                <tr><td colspan="8">Loading...</td></tr>
-              </tbody>
-            </table>
-          </div>
-        </article>
-      </section>
+        </section>
+      </div><!-- /.main-content -->
     </main>
-  </div>
+  </div><!-- /.shell -->
 
+  <!-- ── VM customization dialog ───────────────────────────── -->
   <dialog id="vmCustomizationDialog" class="modal-dialog">
     <form id="vmCustomizationForm" class="modal-card" method="dialog">
       <div class="panel-head">
@@ -495,6 +663,7 @@
     </form>
   </dialog>
 
+  <!-- ── VM IP dialog ───────────────────────────────────────── -->
   <dialog id="vmIpDialog" class="modal-dialog">
     <form id="vmIpForm" class="modal-card" method="dialog">
       <div class="panel-head">
@@ -515,6 +684,7 @@
     </form>
   </dialog>
 
+  <!-- ── VM timezone dialog ─────────────────────────────────── -->
   <dialog id="vmTimezoneDialog" class="modal-dialog">
     <form id="vmTimezoneForm" class="modal-card" method="dialog">
       <div class="panel-head">
@@ -537,5 +707,3 @@
   <script type="module" src="/app.js"></script>
 </body>
 </html>
-
-
