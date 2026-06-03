@@ -37,6 +37,17 @@ variable "proxmox_tls_insecure" {
   default     = true
 }
 
+variable "proxmox_parallel" {
+  description = "Allowed simultaneous Proxmox provider operations."
+  type        = number
+  default     = 10
+
+  validation {
+    condition     = var.proxmox_parallel >= 1
+    error_message = "proxmox_parallel must be at least 1."
+  }
+}
+
 variable "proxmox_node" {
   description = "Proxmox node on which the VM should be created."
   type        = string
@@ -44,6 +55,17 @@ variable "proxmox_node" {
   validation {
     condition     = length(trimspace(var.proxmox_node)) > 0
     error_message = "proxmox_node must not be empty."
+  }
+}
+
+variable "proxmox_nodes" {
+  description = "Optional Proxmox nodes used to distribute VMs. Leave empty to use proxmox_node."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for node in var.proxmox_nodes : length(trimspace(node)) > 0])
+    error_message = "proxmox_nodes must not contain empty node names."
   }
 }
 
@@ -72,10 +94,50 @@ variable "vm_template_name" {
   }
 }
 
+variable "vm_definitions" {
+  description = "Optional list of VMs to create for a lab blueprint deployment."
+  type = list(object({
+    vmid         = number
+    name         = string
+    hostname     = optional(string)
+    os_type      = optional(string)
+    language     = optional(string)
+    windows_admin_username = optional(string)
+    clone_source = string
+    full_clone   = bool
+    ip_last_octet = optional(number)
+    ipconfig0    = optional(string)
+    disk_type    = optional(string)
+    disk_slot    = optional(string)
+    disk_storage = optional(string)
+    disk_size    = optional(string)
+    cloudinit_slot = optional(string)
+    cloudinit_storage = optional(string)
+    bios         = optional(string)
+    machine      = optional(string)
+    tags         = optional(string)
+    vlan_tag     = number
+  }))
+  default = []
+}
+
 variable "vm_full_clone" {
   description = "Whether the clone should be a full copy."
   type        = bool
   default     = false
+}
+
+variable "windows_admin_password" {
+  description = "Guest password used for Windows cloud-init / WinRM checks and Linux SSH readiness checks."
+  type        = string
+  default     = ""
+  sensitive   = true
+}
+
+variable "linux_default_username" {
+  description = "Default Linux username injected through cloud-init and used for SSH readiness checks."
+  type        = string
+  default     = "ubuntu"
 }
 
 variable "vm_cores" {
@@ -102,6 +164,17 @@ variable "vm_onboot" {
   default     = false
 }
 
+variable "vm_ha_state" {
+  description = "Requested Proxmox HA state for each deployed VM after guest readiness. Use an empty string to leave HA unmanaged."
+  type        = string
+  default     = "started"
+
+  validation {
+    condition     = contains(["started", "stopped", "enabled", "disabled", "ignored", ""], lower(trimspace(var.vm_ha_state)))
+    error_message = "vm_ha_state must be one of started, stopped, enabled, disabled, ignored, or an empty string."
+  }
+}
+
 variable "vm_pool" {
   description = "Optional pool to add the VM to. Leave empty to skip."
   type        = string
@@ -126,6 +199,12 @@ variable "network_bridge" {
   default     = "vmbr0"
 }
 
+variable "network_vlan_gateway_host_offset" {
+  description = "Gateway host offset within each VLAN subnet."
+  type        = number
+  default     = 1
+}
+
 variable "network_model" {
   description = "Virtual NIC model."
   type        = string
@@ -142,4 +221,10 @@ variable "network_vlan_tag" {
   description = "VLAN tag applied to the NIC (0 = none)."
   type        = number
   default     = 0
+}
+
+variable "network_vlan_mask" {
+  description = "CIDR mask associated with the VLAN subnet."
+  type        = string
+  default     = "/24"
 }

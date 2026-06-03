@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+dist
+terraform/.terraform
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/.terraform-vars.json

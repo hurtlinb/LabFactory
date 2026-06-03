@@ -1,0 +1,8 @@
+CREATE TABLE IF NOT EXISTS classrooms (
+  id UUID PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  workstation_count INTEGER NOT NULL,
+  starting_vlan INTEGER NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);

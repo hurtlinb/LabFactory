@@ -1,7 +1,27 @@
 services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: labfactory
+      POSTGRES_USER: labfactory
+      POSTGRES_PASSWORD: labfactory
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
   redis:
     image: redis:8-alpine
     restart: unless-stopped
+    env_file:
+      - .env
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD}
     volumes:
       - redis-data:/data
 
@@ -11,15 +31,19 @@ services:
     restart: on-failure
     depends_on:
       - redis
+    env_file:
+      - .env
     volumes:
       - ./terraform:/usr/src/app/terraform:cached
       - ./config:/usr/src/app/config:cached
       - terraform-cache:/usr/src/app/.terraform
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - TF_IN_AUTOMATION=1
       - TF_DATA_DIR=/usr/src/app/.terraform
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run terraform-worker
 
   ansible-worker:
@@ -28,46 +52,39 @@ services:
     restart: on-failure
     depends_on:
       - redis
+      - postgres
+    env_file:
+      - .env
     volumes:
       - ./ansible:/usr/src/app/ansible:cached
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run ansible-worker
-
-  terraform-validator:
-    build: .
-    image: lab-orchestrator-demo:latest
-    depends_on:
-      - redis
-      - terraform-worker
-    volumes:
-      - ./terraform:/usr/src/app/terraform:cached
-      - ./config:/usr/src/app/config:cached
-      - terraform-cache:/usr/src/app/.terraform
-    environment:
-      - TF_IN_AUTOMATION=1
-      - TF_DATA_DIR=/usr/src/app/.terraform
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    command: npm run validate
-    restart: "no"
 
   dashboard:
     build: .
     image: lab-orchestrator-demo:latest
     depends_on:
+      - postgres
       - redis
+    env_file:
+      - .env
     ports:
       - "8080:3000"
     environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run dashboard
     volumes:
       - ./config:/usr/src/app/config:cached
     restart: unless-stopped
 
 volumes:
+  postgres-data:
   terraform-cache:
   redis-data:

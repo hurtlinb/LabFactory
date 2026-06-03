@@ -1,1045 +1,709 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>LabFactory — Observateur IA</title>
+  <title>LabFactory</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <style>
-    :root {
-      --bg: #f6f7fb;
-      --surface: #ffffff;
-      --text: #0f172a;
-      --muted: #6b7280;
-      --border: #e5e7eb;
-      --primary: #2563eb;
-      --primary-end: #7c3aed;
-      --secondary: #7c3aed;
-      --success: #0f766e;
-      --warning: #d97706;
-      --danger: #dc2626;
-      --sidebar: #0b1120;
-      --sidebar-muted: #64748b;
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    body {
-      margin: 0;
-      font-family: 'Inter', 'SF Pro Display', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-    }
-
-    .shell {
-      display: grid;
-      grid-template-columns: 260px 1fr;
-      min-height: 100vh;
-    }
-
-    .sidebar {
-      background: var(--sidebar);
-      color: #e2e8f0;
-      padding: 1.75rem 1.5rem;
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      position: relative;
-    }
-
-    .logo {
-      width: 52px;
-      height: 52px;
-      border-radius: 16px;
-      background: linear-gradient(135deg, var(--primary), var(--primary-end));
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      font-size: 1.1rem;
-      color: #fff;
-    }
-
-    .brand {
-      font-size: 1.3rem;
-      font-weight: 600;
-      letter-spacing: 0.05em;
-    }
-
-    .nav {
-      display: flex;
-      flex-direction: column;
-      gap: 1rem;
-      text-transform: uppercase;
-    }
-
-    .nav-section {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-    }
-
-    .nav-title {
-      font-size: 0.8rem;
-      letter-spacing: 0.11em;
-      color: var(--sidebar-muted);
-      margin: 0;
-      padding-left: 0.4rem;
-      text-align: left;
-    }
-
-    .nav-section button {
-      padding-left: 0.6rem;
-    }
-
-    .nav button {
-      border: none;
-      background: transparent;
-      color: var(--sidebar-muted);
-      font-size: 0.75rem;
-      letter-spacing: 0.08em;
-      padding: 0.45rem 0.25rem;
-      text-align: left;
-      cursor: pointer;
-      position: relative;
-    }
-
-    .nav button.active {
-      color: #fff;
-      font-weight: 600;
-    }
-
-    .nav button.active::after {
-      content: '';
-      position: absolute;
-      width: 4px;
-      height: 32px;
-      left: -1rem;
-      top: 50%;
-      transform: translateY(-50%);
-      border-radius: 999px;
-      background: linear-gradient(180deg, var(--primary), var(--secondary));
-    }
-
-    .sidebar-foot {
-      margin-top: auto;
-      font-size: 0.75rem;
-      color: var(--sidebar-muted);
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-    }
-
-    .sidebar-foot .badge-pill {
-      align-self: flex-start;
-    }
-
-    .main {
-      padding: 2rem;
-      background: linear-gradient(180deg, #f8fafc, #eef2ff 35%, #f8fafc);
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
-    }
-
-    .topbar {
-      background: var(--surface);
-      border-radius: 22px;
-      padding: 1rem 1.5rem;
-      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-
-    .topbar h1 {
-      margin: 0;
-      font-size: 1.45rem;
-    }
-
-    .topbar-label {
-      text-transform: uppercase;
-      letter-spacing: 0.2em;
-      font-size: 0.7rem;
-      color: var(--muted);
-      margin: 0 0 0.35rem 0;
-    }
-
-    .badge-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.25rem 0.8rem;
-      border-radius: 999px;
-      font-size: 0.75rem;
-      border: 1px solid var(--border);
-      background: #eef2ff;
-      font-weight: 600;
-    }
-
-    .grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-      gap: 1.25rem;
-    }
-
-    .card {
-      background: var(--surface);
-      border-radius: 22px;
-      padding: 1.25rem;
-      box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
-      border: 1px solid var(--border);
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .card h3 {
-      margin: 0;
-      font-size: 1rem;
-    }
-
-    .chip {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.4rem 0.8rem;
-      border-radius: 999px;
-      font-size: 0.8rem;
-      border: 1px solid rgba(37, 99, 235, 0.25);
-      background: #eef2ff;
-      color: #1e1b4b;
-    }
-
-    .form-group {
-      display: flex;
-      flex-direction: column;
-      gap: 0.35rem;
-      margin-bottom: 0.9rem;
-    }
-
-    .form-group input,
-    .form-group textarea,
-    .form-group select {
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      padding: 0.75rem 0.9rem;
-      font-size: 0.95rem;
-      font-family: inherit;
-      background: #fbfbff;
-    }
-
-    .btn {
-      border: none;
-      border-radius: 14px;
-      padding: 0.65rem 1.25rem;
-      font-size: 0.95rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: transform 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .btn-primary {
-      background: linear-gradient(135deg, var(--primary), var(--primary-end));
-      color: #fff;
-      box-shadow: 0 10px 30px rgba(37, 99, 235, 0.4);
-    }
-
-    .btn-secondary {
-      background: #eef2ff;
-      color: var(--secondary);
-      box-shadow: 0 10px 30px rgba(124, 58, 237, 0.25);
-    }
-
-    .btn-danger {
-      background: var(--danger);
-      color: #fff;
-      box-shadow: 0 10px 30px rgba(220, 38, 38, 0.4);
-    }
-
-    .btn:hover {
-      transform: translateY(-2px);
-    }
-
-    .btn-group {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-    }
-
-    .workspace {
-      display: grid;
-      grid-template-columns: 230px 1fr;
-      gap: 1rem;
-      background: #f8fafc;
-      border: 2px dashed rgba(15, 23, 42, 0.1);
-      border-radius: 24px;
-      padding: 1rem;
-      min-height: 260px;
-    }
-
-    .workspace.dragover {
-      background: #eef2ff;
-      border-color: rgba(37, 99, 235, 0.6);
-    }
-
-    .module-palette {
-      display: flex;
-      flex-direction: column;
-      gap: 0.65rem;
-    }
-
-    .module-card {
-      background: #fff;
-      border-radius: 14px;
-      padding: 0.75rem;
-      border: 1px dashed var(--border);
-    }
-
-    .canvas {
-      flex: 1;
-      border-radius: 18px;
-      background: linear-gradient(180deg, #fff, #f3f4ff);
-      border: 1px dashed rgba(15, 23, 42, 0.15);
-      min-height: 200px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      color: var(--muted);
-      font-weight: 500;
-    }
-
-    .status-message {
-      border-radius: 16px;
-      padding: 0.75rem 1rem;
-      font-size: 0.85rem;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      border: 1px solid transparent;
-    }
-
-    .status-message[data-state="success"] {
-      color: var(--success);
-      border-color: rgba(15, 118, 110, 0.3);
-      background: rgba(15, 118, 110, 0.08);
-    }
-
-    .status-message[data-state="warning"] {
-      color: var(--warning);
-      border-color: rgba(217, 119, 6, 0.35);
-      background: rgba(217, 119, 6, 0.08);
-    }
-
-    .status-message[data-state="danger"] {
-      color: var(--danger);
-      border-color: rgba(220, 38, 38, 0.35);
-      background: rgba(220, 38, 38, 0.08);
-    }
-
-    .deployment-card {
-      background: linear-gradient(135deg, #fff, #f0f4ff);
-      border-radius: 20px;
-      padding: 1rem;
-      position: relative;
-      overflow: hidden;
-      border: 1px solid var(--border);
-    }
-
-    .deployment-card__status {
-      position: absolute;
-      top: 1rem;
-      right: 1rem;
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      background: var(--warning);
-    }
-
-    .deployment-card__status[data-state="success"] {
-      background: var(--success);
-    }
-
-    .deployment-card__status[data-state="error"] {
-      background: var(--danger);
-    }
-
-    .deployment-card__status::after {
-      content: '';
-      position: absolute;
-      inset: 0;
-      background: rgba(255, 255, 255, 0.4);
-      border-radius: 50%;
-      display: block;
-    }
-
-    .deployment-card__status[data-state="success"]::after {
-      content: '\\2713';
-      font-size: 0.8rem;
-      color: #fff;
-      background: transparent;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .deployment-card__status[data-state="error"]::after {
-      content: '\\2715';
-      font-size: 0.8rem;
-      color: #fff;
-      background: transparent;
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .queue-table-wrapper {
-      overflow-x: auto;
-    }
-
-    .queue-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.9rem;
-      margin-top: 0.6rem;
-    }
-
-    .queue-table th,
-    .queue-table td {
-      padding: 0.55rem 0.6rem;
-      border-bottom: 1px solid rgba(14, 165, 233, 0.15);
-      color: var(--muted);
-      text-align: center;
-    }
-
-    .queue-table th {
-      font-size: 0.8rem;
-      letter-spacing: 0.05em;
-      text-transform: uppercase;
-      color: rgba(15, 23, 42, 0.6);
-    }
-
-    .queue-table tbody tr:last-child td {
-      border-bottom: none;
-    }
-
-    .queue-control {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 1rem;
-      flex-wrap: wrap;
-    }
-
-    .queue-control h3 {
-      margin: 0;
-      font-size: 1.1rem;
-    }
-
-    .queue-actions {
-      display: flex;
-      gap: 0.75rem;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .worker-card {
-      position: relative;
-      padding-bottom: 1.5rem;
-    }
-
-    .workers-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-      gap: 0.8rem;
-    }
-
-    .worker-card {
-      padding: 0.9rem;
-      border-radius: 18px;
-      border: 1px solid var(--border);
-      background: #fff;
-      display: flex;
-      flex-direction: column;
-      gap: 0.45rem;
-    }
-
-    .worker-card__actions {
-      margin-top: 0.5rem;
-      align-self: flex-end;
-    }
-
-    .worker-card__header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .worker-card h4 {
-      margin: 0;
-      font-size: 1rem;
-    }
-
-    .worker-card p {
-      margin: 0;
-      font-size: 0.8rem;
-      color: var(--muted);
-    }
-
-    .status-dot {
-      width: 14px;
-      height: 14px;
-      border-radius: 50%;
-      border: 2px solid #fff;
-      box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.08);
-      position: relative;
-    }
-
-    .status-dot[data-state="running"] {
-      background: var(--success);
-    }
-
-    .status-dot[data-state="paused"] {
-      background: var(--warning);
-    }
-
-    .status-dot[data-state="unknown"] {
-      background: var(--muted);
-    }
-
-    @keyframes spinner {
-      0% { transform: rotate(0deg); }
-      100% { transform: rotate(360deg); }
-    }
-
-    @media (max-width: 1100px) {
-      .shell {
-        grid-template-columns: 200px 1fr;
-      }
-    }
-
-    @media (max-width: 768px) {
-      .shell {
-        grid-template-columns: 1fr;
-      }
-
-      .sidebar {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: center;
-      }
-
-      .workspace {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  <link rel="icon" type="image/png" href="/assets/labfactory-logo.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
   <div class="shell">
+
+    <!-- ── Sidebar navigation ────────────────────────────────── -->
     <aside class="sidebar">
-      <div class="logo">AL</div>
-      <div class="brand">LabFactory</div>
-      <nav class="nav">
-        <div class="nav-section">
-          <p class="nav-title">Autres</p>
-          <button data-view="blueprint" class="active">Design</button>
-          <button data-view="lifecycle">Lifecycle</button>
+
+      <!-- Brand -->
+      <div class="sidebar-brand">
+        <div class="sidebar-logo-mark">
+          <img src="/assets/labfactory-logo.png" alt="LabFactory">
         </div>
-        <div class="nav-section">
-          <p class="nav-title">Administration</p>
-          <button data-view="admin-settings">Paramètres</button>
-          <button data-view="admin-queues">Queues</button>
+        <span class="sidebar-logo-text">LabFactory</span>
+      </div>
+
+      <nav class="nav">
+        <div class="nav-group">
+          <p class="nav-group-title">Labs</p>
+          <button data-view="dashboard" class="active">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="7" height="9" x="3" y="3" rx="1"/><rect width="7" height="5" x="14" y="3" rx="1"/>
+              <rect width="7" height="9" x="14" y="12" rx="1"/><rect width="7" height="5" x="3" y="16" rx="1"/>
+            </svg>
+            Dashboard
+          </button>
+          <button data-view="blueprint">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9A1 1 0 0 0 21.4 6z"/>
+              <path d="m22 17.65-9.17 4.16a2 2 0 0 1-1.66 0L2 17.65"/>
+              <path d="m22 12.65-9.17 4.16a2 2 0 0 1-1.66 0L2 12.65"/>
+            </svg>
+            Blueprints
+          </button>
+          <button data-view="lifecycle">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+            </svg>
+            Lifecycle
+          </button>
+        </div>
+        <div class="nav-group">
+          <p class="nav-group-title">Administration</p>
+          <button data-view="admin-users">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+              <circle cx="9" cy="7" r="4"/>
+              <path d="M22 21v-2a4 4 0 0 0-3-3.87"/>
+              <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+            </svg>
+            Users
+          </button>
+          <button data-view="admin-courses">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            Courses
+          </button>
+          <button data-view="models">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
+              <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
+              <line x1="6" x2="6.01" y1="6" y2="6"/>
+              <line x1="6" x2="6.01" y1="18" y2="18"/>
+            </svg>
+            VM Models
+          </button>
+          <button data-view="classrooms">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
+              <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
+              <path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/>
+              <path d="M10 6h4"/><path d="M10 10h4"/>
+              <path d="M10 14h4"/><path d="M10 18h4"/>
+            </svg>
+            Classrooms
+          </button>
+          <button data-view="admin-settings">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            Settings
+          </button>
+          <button data-view="admin-queues">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+              <path d="M12 11h4"/><path d="M12 16h4"/>
+              <path d="M8 11h.01"/><path d="M8 16h.01"/>
+            </svg>
+            Jobs
+          </button>
         </div>
       </nav>
-      <div class="sidebar-foot">
-        <p>Observateur IA — Monitoring</p>
-        <span class="badge-pill">Connected</span>
+
+      <div class="sidebar-footer">
+        <div id="connectionStatusList" class="sidebar-health-list" aria-live="polite">
+          <div id="postgresStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="postgresStatusLabel">Postgres</span>
+          </div>
+          <div id="proxmoxStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="proxmoxStatusLabel">Proxmox</span>
+          </div>
+          <div id="terraformWorkerStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="terraformWorkerStatusLabel">Terraform</span>
+          </div>
+          <div id="ansibleWorkerStatusIndicator" class="sidebar-health" data-state="unknown">
+            <span class="sidebar-health-icon" aria-hidden="true"></span>
+            <span id="ansibleWorkerStatusLabel">Ansible</span>
+          </div>
+        </div>
+
+        <div id="userSession" class="user-session" hidden>
+          <span id="userSessionName" class="user-session-name">User</span>
+          <span id="userSessionMeta" class="user-session-meta"></span>
+          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
+        </div>
+
+        <span id="appVersion" class="app-version">Version --</span>
       </div>
     </aside>
 
+    <!-- ── Main content ───────────────────────────────────────── -->
     <main class="main">
-      <header class="topbar">
-        <div>
-          <p class="topbar-label">Observateur IA</p>
-          <h1>Blueprint equilibrium</h1>
-        </div>
-        <div class="badge-pill">LabFactory</div>
-      </header>
 
-      <section id="section-blueprint" class="page" data-view="blueprint">
-        <div class="grid">
-          <article class="card">
-            <h3>Gestion des blueprints</h3>
-            <div style="display:flex; flex-wrap:wrap; gap:0.5rem;">
-              <span class="chip">Blueprint #235 — actif</span>
-              <span class="chip" style="background:#fef3c7; border-color:#fcd34d; color:#92400e;">Blueprint #212 — draft</span>
-              <span class="chip" style="background:#dcfce7; border-color:#0f766e; color:#0f766e;">Blueprint #198 — validé</span>
-            </div>
-            <button class="btn btn-secondary" style="margin-top:1rem;">Nouveau blueprint</button>
-          </article>
-          <article class="card">
-            <h3>Vue rapide</h3>
-            <p style="margin:0; color:var(--muted);">Blueprints actifs, modules disponibles et parcours étudiants synchronisés.</p>
-            <div style="margin-top:1rem;">
-              <div class="status-message" data-state="success">23 labs actifs • Systèmes stables</div>
-            </div>
-          </article>
+      <!-- Topbar -->
+      <div class="app-topbar">
+        <div class="page-header">
+          <p id="pageBreadcrumb" class="page-breadcrumb">Labs</p>
+          <h1 id="pageTitle" class="page-title">Blueprints</h1>
         </div>
+      </div>
 
-        <div class="grid">
-          <article class="card">
-            <h3>Formulaire de blueprint</h3>
-            <form>
-              <div class="form-group">
-                <label>Nom du blueprint</label>
-                <input type="text" placeholder="Ex: Atelier réseau" />
-              </div>
-              <div class="form-group">
-                <label>Description</label>
-                <textarea rows="4" placeholder="Décrivez l'expérience pédagogique..."></textarea>
-              </div>
-              <div class="form-group">
-                <label>Modules</label>
-                <select>
-                  <option>Catalogue complet</option>
-                  <option>Simulations cloud</option>
-                  <option>Laboratoires immersifs</option>
-                </select>
-              </div>
-              <div style="display:flex; gap:0.75rem;">
-                <button type="button" class="btn btn-secondary">Annuler</button>
-                <button type="button" class="btn btn-primary">Créer</button>
-              </div>
-            </form>
-          </article>
-          <article class="card">
-            <h3>Workspace</h3>
-            <div class="workspace" id="canvas">
-              <div class="module-palette">
-                <div class="module-card">Module Terraform</div>
-                <div class="module-card">Module Ansible</div>
-                <div class="module-card">Module Debug</div>
-              </div>
-              <div class="canvas">Glissez vos blocs ici</div>
-            </div>
-          </article>
-        </div>
-      </section>
+      <!-- Scrollable content -->
+      <div class="main-content">
+        <div id="globalStatus" class="status-message" hidden></div>
 
-      <section id="section-lifecycle" class="page" data-view="lifecycle" hidden>
-        <div class="grid">
-          <article class="card">
-            <h3>Deployments</h3>
-            <div class="deployment-card">
-              <p><strong>Release 4.2</strong></p>
-              <p>Statut: prêt</p>
-              <div class="deployment-card__status" data-state="success"></div>
+        <!-- ── Dashboard ─────────────────────────────────────── -->
+        <section class="page" data-view="dashboard" hidden>
+          <!-- Metrics row -->
+          <div class="dash-metrics">
+            <div class="dash-metric">
+              <p class="dash-metric-label">Active labs</p>
+              <p class="dash-metric-value accent" id="dashLabsCount">—</p>
+              <p class="dash-metric-sub" id="dashLabsSub">—</p>
             </div>
-          </article>
-          <article class="card">
-            <h3>File de jobs</h3>
-            <p style="margin:0; color:var(--muted);">Terraform → Ansible → Debug</p>
-            <div style="margin-top:0.8rem;">
-              <div class="status-message" data-state="warning">Terraform #29 en attente</div>
-              <div class="status-message" data-state="success" style="margin-top:0.5rem;">Ansible #27 terminé</div>
+            <div class="dash-metric">
+              <p class="dash-metric-label">VMs deployed</p>
+              <p class="dash-metric-value" id="dashVmsCount">—</p>
+              <p class="dash-metric-sub" id="dashVmsSub">—</p>
             </div>
-          </article>
-        </div>
-        <div class="grid">
-          <article class="card">
-            <h3>Formulaire Lifecycle</h3>
-            <div class="form-group">
-              <label>Cycle ciblé</label>
-              <input type="text" placeholder="Ex: Semaine 5" />
+            <div class="dash-metric">
+              <p class="dash-metric-label">Blueprints</p>
+              <p class="dash-metric-value" id="dashBlueprintsCount">—</p>
+              <p class="dash-metric-sub" id="dashBlueprintsSub">—</p>
             </div>
-            <button class="btn btn-primary">Planifier</button>
-          </article>
-          <article class="card">
-            <h3>Debugging</h3>
-            <p class="status-message" data-state="danger">Logs terraform en erreur</p>
-          </article>
-        </div>
-      </section>
+            <div class="dash-metric">
+              <p class="dash-metric-label">Classrooms</p>
+              <p class="dash-metric-value" id="dashClassroomsCount">—</p>
+              <p class="dash-metric-sub" id="dashClassroomsSub">—</p>
+            </div>
+          </div>
 
-      <section id="section-admin-settings" class="page" data-view="admin-settings" hidden>
-        <form id="terraformSettingsForm">
-          <div class="grid">
-            <article class="card">
-              <h3>Connexion Proxmox</h3>
-              <div class="form-group">
-                <label>URL API Proxmox</label>
-                <input type="text" name="proxmox_api_url" placeholder="https://pve.example.com:8006/api2/json" required />
+          <!-- Two-column: recent labs + VM models -->
+          <div class="dash-grid">
+            <div class="panel">
+              <div class="panel-head">
+                <p class="eyebrow">Recent labs</p>
+                <button class="btn btn-ghost" type="button" id="dashGotoLifecycle">View all</button>
               </div>
-              <div class="form-group">
-                <label>Token ID</label>
-                <input type="text" name="proxmox_api_token_id" placeholder="terraform@pve!labfactory" required />
+              <div id="dashRecentLabsList" class="saved-list">
+                <p class="placeholder">Loading…</p>
               </div>
-              <div class="form-group">
-                <label>Token secret</label>
-                <input type="password" name="proxmox_api_token_secret" placeholder="••••••••" required />
+            </div>
+            <div class="panel">
+              <div class="panel-head">
+                <p class="eyebrow">VM Models</p>
+                <button class="btn btn-ghost" type="button" id="dashGotoModels">Manage</button>
               </div>
-              <div class="form-group">
-                <label>Node cible</label>
-                <input type="text" name="proxmox_node" placeholder="pve01" required />
+              <div id="dashModelsList" class="saved-list">
+                <p class="placeholder">Loading…</p>
               </div>
-              <div class="form-group">
-                <label style="display:flex; align-items:center; gap:0.5rem;">
-                  <input type="checkbox" name="proxmox_tls_insecure" />
-                  Autoriser TLS auto-signé
-                </label>
+            </div>
+          </div>
+
+          <!-- Active lifecycle tracker -->
+          <div id="dashLifecycleCard" class="panel" hidden>
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Active lifecycle</p>
+                <h3 id="dashLifecycleTitle">—</h3>
+              </div>
+              <span id="dashLifecycleBadge" class="mini-pill">—</span>
+            </div>
+            <div id="dashLifecycleSteps"></div>
+            <div id="dashLifecycleActions" class="lc-actions"></div>
+          </div>
+
+          <!-- Per-seat grid -->
+          <div id="dashSeatCard" class="panel" hidden>
+            <div class="panel-head">
+              <p class="eyebrow">Workstation view</p>
+              <span id="dashSeatTitle" class="muted">—</span>
+            </div>
+            <div id="dashSeatGrid" class="seat-grid"></div>
+          </div>
+        </section>
+
+        <!-- ── VM Models ──────────────────────────────────────── -->
+        <section class="page" data-view="models" hidden>
+          <div class="builder-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">inventory</p>
+                </div>
+                <button id="newTemplateButton" class="btn btn-ghost" type="button">New</button>
+              </div>
+              <div id="modelList" class="saved-list">
+                <p class="placeholder">Loading models...</p>
               </div>
             </article>
-            <article class="card">
-              <h3>VM & ressources</h3>
-              <div class="form-group">
-                <label>VMID unique</label>
-                <input type="number" name="vm_id" min="101" required />
-              </div>
-                <div class="form-group">
-                  <label>Nom du VM</label>
-                  <input type="text" name="vm_name" required />
-                </div>
-                <div class="form-group">
-                  <label>Nom du template</label>
-                  <input type="text" name="vm_template_name" required />
-                </div>
-                <div class="form-group">
-                  <label>Pool (optionnel)</label>
-                  <input type="text" name="vm_pool" placeholder="labfactory" />
-                </div>
-              <div class="form-group">
-                <label>Cœurs</label>
-                <input type="number" name="vm_cores" min="1" />
-              </div>
-              <div class="form-group">
-                <label>Sockets</label>
-                <input type="number" name="vm_sockets" min="1" />
-              </div>
-              <div class="form-group">
-                <label>Mémoire (MiB)</label>
-                <input type="number" name="vm_memory" min="512" />
-              </div>
-              <div class="form-group">
-                <label style="display:flex; align-items:center; gap:0.5rem;">
-                    <input type="checkbox" name="vm_onboot" />
-                    Démarrer au boot
-                  </label>
-                </div>
-                <div class="form-group">
-                  <label>Description</label>
-                  <textarea name="vm_description" rows="3"></textarea>
-                </div>
-                <div class="form-group">
-                  <label>Contrôleur SCSI</label>
-                  <input type="text" name="vm_scsi_hw" />
-                </div>
-                <div class="form-group">
-                  <label style="display:flex; align-items:center; gap:0.5rem;">
-                    <input type="checkbox" name="vm_full_clone" checked />
-                    Clone complet (tous les disques et la configuration)
-                  </label>
-                </div>
-              </article>
-            </div>
 
-            <div class="grid">
-              <article class="card">
-                <h3>Réseau</h3>
-                <div class="form-group">
-                  <label>Bridge</label>
-                  <input type="text" name="network_bridge" />
-                </div>
-                <div class="form-group">
-                  <label>Modèle NIC</label>
-                  <input type="text" name="network_model" />
-                </div>
-                <div class="form-group">
-                  <label style="display:flex; align-items:center; gap:0.5rem;">
-                    <input type="checkbox" name="network_firewall" />
-                    Activer le firewall Proxmox
-                  </label>
-                </div>
-                <div class="form-group">
-                  <label>Tag VLAN</label>
-                  <input type="number" name="network_vlan_tag" min="0" />
-                </div>
-              </article>
-            </div>
-
-          <div class="form-group" style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center;">
-            <button type="submit" class="btn btn-primary">Enregistrer</button>
-            <button type="button" id="resetSettingsButton" class="btn btn-secondary">Recharger</button>
-            <p id="terraformSettingsStatus" class="status-message" data-state="success" hidden></p>
-          </div>
-        </form>
-      </section>
-
-      <section id="section-admin-queues" class="page" data-view="admin-queues" hidden>
-        <div class="grid">
-          <article class="card queue-card">
-              <div class="queue-control">
+            <article id="templateEditorPanel" class="panel" hidden>
+              <div class="panel-head">
                 <div>
-                  <p class="topbar-label" style="margin:0;">Cluster IA</p>
-                  <h3>Queues Terraform & Ansible</h3>
-                </div>
-                <div class="queue-actions">
-                  <button id="terraformJobButton" class="btn btn-primary">Créer job Terraform</button>
+                  <p class="eyebrow">VM Templates</p>
                 </div>
               </div>
-            <div class="queue-table-wrapper">
-              <table class="queue-table">
+              <p class="muted">Each model represents a Terraform clone operation for an existing Proxmox template.</p>
+              <form id="templateForm" class="stack">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="name" placeholder="VM Ubuntu 24.04" required>
+                </label>
+                <fieldset class="field os-fieldset">
+                  <legend>OS</legend>
+                  <div class="os-choice-grid">
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="windows11" required>
+                      <img src="/assets/os-windows11.png" alt="" aria-hidden="true">
+                      <span>Windows 11</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="windows-server" required>
+                      <img src="/assets/os-windows-server.png" alt="" aria-hidden="true">
+                      <span>Windows Server</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="ubuntu" required checked>
+                      <img src="/assets/os-ubuntu.png" alt="" aria-hidden="true">
+                      <span>Ubuntu</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="other" required>
+                      <img src="/assets/os-other.svg" alt="" aria-hidden="true">
+                      <span>Other</span>
+                    </label>
+                  </div>
+                </fieldset>
+                <div class="split">
+                  <label class="field">
+                    <span>Proxmox VMID</span>
+                    <input type="number" name="proxmoxTemplateVmid" min="1" placeholder="9002" required>
+                  </label>
+                  <label class="field">
+                    <span>Language</span>
+                    <select name="language" required>
+                      <option value="en" selected>EN</option>
+                      <option value="fr">FR</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="fullClone">
+                  <span>Use full clone instead of linked clone</span>
+                </label>
+                <div class="split">
+                  <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
+                  <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Blueprints ─────────────────────────────────────── -->
+        <section class="page" data-view="blueprint" hidden>
+          <div class="hero-grid">
+            <article class="panel panel-full">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">blueprints</p>
+                </div>
+                <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
+              </div>
+              <div id="blueprintList" class="saved-list">
+                <p class="placeholder">Loading blueprints...</p>
+              </div>
+            </article>
+          </div>
+
+          <div id="blueprintWorkspace" class="builder-grid" hidden>
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">palette</p>
+                </div>
+              </div>
+              <div id="templatePalette" class="template-palette">
+                <p class="placeholder">No VM models yet.</p>
+              </div>
+            </article>
+
+            <article class="panel panel-wide">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">workspace</p>
+                </div>
+                <div class="inline-actions">
+                  <span id="vmCount" class="pill">0 VM</span>
+                  <button id="saveBlueprintButton" class="btn btn-primary" type="button">Save blueprint</button>
+                </div>
+              </div>
+
+              <div id="dropzone" class="dropzone">
+                <div class="dropzone-copy">
+                  <p>Drop VM templates here</p>
+                  <span>Each drop creates a VM instance inside the lab blueprint.</span>
+                </div>
+                <div id="canvasVmList" class="canvas-vm-list"></div>
+              </div>
+
+              <form id="blueprintForm" class="stack">
+                <label class="field">
+                  <span>Blueprint name</span>
+                  <input id="blueprintName" type="text" name="name" placeholder="SOC analyst sandbox" required>
+                </label>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
+                </label>
+                <label class="field">
+                  <span>Course</span>
+                  <select id="blueprintCourseId" name="courseId" required>
+                    <option value="">Select a course</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Guest password</span>
+                  <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Used for Windows guest access and Linux SSH customization">
+                </label>
+                <label class="field">
+                  <span>Linux default username</span>
+                  <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
+                </label>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Classrooms ─────────────────────────────────────── -->
+        <section class="page" data-view="classrooms" hidden>
+          <div class="builder-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">inventory</p>
+                </div>
+                <button id="newClassroomButton" class="btn btn-ghost" type="button">New</button>
+              </div>
+              <div id="classroomList" class="saved-list">
+                <p class="placeholder">Loading classrooms...</p>
+              </div>
+            </article>
+
+            <article id="classroomEditorPanel" class="panel" hidden>
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">classrooms</p>
+                </div>
+              </div>
+              <p class="muted">Each workstation gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
+              <form id="classroomForm" class="stack">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="name" placeholder="Room A-203" required>
+                </label>
+                <div class="split-3">
+                  <label class="field">
+                    <span>Workplaces</span>
+                    <input type="number" name="workstationCount" min="1" placeholder="24" required>
+                  </label>
+                  <label class="field">
+                    <span>Starting VLAN</span>
+                    <input type="number" name="startingVlan" min="1" placeholder="200" required>
+                  </label>
+                  <label class="field">
+                    <span>Starting subnet</span>
+                    <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
+                  </label>
+                </div>
+                <div class="split">
+                  <label class="field">
+                    <span>Gateway</span>
+                    <input type="text" name="networkGateway" placeholder="10.0.200.1" required>
+                  </label>
+                  <label class="field">
+                    <span>VLAN mask</span>
+                    <select name="networkVlanMask" required>
+                      <option value="/24">/24</option>
+                      <option value="/25">/25</option>
+                      <option value="/26">/26</option>
+                      <option value="/27">/27</option>
+                      <option value="/28">/28</option>
+                      <option value="/29">/29</option>
+                      <option value="/30">/30</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="split">
+                  <button id="classroomSubmitButton" class="btn btn-primary" type="submit">Add classroom</button>
+                  <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
+                </div>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Lifecycle ──────────────────────────────────────── -->
+        <section class="page" data-view="lifecycle" hidden>
+          <div class="stack">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Prepare a lab</p>
+                </div>
+              </div>
+              <form id="deploymentForm" class="stack section-form">
+                <div class="split">
+                  <label class="field">
+                    <span>Blueprint</span>
+                    <select id="deploymentBlueprintSelect" name="blueprintId" required>
+                      <option value="">Select a blueprint</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Classroom</span>
+                    <select id="deploymentClassroomSelect" name="classroomId" required>
+                      <option value="">Select a classroom</option>
+                    </select>
+                  </label>
+                </div>
+                <button class="btn btn-primary" type="submit">Prepare</button>
+              </form>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">Operations</p>
+                </div>
+              </div>
+              <div id="lifecycleList" class="saved-list">
+                <p class="placeholder">Loading deployments...</p>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Deployment details dialog ─────────────────────── -->
+        <dialog id="deploymentDetailsDialog" class="details-dialog">
+          <article class="details-card">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Deployment details</p>
+                <h3 id="deploymentDetailsTitle">Deployment</h3>
+              </div>
+              <button id="closeDeploymentDetailsButton" class="icon-btn" type="button" aria-label="Close deployment details">×</button>
+            </div>
+            <div id="deploymentDetailsStatus" class="status-message" hidden></div>
+            <div id="deploymentVmDetailsList" class="saved-list">
+              <p class="placeholder">Loading deployment VMs...</p>
+            </div>
+          </article>
+        </dialog>
+
+        <!-- ── Settings ───────────────────────────────────────── -->
+        <section class="page" data-view="admin-settings" hidden>
+          <article class="panel">
+            <p class="eyebrow">settings</p>
+            <div class="inline-actions section-actions">
+              <button type="button" id="refreshLabsStateButton" class="btn btn-secondary">Refresh labs state</button>
+              <div id="settingsStatus" class="status-message" hidden></div>
+            </div>
+          </article>
+
+          <article class="panel danger-panel">
+            <p class="eyebrow danger-eyebrow">danger zone</p>
+            <div class="inline-actions section-actions danger-actions">
+              <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
+              <button type="button" id="cleanOrphanedDisksButton" class="btn btn-secondary">Clean orphaned disks</button>
+              <div id="dangerZoneStatus" class="status-message" hidden></div>
+            </div>
+          </article>
+        </section>
+
+        <!-- ── Users ──────────────────────────────────────────── -->
+        <section class="page" data-view="admin-users" hidden>
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">users</p>
+                <h3>Synchronized teachers</h3>
+              </div>
+            </div>
+            <div id="teacherList" class="saved-list">
+              <p class="placeholder">Loading users...</p>
+            </div>
+          </article>
+        </section>
+
+        <!-- ── Courses ────────────────────────────────────────── -->
+        <section class="page" data-view="admin-courses" hidden>
+          <div class="builder-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">courses</p>
+                  <h3>Courses</h3>
+                </div>
+              </div>
+              <div id="courseList" class="saved-list">
+                <p class="placeholder">Loading courses...</p>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">new course</p>
+                </div>
+              </div>
+              <form id="courseForm" class="stack">
+                <label class="field">
+                  <span>Course number</span>
+                  <input type="number" name="courseNumber" min="1" placeholder="101" required>
+                </label>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea name="description" rows="3" placeholder="Optional description"></textarea>
+                </label>
+                <button id="courseSubmitButton" class="btn btn-primary" type="submit">Add course</button>
+              </form>
+            </article>
+          </div>
+        </section>
+
+        <!-- ── Jobs / Queues ──────────────────────────────────── -->
+        <section class="page" data-view="admin-queues" hidden>
+          <div class="hero-grid">
+            <article class="panel">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">queues</p>
+                </div>
+              </div>
+              <div class="table-wrap">
+                <table class="queue-table">
+                  <thead>
+                    <tr>
+                      <th>Queue</th>
+                      <th>Waiting</th>
+                      <th>Active</th>
+                      <th>Delayed</th>
+                      <th>Completed</th>
+                      <th>Failed</th>
+                    </tr>
+                  </thead>
+                  <tbody id="queueTableBody">
+                    <tr><td colspan="6">Loading...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div id="terraformJobStatus" class="status-message" hidden></div>
+            </article>
+
+            <article class="panel">
+              <p class="eyebrow">workers</p>
+              <div id="workers" class="workers-grid">
+                <p class="placeholder">Loading workers...</p>
+              </div>
+            </article>
+          </div>
+
+          <article class="panel panel-full">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">jobs</p>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="queue-table jobs-table">
                 <thead>
                   <tr>
+                    <th>Job</th>
                     <th>Queue</th>
-                    <th>En attente</th>
-                    <th>Actif</th>
-                    <th>Retardés</th>
-                    <th>Terminés</th>
-                    <th>Échecs</th>
+                    <th>Status</th>
+                    <th>Lab</th>
+                    <th>Action</th>
+                    <th>Duration</th>
+                    <th>Created</th>
+                    <th>Detail</th>
                   </tr>
                 </thead>
-                <tbody id="queueTableBody">
-                  <tr><td colspan="6">Chargement...</td></tr>
+                <tbody id="jobsTableBody">
+                  <tr><td colspan="8">Loading...</td></tr>
                 </tbody>
               </table>
             </div>
-            <p id="terraformJobStatus" class="status-message" data-state="success" hidden></p>
           </article>
-          <article class="card">
-            <h3>Workers</h3>
-            <div id="workers" class="workers-grid">
-              <div class="worker-card">
-                <div class="worker-card__header">
-                  <h4>Terraform</h4>
-                  <span class="status-dot" data-state="unknown"></span>
-                </div>
-                <p>Statut : en attente</p>
-                <p>Heartbeat : ...</p>
-              </div>
-            </div>
-          </article>
-        </div>
-      </section>
+        </section>
+      </div><!-- /.main-content -->
     </main>
-  </div>
+  </div><!-- /.shell -->
 
-  <script>
-    const navButtons = document.querySelectorAll('.nav button');
-    const pages = document.querySelectorAll('.page');
-    const queueTableBody = document.getElementById('queueTableBody');
-    const workersContainer = document.getElementById('workers');
-    const terraformButton = document.getElementById('terraformJobButton');
-    const terraformStatus = document.getElementById('terraformJobStatus');
-    const terraformSettingsForm = document.getElementById('terraformSettingsForm');
-    const terraformSettingsStatus = document.getElementById('terraformSettingsStatus');
-    const resetSettingsButton = document.getElementById('resetSettingsButton');
-    let statusTimeout = null;
-    let settingsTimeout = null;
+  <!-- ── VM customization dialog ───────────────────────────── -->
+  <dialog id="vmCustomizationDialog" class="modal-dialog">
+    <form id="vmCustomizationForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Customization</p>
+          <h3 id="vmCustomizationTitle">Set Value</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Value</span>
+        <input id="vmCustomizationValue" type="text" autocomplete="off" required>
+      </label>
+      <div class="inline-actions">
+        <button id="vmCustomizationCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
 
-    const setActiveView = view => {
-      pages.forEach(page => {
-        page.hidden = page.dataset.view !== view;
-      });
-    };
+  <!-- ── VM IP dialog ───────────────────────────────────────── -->
+  <dialog id="vmIpDialog" class="modal-dialog">
+    <form id="vmIpForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">VM Model</p>
+          <h3>Set IP last octet</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Last octet</span>
+        <input id="vmIpValue" type="number" min="1" max="254" step="1" inputmode="numeric" required>
+      </label>
+      <p id="vmIpHelp" class="muted modal-help">Enter the last IPv4 octet for this VM.</p>
+      <div class="inline-actions">
+        <button id="vmIpCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button id="vmIpSubmitButton" class="btn btn-primary" type="submit">Add VM</button>
+      </div>
+    </form>
+  </dialog>
 
-    const renderWorkers = workers => {
-      workersContainer.innerHTML = workers.map(worker => {
-        const lastBeat = worker.lastHeartbeat ? new Date(worker.lastHeartbeat).toLocaleTimeString() : '—';
-        const action = worker.status === 'running' ? 'pause' : 'resume';
-        const icon = action === 'pause' ? '❚❚' : '▶';
-        return `
-          <article class="worker-card">
-            <div class="worker-card__header">
-              <h4>${worker.name}</h4>
-              <span class="status-dot" data-state="${worker.status === 'running' ? 'running' : worker.status === 'paused' ? 'paused' : 'unknown'}"></span>
-            </div>
-            <p>Statut : ${worker.status || 'unknown'}</p>
-            <p>Heartbeat : ${lastBeat}</p>
-            <div class="worker-card__actions">
-              <button class="btn btn-icon worker-toggle" data-worker="${worker.name}" data-action="${action}" aria-label="${action} queue">${icon}</button>
-            </div>
-          </article>
-        `;
-      }).join('');
-    };
+  <!-- ── VM timezone dialog ─────────────────────────────────── -->
+  <dialog id="vmTimezoneDialog" class="modal-dialog">
+    <form id="vmTimezoneForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Customization</p>
+          <h3>Set Timezone</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Timezone</span>
+        <select id="vmTimezoneValue"></select>
+      </label>
+      <div class="inline-actions">
+        <button id="vmTimezoneCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
 
-    const refreshQueues = async () => {
-      try {
-        const res = await fetch('/api/queues');
-        if (!res.ok) return;
-        const queues = await res.json();
-        queueTableBody.innerHTML = queues.map(queue => `
-          <tr>
-            <td>${queue.name}</td>
-            <td>${queue.waiting ?? 0}</td>
-            <td>${queue.active ?? 0}</td>
-            <td>${queue.delayed ?? 0}</td>
-            <td>${queue.completed ?? 0}</td>
-            <td>${queue.failed ?? 0}</td>
-          </tr>
-        `).join('');
-      } catch (err) {
-        queueTableBody.innerHTML = '<tr><td colspan="6">Impossible de récupérer les files</td></tr>';
-      }
-    };
-
-    const refreshWorkers = async () => {
-      try {
-        const res = await fetch('/api/workers');
-        if (!res.ok) return;
-        const workers = await res.json();
-        renderWorkers(workers);
-        document.querySelectorAll('.worker-toggle').forEach(button => {
-          button.onclick = async () => {
-            const worker = button.dataset.worker;
-            const action = button.dataset.action;
-            button.disabled = true;
-            try {
-              await fetch('/api/control', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ worker, action })
-              });
-            } catch (err) {
-              console.error('Impossible de modifier la queue', err);
-            } finally {
-              button.disabled = false;
-              await refreshWorkers();
-            }
-          };
-        });
-      } catch (err) {
-        console.error('Impossible de récupérer les workers', err);
-      }
-    };
-
-    const showTerraformMessage = (message, state = 'success') => {
-      terraformStatus.textContent = message;
-      terraformStatus.dataset.state = state;
-      terraformStatus.hidden = false;
-      if (statusTimeout) clearTimeout(statusTimeout);
-      statusTimeout = setTimeout(() => {
-        terraformStatus.hidden = true;
-      }, 3500);
-    };
-
-    const showSettingsStatus = (message, state = 'success') => {
-      terraformSettingsStatus.textContent = message;
-      terraformSettingsStatus.dataset.state = state;
-      terraformSettingsStatus.hidden = false;
-      if (settingsTimeout) clearTimeout(settingsTimeout);
-      settingsTimeout = setTimeout(() => {
-        terraformSettingsStatus.hidden = true;
-      }, 3500);
-    };
-
-    const fillSettingsForm = settings => {
-      Object.entries(settings).forEach(([key, value]) => {
-        const field = terraformSettingsForm.elements[key];
-        if (!field) return;
-        if (field.type === 'checkbox') {
-          field.checked = Boolean(value);
-        } else {
-          field.value = value ?? '';
-        }
-      });
-    };
-
-    const collectSettingsPayload = () => {
-      const payload = {};
-      Array.from(terraformSettingsForm.elements).forEach(el => {
-        if (!el.name) return;
-        if (el.type === 'checkbox') {
-          payload[el.name] = el.checked;
-          return;
-        }
-        if (el.type === 'number') {
-          if (el.value === '') return;
-          payload[el.name] = Number(el.value);
-          return;
-        }
-        payload[el.name] = el.value;
-      });
-      return payload;
-    };
-
-    const loadTerraformSettings = async () => {
-      try {
-        const res = await fetch('/api/settings/terraform');
-        if (!res.ok) {
-          throw new Error('impossible de charger les paramètres');
-        }
-        const data = await res.json();
-        fillSettingsForm(data);
-      } catch (err) {
-        showSettingsStatus(err.message ?? 'Erreur lors du chargement', 'danger');
-      }
-    };
-
-    terraformSettingsForm.addEventListener('submit', async event => {
-      event.preventDefault();
-      const payload = collectSettingsPayload();
-      try {
-        const response = await fetch('/api/settings/terraform', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        if (!response.ok) {
-          const payload = await response.json();
-          throw new Error(payload.error ?? 'Erreur lors de l\'enregistrement');
-        }
-        showSettingsStatus('Paramètres sauvegardés', 'success');
-        await loadTerraformSettings();
-      } catch (err) {
-        showSettingsStatus(err.message ?? 'Impossible d\'enregistrer', 'danger');
-      }
-    });
-
-    resetSettingsButton.addEventListener('click', () => {
-      loadTerraformSettings();
-    });
-
-    navButtons.forEach(button => {
-      button.addEventListener('click', () => {
-        navButtons.forEach(btn => btn.classList.remove('active'));
-        button.classList.add('active');
-        setActiveView(button.dataset.view);
-      });
-    });
-
-    setActiveView('blueprint');
-    loadTerraformSettings();
-
-
-    terraformButton.addEventListener('click', async () => {
-      terraformButton.disabled = true;
-      showTerraformMessage('Mise en file d’un job Terraform…', 'warning');
-      try {
-        const response = await fetch('/api/jobs/terraform', { method: 'POST' });
-        const payload = await response.json();
-        if (!response.ok) {
-          showTerraformMessage(payload.error ?? 'Échec de la création', 'danger');
-        } else {
-          showTerraformMessage(`Job ${payload.jobId} placé dans ${payload.queue}`);
-        }
-      } catch (err) {
-        showTerraformMessage('Impossible de joindre l’API', 'danger');
-      } finally {
-        terraformButton.disabled = false;
-      }
-    });
-
-    refreshQueues();
-    refreshWorkers();
-    setInterval(() => {
-      refreshQueues();
-      refreshWorkers();
-    }, 5000);
-  </script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

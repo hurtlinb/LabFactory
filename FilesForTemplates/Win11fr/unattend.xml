@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS" xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "Enable-PSRemoting -Force"</CommandLine>
+          <Description>Enable WinRM</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "winrm set winrm/config/service '@{AllowUnencrypted=\"true\"}'"</CommandLine>
+          <Description>Allow unencrypted WinRM</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "winrm set winrm/config/service/auth '@{Basic=\"true\"}'"</CommandLine>
+          <Description>Enable Basic auth</Description>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <CommandLine>powershell -ExecutionPolicy Bypass -Command "netsh advfirewall firewall set rule group='Windows Remote Management' new enable=yes"</CommandLine>
+          <Description>Open WinRM firewall</Description>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+  <!-- Phase windowsPE -->
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <SetupUILanguage>
+        <UILanguage>fr-CH</UILanguage>
+      </SetupUILanguage>
+      <InputLocale>fr-CH</InputLocale>
+      <SystemLocale>fr-CH</SystemLocale>
+      <UILanguage>fr-CH</UILanguage>
+      <UserLocale>fr-CH</UserLocale>
+    </component>
+  </settings>
+
+  <!-- Phase specialize -->
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <ComputerName>*</ComputerName>
+      <TimeZone>W. Europe Standard Time</TimeZone>
+    </component>
+  </settings>
+
+  <!-- Phase oobeSystem -->
+  <settings pass="oobeSystem">
+    <component name="Microsoft-Windows-International-Core" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      <InputLocale>fr-CH</InputLocale>
+      <SystemLocale>fr-CH</SystemLocale>
+      <UILanguage>fr-CH</UILanguage>
+      <UserLocale>fr-CH</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup" processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35" language="neutral" versionScope="nonSxS">
+      
+      <!-- OOBE simplifié -->
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+
+      <!-- Activation du compte Administrateur -->
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>Emf12345</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+      </UserAccounts>
+
+      <!-- Auto-logon Administrateur -->
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <LogonCount>5</LogonCount>
+        <Password>
+          <Value>Emf12345</Value>
+          <PlainText>true</PlainText>
+        </Password>
+      </AutoLogon>
+
+      <RegisteredOwner>EMF</RegisteredOwner>
+      <RegisteredOrganization>EMF-Informatique</RegisteredOrganization>
+
+    </component>
+  </settings>
+
+</unattend>

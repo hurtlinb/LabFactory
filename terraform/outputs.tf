@@ -1,19 +1,19 @@
-output "vm_resource_id" {
-  description = "Terraform-managed Proxmox resource identifier."
-  value       = proxmox_vm_qemu.blank_vm.id
+output "vm_resource_ids" {
+  description = "Terraform-managed Proxmox resource identifiers keyed by VMID."
+  value       = { for key, vm in proxmox_vm_qemu.lab_vm : key => vm.id }
 }
 
-output "vmid" {
-  description = "Numeric VMID assigned in Proxmox."
-  value       = proxmox_vm_qemu.blank_vm.vmid
+output "vmids" {
+  description = "Numeric VMIDs assigned in Proxmox."
+  value       = { for key, vm in proxmox_vm_qemu.lab_vm : key => vm.vmid }
 }
 
-output "vm_node" {
-  description = "Proxmox node hosting the VM."
-  value       = proxmox_vm_qemu.blank_vm.target_node
+output "vm_nodes" {
+  description = "Proxmox node hosting each VM."
+  value       = { for key, vm in proxmox_vm_qemu.lab_vm : key => vm.target_node }
 }
 
-output "vm_name" {
-  description = "Name of the deployed VM."
-  value       = proxmox_vm_qemu.blank_vm.name
+output "vm_names" {
+  description = "Names of deployed VMs keyed by VMID."
+  value       = { for key, vm in proxmox_vm_qemu.lab_vm : key => vm.name }
 }

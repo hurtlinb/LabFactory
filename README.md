@@ -1,49 +1,341 @@
-# Labourator Demo
+# LabFactory
 
-This project splits the Terraform and Ansible workers into separate container services while providing a single LabFactory dashboard for orchestration visibility.
+LabFactory is a Proxmox lab orchestration dashboard built around:
+- reusable VM models
+- drag-and-drop blueprints
+- classroom-based deployments
+- BullMQ job queues
+- Terraform workers for deploy, start, stop, and destroy operations
 
-## Prerequisites
-- Terraform 1.5+ and Ansible (built into the Dockerfile).
-- Node.js 20+ for the Node scripts.
-- Redis for BullMQ job queues (`docker-compose.yml` provides it).
+The UI is served by the `dashboard` service, state is stored in PostgreSQL, and workflow execution is handled by Redis-backed workers.
 
-## Structure
-1. `workers/terraformWorker.js` and `workers/ansibleWorker.js` run BullMQ jobs for each workflow.
-2. `workers/startTerraformWorkerService.js` and `workers/startAnsibleWorkerService.js` launch the workers, publish heartbeat/status to `worker:<name>` in Redis, and listen to `control:<name>` channels for pause/resume commands.
-3. `lib/jobMonitor.js` contains `waitForJobCompletion`, which polls job state instead of relying on `QueueEvents`.
-4. `docker-compose.yml` runs four services: `redis`, `terraform-worker`, `ansible-worker`, and `dashboard`. The workers run continuously and the dashboard presents the LabFactory observatory UI.
-5. `terraform/` now includes a Proxmox playbook that deploys an empty QEMU VM onto an existing cluster.
+## Authentication
+The dashboard can be protected with OpenID Connect through Keycloak.
 
-## Terraform playbook
-The configuration under `terraform/` uses the Telmate Proxmox provider to create a minimal VM with a blank boot disk. It is intentionally opinionated (single NIC on `vmbr0`, `virtio-scsi-pci`, etc.) but every option is configurable through variables.
+When `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID` are configured:
+- all dashboard pages and `/api/*` routes require authentication
+- login is handled with the Authorization Code flow + PKCE
+- the sidebar shows the authenticated user and a logout link
 
-### Usage
-1. Copy `terraform/terraform.tfvars.sample` to `terraform/terraform.tfvars` and fill in the API endpoint, API token ID/secret (password logins no longer work), node name, a unique `vm_id`, and the template name you want to clone.
-2. `cd terraform`
-3. `terraform init`
-4. `terraform plan -var-file=terraform.tfvars`
-5. `terraform apply -var-file=terraform.tfvars`
+Required environment variables for OIDC:
+- `SESSION_SECRET`
+- `OIDC_ISSUER_URL`
+- `OIDC_CLIENT_ID`
 
-### Notes
-- Authentication now requires an API token (`proxmox_api_token_id`/`proxmox_api_token_secret`); password-based login is no longer supported, so fill those fields in Administration → Paramètres before enqueueing jobs.
-- Keep `vm_id` unique on the cluster; Proxmox rejects duplicates.
-- The playbook assumes `vmbr0` and the configured storage pool exist. Adjust `network_bridge` and disk variables if your topology differs.
-- TLS verification is disabled by default (`proxmox_tls_insecure = true`) because many lab clusters use self-signed certificates; flip the flag once you trust the certificate.
-- Use the Telmate provider `3.0.2-rc07`; the 3.0 RC series ships the fixes that align with Proxmox 9.1’s ACL model and the latest release notes list rc07 as a compatible version. citeturn0search3
-- API tokens still need cluster privileges such as `Sys.Audit` (and the VM/Datastore rights you want to manage) because the RC provider now queries the user list and Proxmox 9 dropped the `VM.Monitor` privilege in favor of `Sys.Audit`. citeturn1search1
-- VM deployments now clone an existing Proxmox template (`vm_template_name`, managed through Administration → Paramètres). The template defines disks, NICs, cloud-init data, and CPU flavor, and Terraform performs a linked clone by default (`vm_full_clone = false`); flip the `Full clone` checkbox if you need an independent copy of the template’s storage.
-- Terraform workers now load `config/terraform-settings.json` (populated by the dashboard Administration → Settings page) and pass it directly as `-var-file=` during each job. Failing to fill those UI fields leads to startup logs complaining about unset variables, so configure the settings page (or manually create the JSON file) before queueing jobs.
-- Each run also writes a sanitized copy to `terraform/.terraform-vars.json`, ensuring Terraform only sees the variables declared in the module; replay the Administration → Paramètres save if you ever see “undeclared variable” warnings, and the worker still filters out stray fields at runtime.
-- Terraform state lives in `terraform/` and is ignored by git (`.gitignore` already excludes it). Delete the `.terraform/` directory and `terraform.tfstate*` files if you need a clean slate.
-- The dashboard and terraform-worker containers mount the host `config/` directory, so anything you save in Administration → Paramètres (`config/terraform-settings.json`) survives container restarts. Do not delete that file if you want the saved credentials and VM defaults to persist across `docker compose down`/`up` cycles. 
+Optional environment variables:
+- `OIDC_CLIENT_SECRET`
+- `OIDC_SCOPES` (default: `openid profile email`)
+- `OIDC_REDIRECT_URI`
+- `OIDC_POST_LOGOUT_REDIRECT_URI`
+- `SESSION_COOKIE_SECURE`
+- `TRUST_PROXY`
 
-## Running the dashboard
-1. `npm install` (to generate `package-lock.json` and install dependencies).
-2. `docker compose up --build terraform-worker ansible-worker dashboard` to start Redis, the workers, and the dashboard.
-3. Open <http://localhost:8080>; the LabFactory sidebar exposes Design, Lifecycle, and Administration (with a Queues submenu). Within **Administration > Queues** you can monitor the BullMQ queue lengths, see worker states, issue pause/resume commands, and hit “Create a Terraform job” to enqueue a brand new workflow without additional CLI commands.
+## Stack
+- `dashboard`: Express server + static UI
+- `postgres`: persistent storage for models, blueprints, classrooms, and deployments
+- `redis`: BullMQ backend
+- `terraform-worker`: executes Terraform and Proxmox lifecycle actions
+- `ansible-worker`: reserved for Ansible workflows
+
+Current Docker services are defined in [docker-compose.yml](./docker-compose.yml).
+
+## Main Features
+
+### VM Models
+VM models are stored in PostgreSQL and include:
+- name
+- description
+- OS
+  - `Windows 11`
+  - `Windows Server`
+  - `Ubuntu`
+  - `Other`
+- Proxmox template VMID
+- clone mode
+  - `full clone`
+  - `linked clone`
+
+The UI exposes OS selection with logos and uses the selected OS in the model cards and blueprint palette.
+
+### Blueprints
+Blueprints are created with drag and drop:
+- drag VM models from the palette
+- create one or more VM instances
+- rename each instance
+- save, reload, and delete blueprints
+
+Each blueprint stores a reusable lab definition in PostgreSQL.
+Each blueprint is also linked to the teacher who created it, using the authenticated OpenID Connect user email.
+Each blueprint must also be attached to a course.
+
+### Classrooms
+Classrooms are used as deployment targets and include:
+- name
+- workstation count
+- starting VLAN
+
+For a classroom deployment:
+- each workstation gets its own VLAN
+- VLAN = `startingVlan + workstationIndex`
+
+### Courses
+Courses are managed from the `Administration` section.
+
+Each course contains:
+- a unique required number
+- an optional description
+
+### Lifecycle
+Lifecycle works with prepared deployments:
+1. choose a blueprint
+2. choose a classroom
+3. click `Prepare`
+4. launch actions from the deployment row
+
+Supported actions:
+- deploy
+- start
+- stop
+- destroy
+
+Each prepared deployment is stored independently, so multiple labs can target the same classroom.
+Each deployment also stores the teacher email that created it, using the authenticated OpenID Connect user email as the key.
+
+For a classroom deployment, the blueprint is replicated for every workstation in the classroom.
+
+VM naming convention:
+- `<course-number>-<teacher-initials>-<blueprint-name>-<two-digit-workstation-number>-<instance-name>`
+
+Example:
+- `101-bh-soc-lab-01-dc`
+- `101-bh-soc-lab-01-client`
+- `101-bh-soc-lab-02-dc`
+
+### Lifecycle State Refresh
+The `Settings` page contains a `Refresh labs state` button.
+
+This action queries Proxmox and reconciles deployment state with the real VM state:
+- `running`
+- `stopped`
+- `destroyed`
+- `mixed`
+
+If a deployment is in a mixed state, the `Lifecycle` page shows:
+- both `Start` and `Stop` icons
+- a warning badge
+
+### Jobs
+The `Jobs` page provides:
+- queue counters for Terraform and Ansible
+- worker status
+- one-line job history with:
+  - queue
+  - status
+  - associated lab
+  - action
+  - duration
+  - creation time
+  - detail / error
+
+The `Settings` page also contains a `Clear job history` button to remove completed and failed jobs from BullMQ history.
+
+The danger zone also contains a `Clean orphaned disks` button. It uses the Proxmox API token to inspect QEMU VM configs, list volumes in `PROXMOX_ORPHANED_DISK_POOL` (`ceph-pool` by default), and remove pool volumes that are not referenced by any VM config. Volumes whose VMID still exists in Proxmox or whose RBD image still has watchers are ignored. The cleanup uses direct Proxmox REST API calls on the first node from `PROXMOX_NODES` or `PROXMOX_NODE`; the `nodes/{node}/execute` endpoint is not used because Proxmox restricts it to `root@pam`.
+
+## Terraform Behavior
+Terraform is used for deployment and destruction.
+
+Important points:
+- Proxmox authentication is done with API token environment variables
+- LabFactory stores template VMIDs in the database
+- before deploy, the Terraform worker resolves template VMID -> Proxmox VM name
+- the Proxmox API token must have `VM.Audit` on each template VMID, for example `/vms/<template-vmid>`, so the worker can read the template name and disk layout
+- each deployment uses its own Terraform workspace
+- VMs are distributed round-robin across `PROXMOX_NODES`; when it is empty, the worker discovers online Proxmox nodes and falls back to `PROXMOX_NODE`
+- VMs are registered in Proxmox HA only after guest readiness checks pass, using `vm_ha_state = "started"` by default; set `vm_ha_state` to an empty string to leave HA unmanaged
+- Terraform and Telmate provider concurrency are controlled by `TERRAFORM_PARALLELISM` (`10` by default, capped at `64` by the worker)
+- deployment state is tracked in PostgreSQL
+
+`start` and `stop` do not run Terraform apply; they resolve each VM's current Proxmox node and call the Proxmox API directly on the deployed VMIDs. For HA-managed VMs, the worker requests the matching Proxmox HA state (`started` or `stopped`) instead of fighting the HA manager.
+
+## Ubuntu Template Preparation
+To prepare an Ubuntu VM before converting it to a Proxmox template:
+
+1. Install Cloud-Init, the QEMU guest agent, and OpenSSH server:
+
+```bash
+sudo apt update
+sudo apt install -y cloud-init qemu-guest-agent openssh-server
+```
+
+2. Enable the guest agent and SSH:
+
+```bash
+sudo systemctl enable qemu-guest-agent
+sudo systemctl enable ssh
+```
+
+3. Configure Cloud-Init for Proxmox and make sure the NoCloud datasource is allowed:
+
+```bash
+sudo nano /etc/cloud/cloud.cfg.d/99-pve.cfg
+```
+
+Use:
+
+```yaml
+datasource_list: [ NoCloud, ConfigDrive ]
+```
+
+4. Clean the Cloud-Init state before turning the VM into a template:
+
+```bash
+sudo cloud-init clean --logs
+```
+
+5. Remove machine identifiers to avoid duplicate identities and network conflicts on clones:
+
+```bash
+sudo truncate -s 0 /etc/machine-id
+sudo rm /var/lib/dbus/machine-id
+```
+
+6. Optionally remove existing SSH host keys so they are regenerated on first boot:
+
+```bash
+sudo rm -f /etc/ssh/ssh_host_*
+```
+
+7. Power off the VM:
+
+```bash
+sudo poweroff
+```
+
+Once the VM is powered off, convert it into a Proxmox template.
+
+LabFactory expects Linux guest customization over SSH. The template must therefore expose an SSH server and allow login for the configured `linux_default_username`.
+
+## Windows Template Preparation
+The Windows template preparation flow is the same for Windows Server 2022 and Windows 11.
+
+To prepare a Windows VM before converting it to a Proxmox template:
+
+1. Install the QEMU guest agent.
+
+2. Install Cloudbase-Init.
+  # EDIT BHU: that's not true
+  # For Windows 11 FR: Cloudbase-Init must run with the built-in `Administrateur` account, not `admin`.
+
+3. Copy the files from [FilesForTemplates](./FilesForTemplates):
+- `cloudbase-init.conf`
+- `unattend.xml`
+- any additional Windows preparation files needed by your template workflow
+
+4. Open an elevated PowerShell session and set the execution policy to `RemoteSigned`:
+
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope LocalMachine
+```
+
+5. Run `sysprep`.
+
+6. Once the VM is powered off, convert it into a Proxmox template.
+
+## Data Model
+Main SQL migrations:
+- [001-init.sql](./db/migrations/001-init.sql)
+- [002-blueprints.sql](./db/migrations/002-blueprints.sql)
+- [003-lifecycle.sql](./db/migrations/003-lifecycle.sql)
+- [004-classrooms.sql](./db/migrations/004-classrooms.sql)
+- [005-lab-deployments.sql](./db/migrations/005-lab-deployments.sql)
+- [006-template-os-type.sql](./db/migrations/006-template-os-type.sql)
+
+The dashboard keeps track of applied migrations with `schema_migrations`.
+
+## Repository Layout
+- [dashboard/](./dashboard): UI and API server
+- [workers/](./workers): BullMQ workers
+- [terraform/](./terraform): Terraform Proxmox module
+- [config/](./config): runtime configuration files
+- [db/migrations/](./db/migrations): PostgreSQL schema and seed data
+
+## Environment
+Copy `.env.example` to `.env` and set at least:
+- `REDIS_PASSWORD`
+- `PROXMOX_API_URL`
+- `PROXMOX_NODE`
+- `PROXMOX_TLS_INSECURE`
+- `PROXMOX_API_TOKEN_ID`
+- `PROXMOX_API_TOKEN_SECRET`
+
+Optional Proxmox node distribution:
+- `PROXMOX_NODES` comma-separated target nodes, for example `pve01,pve02,pve03`
+- `TERRAFORM_PARALLELISM` concurrent Terraform and Telmate provider operations, for example `20` for large multi-node deployments
+
+To enable Keycloak authentication, also set:
+- `SESSION_SECRET`
+- `OIDC_ISSUER_URL`
+- `OIDC_CLIENT_ID`
+
+Example Keycloak values:
+- `OIDC_ISSUER_URL=https://keycloak.example.com/realms/labfactory`
+- `OIDC_CLIENT_ID=labfactory-dashboard`
+- `OIDC_CLIENT_SECRET=<only for confidential clients>`
+
+## Redis Security
+Redis is used as the BullMQ backend and is expected to run behind the internal Docker network only.
+
+Current security model:
+- Redis is not published with `ports`, so it is not exposed on the host by default
+- Redis requires authentication through `REDIS_PASSWORD`
+- `dashboard`, `terraform-worker`, and `ansible-worker` use the same `REDIS_PASSWORD` value
+
+When changing the Redis password in `.env`, restart the Redis and application services:
+
+```bash
+docker compose up -d redis dashboard ansible-worker terraform-worker
+```
+
+## Run
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start the stack:
+
+```bash
+docker compose up --build
+```
+
+3. Open:
+
+```text
+http://localhost:8080
+```
+
+## Notes
+- PostgreSQL stores VM models, blueprints, classrooms, and prepared deployments.
+- Redis stores BullMQ queue data.
+- Redis should stay on the internal Docker network unless you also add network-level restrictions and secret management.
+- `config/terraform-settings.json` is still mounted and available, but the old settings form is no longer used for operational parameters.
+- The old `terraform-validator` service has been removed from the stack.
 
 ## Cleanup
-- `docker compose down` removes all containers and networks.
-- Remove any Terraform artifacts in `terraform/.terraform` or the `tfplan` file if needed.
+- Stop containers:
 
-This skeleton is ready to host the API, the HTTP Terraform backend, RBAC auditing, and more complex orchestration flows.
+```bash
+docker compose down
+```
+
+- Stop containers and delete volumes:
+
+```bash
+docker compose down -v
+```
+
+- If you need to reset local Terraform cache/state used by the worker, remove:
+  - `terraform/.terraform`
+  - `terraform/.terraform-vars.json`
+  - any local `terraform.tfstate*` artifacts if present

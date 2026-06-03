@@ -4,3 +4,6 @@ tfplan
 terraform.tfstate*
 config/terraform-settings.json
 terraform/.terraform-vars.json
+.env
+.env.*
+!.env.example
