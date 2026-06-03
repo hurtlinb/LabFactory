@@ -7,6 +7,10 @@ FROM node:20-bullseye
 WORKDIR /usr/src/app
 COPY --from=deps /usr/src/app/node_modules ./node_modules
 COPY --from=deps /usr/src/app/package*.json ./
+# dashboard/server.js importe depuis ../config, ../lib et ../db/migrations
 COPY dashboard ./dashboard
+COPY config ./config
+COPY lib ./lib
+COPY db ./db
 ENV NODE_ENV=production
 CMD ["node", "dashboard/server.js"]

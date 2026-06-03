@@ -794,11 +794,9 @@ const deriveTeacherInitials = teacher => {
   const explicitInitials = String(teacher?.initials ?? '').trim();
   if (explicitInitials) return explicitInitials;
 
-  const fromNames = [teacher?.firstName, teacher?.lastName]
-    .map(value => String(value ?? '').trim())
-    .filter(Boolean)
-    .map(value => value[0])
-    .join('');
+  const lastName = String(teacher?.lastName ?? '').trim();
+  const firstName = String(teacher?.firstName ?? '').trim();
+  const fromNames = (firstName.slice(0, 1) + lastName.slice(0, 2)).toUpperCase();
   if (fromNames) return fromNames;
 
   const fromDisplayName = String(teacher?.displayName ?? '')
@@ -807,7 +805,8 @@ const deriveTeacherInitials = teacher => {
     .filter(Boolean)
     .slice(0, 3)
     .map(part => part[0])
-    .join('');
+    .join('')
+    .toUpperCase();
   if (fromDisplayName) return fromDisplayName;
 
   return 'xx';
@@ -1523,9 +1522,11 @@ const upsertTeacher = async user => {
     throw createErrorWithCode('authenticated user email is required to create a deployment', 'VALIDATION');
   }
 
-  const initials = String(user?.initials ?? '').trim() || null;
   const firstName = String(user?.firstName ?? '').trim() || null;
   const lastName = String(user?.lastName ?? '').trim() || null;
+  const initials =
+    String(user?.initials ?? '').trim() ||
+    (lastName && firstName ? (firstName.slice(0, 1) + lastName.slice(0, 2)).toUpperCase() : null);
   const displayName =
     String(user?.name ?? '').trim() ||
     [firstName, lastName].filter(Boolean).join(' ').trim() ||
@@ -1691,6 +1692,7 @@ app.get('/api/app-info', (req, res) => {
   res.json({
     name: packageJson.name ?? 'LabFactory',
     version: packageJson.version ?? '0.0.0',
+    env: process.env.NODE_ENV ?? 'production',
     auth: auth.describeSession(req)
   });
 });

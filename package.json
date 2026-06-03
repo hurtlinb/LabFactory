@@ -1,15 +1,26 @@
 {
   "name": "labfactory",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "tsc",
+    "start:api": "node dist/api/index.js",
+    "dashboard": "node dashboard/server.js",
     "terraform-worker": "node workers/startTerraformWorkerService.js",
-    "ansible-worker": "node workers/startAnsibleWorkerService.js",
-    "dashboard": "node dashboard/server.js"
+    "ansible-worker": "node workers/startAnsibleWorkerService.js"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/express-session": "^1.18.0",
+    "@types/node": "^20.14.0",
+    "@types/pg": "^8.11.6",
+    "typescript": "^5.4.5"
   },
   "dependencies": {
+    "@kubernetes/client-node": "^0.22.3",
     "bullmq": "^5.70.1",
+    "pino": "^9.5.0",
     "dotenv": "^17.3.1",
     "express": "^4.19.2",
     "express-session": "^1.19.0",

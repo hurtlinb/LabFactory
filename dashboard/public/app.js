@@ -1622,6 +1622,10 @@ async function loadAppInfo() {
     appVersion.textContent = `Version ${info.version ?? '--'}`;
   }
 
+  if (info.env === 'development') {
+    document.body.classList.add('dev-env');
+  }
+
   if (!userSession || !userSessionName || !userSessionMeta) {
     return;
   }

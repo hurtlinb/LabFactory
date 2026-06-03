@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: labfactory-terraform-worker
+  namespace: labfactory-dev
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: labfactory-terraform-worker
+  template:
+    metadata:
+      labels:
+        app: labfactory-terraform-worker
+    spec:
+      containers:
+        - name: terraform-worker
+          image: hurtlinb/labfactory:worker-1.0.0
+          imagePullPolicy: Always
+          command: ["npm", "run", "terraform-worker"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: labfactory-secrets
+                  key: database-url
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: labfactory-secrets
+                  key: redis-password
+            - name: PROXMOX_API_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: labfactory-secrets
+                  key: proxmox-token-id
+            - name: PROXMOX_API_TOKEN_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: labfactory-secrets
+                  key: proxmox-token-secret
+          envFrom:
+            - configMapRef:
+                name: labfactory-config
+          volumeMounts:
+            - name: terraform-cache
+              mountPath: /usr/src/app/.terraform
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+      volumes:
+        - name: terraform-cache
+          emptyDir: {}

@@ -7,3 +7,7 @@ terraform/.terraform-vars.json
 .env
 .env.*
 !.env.example
+
+# Secrets Kubernetes – ne jamais committer
+k8s/dev/02-secrets.yaml
+k8s/prod/02-secrets.yaml
