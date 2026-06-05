@@ -447,6 +447,17 @@ function renderTemplates() {
         <span class="vm-lib-cust-name">Timezone</span>
       </article>
     </div>
+    <div class="vm-lib-group">
+      <p class="vm-lib-group-label">Windows uniquement</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="domain-controller">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('domain-controller')}</span>
+        <span class="vm-lib-cust-name">Domain Controller</span>
+      </article>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="domain-member">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('domain-member')}</span>
+        <span class="vm-lib-cust-name">Domain Member</span>
+      </article>
+    </div>
     <p class="vm-lib-hint">→ Drag to canvas</p>`;
 
   templatePalette.innerHTML = `
@@ -645,6 +656,22 @@ function renderCanvas() {
           </span>
         `);
       }
+      if (vm.config?.domainRole === 'controller' && vm.config?.domainName) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill vm-domain-pill">
+            <span>DC: ${escapeHtml(vm.config.domainName)}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="domain-controller" aria-label="Remove Domain Controller" title="Remove Domain Controller">×</button>
+          </span>
+        `);
+      }
+      if (vm.config?.domainRole === 'member' && vm.config?.domainName) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill vm-domain-pill">
+            <span>Member: ${escapeHtml(vm.config.domainName)}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="domain-member" aria-label="Remove Domain Member" title="Remove Domain Member">×</button>
+          </span>
+        `);
+      }
       return `
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
@@ -698,6 +725,20 @@ function renderCanvas() {
       if (customizationKey === 'timezone') {
         await promptVmTimezone(vmId);
       }
+      if (customizationKey === 'domain-controller' || customizationKey === 'domain-member') {
+        const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+        const template = state.templates.find(t => t.id === vm?.templateId);
+        const isWindows = ['windows11', 'windows-server'].includes(String(template?.osType || ''));
+        if (!isWindows) {
+          showMessage(globalStatus, 'Les customisations de domaine sont réservées aux VMs Windows.', 'danger', 3000);
+          return;
+        }
+        if (customizationKey === 'domain-controller') {
+          await promptDomainController(vmId);
+        } else {
+          await promptDomainMember(vmId);
+        }
+      }
     });
     card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
       button.addEventListener('click', event => {
@@ -712,6 +753,13 @@ function renderCanvas() {
         if (button.dataset.customizationKey === 'timezone') {
           updateVm(vmId, vm => {
             delete vm.config.timezone;
+          });
+          renderCanvas();
+        }
+        if (button.dataset.customizationKey === 'domain-controller' || button.dataset.customizationKey === 'domain-member') {
+          updateVm(vmId, vm => {
+            delete vm.config.domainRole;
+            delete vm.config.domainName;
           });
           renderCanvas();
         }
@@ -1321,6 +1369,92 @@ async function promptVmTimezone(vmId) {
   }
 }
 
+async function promptDomainController(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+  const dialog = document.getElementById('vmDomainControllerDialog');
+  const form = document.getElementById('vmDomainControllerForm');
+  const input = document.getElementById('vmDomainControllerValue');
+  const cancelBtn = document.getElementById('vmDomainControllerCancelButton');
+  if (!dialog || !form || !input) return;
+
+  input.value = vm.config?.domainRole === 'controller' ? (vm.config.domainName ?? '') : '';
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      const domainName = input.value.trim();
+      if (!domainName) { resolve(false); return; }
+      updateVm(vmId, nextVm => {
+        nextVm.config.domainRole = 'controller';
+        nextVm.config.domainName = domainName;
+      });
+      renderCanvas();
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit, { once: true });
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+  });
+}
+
+async function promptDomainMember(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+
+  const domains = state.currentBlueprint.vms
+    .filter(v => v.id !== vmId && v.config?.domainRole === 'controller' && v.config?.domainName)
+    .map(v => v.config.domainName)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+
+  if (!domains.length) {
+    showMessage(globalStatus, "Aucun Domain Controller défini dans ce blueprint. Ajoutez d'abord un DC.", 'warning', 4000);
+    return;
+  }
+
+  const dialog = document.getElementById('vmDomainMemberDialog');
+  const form = document.getElementById('vmDomainMemberForm');
+  const select = document.getElementById('vmDomainMemberValue');
+  const cancelBtn = document.getElementById('vmDomainMemberCancelButton');
+  if (!dialog || !form || !select) return;
+
+  select.innerHTML = domains.map(d => `<option value="${escapeHtmlAttr(d)}">${escapeHtml(d)}</option>`).join('');
+  if (vm.config?.domainRole === 'member' && vm.config?.domainName) {
+    select.value = vm.config.domainName;
+  }
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      const domainName = select.value.trim();
+      if (!domainName) { resolve(false); return; }
+      updateVm(vmId, nextVm => {
+        nextVm.config.domainRole = 'member';
+        nextVm.config.domainName = domainName;
+      });
+      renderCanvas();
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit, { once: true });
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+  });
+}
+
 async function loadTimezoneOptions() {
   try {
     const payload = await fetchJson('/api/timezones');
@@ -1839,6 +1973,17 @@ function getOsLogo(osType) {
 }
 
 function getCustomizationIcon(key) {
+  if (key === 'domain-controller') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
+      <path d="M7 8h.01"/><path d="M11 8h6"/>
+    </svg>`;
+  }
+  if (key === 'domain-member') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>`;
+  }
   if (key === 'name') {
     return `
       <svg viewBox="0 0 24 24" focusable="false">

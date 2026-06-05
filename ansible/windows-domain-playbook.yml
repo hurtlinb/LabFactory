@@ -1,0 +1,155 @@
+# Playbook Active Directory — Domain Controller & Domain Member
+#
+# Pré-requis : windows-playbook.yml doit avoir tourné avant (hostname appliqué,
+# VM redémarrée avec son nouveau nom).
+#
+# Play 1 : Promotion DC
+#   1. DNS → 127.0.0.1 sur le DC (requis avant DCPromo)
+#   2. Installe AD-DS
+#   3. DCPromo → redémarre
+#   4. Ajoute les forwarders Swisscom
+#
+# Play 2 : Jonction des membres
+#   1. Attend que le DNS du DC réponde (port 53)
+#   2. Pointe le DNS vers le DC
+#   3. Add-Computer → redémarre
+
+# ── Play 1 : Promotion Domain Controller ─────────────────────────────────────
+- name: Promote Domain Controllers
+  hosts: windows_timezone_targets
+  gather_facts: false
+  tasks:
+    - name: Pointer le DNS vers 127.0.0.1 avant la promotion
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "$idx = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1).ifIndex; Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses '127.0.0.1'; Write-Output 'dns-loopback-set'"
+      register: dns_loopback_result
+      changed_when: "'dns-loopback-set' in (dns_loopback_result.stdout | default(''))"
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+
+    - name: Installer le rôle AD-DS
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "if (-not (Get-WindowsFeature -Name AD-Domain-Services).Installed) { Install-WindowsFeature -Name AD-Domain-Services -IncludeManagementTools | Out-Null; Write-Output 'installed' } else { Write-Output 'already-installed' }"
+      register: adds_install_result
+      changed_when: "'installed' in (adds_install_result.stdout | default(''))"
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+
+    - name: Promouvoir en contrôleur de domaine (DCPromo)
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Import-Module ADDSDeployment; Install-ADDSForest -DomainName '{{ domain_name }}' -SafeModeAdministratorPassword (ConvertTo-SecureString '{{ ansible_password }}' -AsPlainText -Force) -InstallDns -Force -NoRebootOnCompletion | Out-Null; Write-Output 'promoted'"
+      register: dc_promo_result
+      changed_when: "'promoted' in (dc_promo_result.stdout | default(''))"
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+        - domain_name is defined
+        - adds_install_result is not skipped
+
+    - name: Redémarrer le DC après promotion
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
+      changed_when: true
+      failed_when: false
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+        - dc_promo_result.changed | default(false)
+
+    - name: Attendre le retour du DC
+      ansible.builtin.wait_for_connection:
+        timeout: 1800
+        sleep: 15
+        delay: 45
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+        - dc_promo_result.changed | default(false)
+
+    - name: Vérifier que les services AD sont prêts
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "for ($i=0; $i -lt 30; $i++) { try { Get-ADDomain -ErrorAction Stop | Out-Null; Write-Output 'ad-ready'; exit 0 } catch { Start-Sleep -Seconds 10 } }; Write-Error 'AD not ready after timeout'; exit 1"
+      register: ad_ready_result
+      changed_when: false
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+        - dc_promo_result.changed | default(false)
+
+    - name: Ajouter les forwarders DNS Swisscom
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Add-DnsServerForwarder -IPAddress '195.186.1.111','195.186.1.110','195.186.4.111','195.186.4.110' -ErrorAction SilentlyContinue; Write-Output 'forwarders-set'"
+      register: forwarders_result
+      changed_when: "'forwarders-set' in (forwarders_result.stdout | default(''))"
+      when:
+        - domain_role is defined
+        - domain_role == 'controller'
+        - dc_promo_result.changed | default(false)
+
+# ── Play 2 : Jonction des membres au domaine ─────────────────────────────────
+- name: Join Domain Members
+  hosts: windows_timezone_targets
+  gather_facts: false
+  tasks:
+    - name: Attendre que le DNS du DC soit opérationnel (port 53)
+      ansible.builtin.wait_for:
+        host: "{{ domain_controller_ip }}"
+        port: 53
+        timeout: 300
+        sleep: 5
+        delay: 10
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+        - domain_controller_ip is defined
+
+    - name: Pointer le DNS vers le DC
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "$idx = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1).ifIndex; Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses '{{ domain_controller_ip }}'; Write-Output 'dns-set'"
+      register: dns_set_result
+      changed_when: "'dns-set' in (dns_set_result.stdout | default(''))"
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+        - domain_controller_ip is defined
+
+    - name: Vider le cache DNS local
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Clear-DnsClientCache; Write-Output 'cache-cleared'"
+      changed_when: false
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+
+    - name: Joindre le domaine
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "if (-not (Get-CimInstance Win32_ComputerSystem).PartOfDomain) { $pass = ConvertTo-SecureString '{{ ansible_password }}' -AsPlainText -Force; $cred = New-Object System.Management.Automation.PSCredential('Administrator@{{ domain_name }}', $pass); Add-Computer -DomainName '{{ domain_name }}' -Credential $cred -Server '{{ domain_controller_ip }}' -Force | Out-Null; Write-Output 'joined' } else { Write-Output 'already-joined' }"
+      register: domain_join_result
+      changed_when: "'joined' in (domain_join_result.stdout | default(''))"
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+        - domain_name is defined
+        - domain_controller_ip is defined
+
+    - name: Redémarrer après jonction au domaine
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
+      changed_when: true
+      failed_when: false
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+        - domain_join_result.changed | default(false)
+
+    - name: Attendre le retour du membre
+      ansible.builtin.wait_for_connection:
+        timeout: 600
+        sleep: 10
+        delay: 20
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+        - domain_join_result.changed | default(false)

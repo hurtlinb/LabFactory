@@ -1248,6 +1248,8 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         ipLastOctet: vm.ipLastOctet ?? null,
         customNameEnabled: isVmCustomNameEnabled(vm),
         timezone: String(vm.config?.timezone ?? '').trim() || null,
+        domainRole: String(vm.config?.domainRole ?? '').trim() || null,
+        domainName: String(vm.config?.domainName ?? '').trim() || null,
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
         vlanTag
@@ -2258,7 +2260,7 @@ app.post(
       return;
     }
 
-    if (action === 'destroy' && ['idle', 'destroyed'].includes(deployment.status)) {
+    if (action === 'destroy' && deployment.status === 'idle') {
       res.status(409).json({ error: 'deployment has no VMs to destroy' });
       return;
     }

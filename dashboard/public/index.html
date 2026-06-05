@@ -685,6 +685,48 @@
     </form>
   </dialog>
 
+  <!-- ── Domain Controller dialog ─────────────────────────── -->
+  <dialog id="vmDomainControllerDialog" class="modal-dialog">
+    <form id="vmDomainControllerForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Windows — Customization</p>
+          <h3>Domain Controller</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Nom de domaine</span>
+        <input id="vmDomainControllerValue" type="text" autocomplete="off" placeholder="example.local" required>
+      </label>
+      <p class="muted modal-help">Ce serveur sera promu contrôleur de domaine Active Directory.</p>
+      <div class="inline-actions">
+        <button id="vmDomainControllerCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ── Domain Member dialog ───────────────────────────────── -->
+  <dialog id="vmDomainMemberDialog" class="modal-dialog">
+    <form id="vmDomainMemberForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Windows — Customization</p>
+          <h3>Domain Member</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Domaine</span>
+        <select id="vmDomainMemberValue"></select>
+      </label>
+      <p class="muted modal-help">Cette VM sera jointe au domaine sélectionné.</p>
+      <div class="inline-actions">
+        <button id="vmDomainMemberCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>

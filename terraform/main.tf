@@ -7,6 +7,11 @@ terraform {
       version = "3.0.2-rc07"
     }
   }
+
+  # État stocké en PostgreSQL — connexion via PG_CONN_STR (env var)
+  backend "pg" {
+    schema_name = "terraform_remote_state"
+  }
 }
 
 provider "proxmox" {

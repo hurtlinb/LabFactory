@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: ansible-worker
-          image: hurtlinb/labfactory:worker-1.0.0
+          image: hurtlinb/labfactory:worker-1.1.4
           imagePullPolicy: IfNotPresent
           command: ["npm", "run", "ansible-worker"]
           env:

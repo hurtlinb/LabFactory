@@ -5,6 +5,8 @@ metadata:
   namespace: labfactory
 spec:
   replicas: 1
+  strategy:
+    type: Recreate
   selector:
     matchLabels:
       app: labfactory-terraform-worker
@@ -15,7 +17,7 @@ spec:
     spec:
       containers:
         - name: terraform-worker
-          image: hurtlinb/labfactory:worker-1.0.0
+          image: hurtlinb/labfactory:worker-1.1.3
           imagePullPolicy: IfNotPresent
           command: ["npm", "run", "terraform-worker"]
           env:
@@ -24,6 +26,13 @@ spec:
                 secretKeyRef:
                   name: labfactory-secrets
                   key: database-url
+            - name: PG_CONN_STR
+              valueFrom:
+                secretKeyRef:
+                  name: labfactory-secrets
+                  key: database-url
+            - name: PGSSLMODE
+              value: "disable"
             - name: REDIS_PASSWORD
               valueFrom:
                 secretKeyRef:

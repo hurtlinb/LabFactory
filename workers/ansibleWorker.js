@@ -13,6 +13,7 @@ const getWindowsAdminUsername = language =>
   (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
 const linuxPlaybookPath = path.join(ansibleDir, 'linux-playbook.yml');
 const windowsPlaybookPath = path.join(ansibleDir, 'windows-playbook.yml');
+const windowsDomainPlaybookPath = path.join(ansibleDir, 'windows-domain-playbook.yml');
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
 });
@@ -53,7 +54,7 @@ const safeUpdateDeploymentStatus = async (deploymentId, status, details = {}) =>
   }
 };
 
-const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) => {
+const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, allTargets = [] }) => {
   const hosts = timezoneTargets
     .map((target, index) => {
       const hostName = `vm_${index + 1}`;
@@ -76,6 +77,23 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) =
       }
       if (String(target.hostname ?? '').trim()) {
         lines.push(`          target_hostname: ${JSON.stringify(target.hostname)}`);
+      }
+      if (String(target.domainRole ?? '').trim()) {
+        lines.push(`          domain_role: ${JSON.stringify(target.domainRole)}`);
+      }
+      if (String(target.domainName ?? '').trim()) {
+        lines.push(`          domain_name: ${JSON.stringify(target.domainName)}`);
+      }
+      if (target.domainRole === 'member' && target.domainName && target.ipAddress) {
+        const subnet = target.ipAddress.split('.').slice(0, 3).join('.');
+        const dc = allTargets.find(t =>
+          t.domainRole === 'controller' &&
+          t.domainName === target.domainName &&
+          t.ipAddress?.startsWith(subnet + '.')
+        );
+        if (dc?.ipAddress) {
+          lines.push(`          domain_controller_ip: ${JSON.stringify(dc.ipAddress)}`);
+        }
       }
       return lines.join('\n');
     })
@@ -145,7 +163,7 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname) &&
+            (target.timezone || target.hostname || target.domainRole) &&
             ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
         const linuxTimezoneTargets = extraVars.timezone_targets.filter(
@@ -174,7 +192,8 @@ export function startAnsibleWorker(connection) {
           inventoryParts.push(
             buildWindowsInventoryHosts({
               windowsAdminPassword: extraVars.windows_admin_password,
-              timezoneTargets: windowsTimezoneTargets
+              timezoneTargets: windowsTimezoneTargets,
+              allTargets: extraVars.timezone_targets
             })
           );
         }
@@ -241,6 +260,19 @@ export function startAnsibleWorker(connection) {
                 signal: abortController.signal
               }
             );
+
+            const hasDomainTargets = windowsTimezoneTargets.some(t => t.domainRole);
+            if (hasDomainTargets) {
+              await runCommand(
+                'ansible-playbook',
+                [windowsDomainPlaybookPath, ...commonArgs],
+                {
+                  cwd: ansibleDir,
+                  env: { ...process.env },
+                  signal: abortController.signal
+                }
+              );
+            }
           }
         } finally {
           await fs.rm(inventoryPath, { force: true });

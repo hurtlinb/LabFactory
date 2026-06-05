@@ -1673,7 +1673,8 @@ export function startTerraformWorker(connection) {
                 vm =>
                   (
                     String(vm.timezone ?? '').trim() ||
-                    String(vm.hostname ?? '').trim()
+                    String(vm.hostname ?? '').trim() ||
+                    String(vm.domainRole ?? '').trim()
                   ) &&
                   [isWindowsOsType(vm.osType), isLinuxOsType(vm.osType)].some(Boolean)
               )
@@ -1687,7 +1688,9 @@ export function startTerraformWorker(connection) {
                   vm.ipLastOctet != null && vm.subnetBase
                     ? `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
                     : null,
-                timezone: String(vm.timezone).trim(),
+                timezone: String(vm.timezone ?? '').trim() || null,
+                domainRole: String(vm.domainRole ?? '').trim() || null,
+                domainName: String(vm.domainName ?? '').trim() || null,
                 osType: vm.osType ?? 'other'
               }))
           : [];

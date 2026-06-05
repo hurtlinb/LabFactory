@@ -1,4 +1,7 @@
-- name: Apply Windows timezone customization
+# ── Play 1 : Hostname, Timezone, Cloudbase-Init ───────────────────────────────
+# Toutes les VMs Windows : applique hostname + timezone, redémarre une fois.
+# Le DC reçoit ici son nouveau nom — obligatoire avant la promotion AD.
+- name: Apply Windows hostname and timezone
   hosts: windows_timezone_targets
   gather_facts: false
   tasks:
@@ -27,19 +30,19 @@
         - target_timezone | string | trim != ""
         - target_timezone | string | lower != "null"
 
-    - name: Reboot Windows at end of customization
+    - name: Reboot (applique le nouveau nom d'ordinateur)
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
       changed_when: true
       failed_when: false
 
-    - name: Wait for Windows to come back after reboot
+    - name: Attendre le retour après redémarrage
       ansible.builtin.wait_for_connection:
         timeout: 1800
         sleep: 10
         delay: 15
 
-    - name: Wait for Cloudbase-Init to finish after reboot
+    - name: Attendre la fin de Cloudbase-Init
       ansible.windows.win_powershell:
         script: |
           $flag = 'C:\ProgramData\cloudbase-init\done.flag'
@@ -47,28 +50,25 @@
             Write-Error 'Cloudbase-Init has not finished'
             exit 1
           }
-
           $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
           $flagTime = (Get-Item -LiteralPath $flag).LastWriteTime
           if ($flagTime -lt $bootTime) {
             Write-Error "Cloudbase-Init done flag is stale: $flagTime is before boot $bootTime"
             exit 1
           }
-
           $cloudbaseServices = Get-Service -Name 'cloudbase-init','cloudbaseinit' -ErrorAction SilentlyContinue
           $activeServices = @($cloudbaseServices | Where-Object { $_.Status -in @('StartPending', 'Running', 'ContinuePending') })
           if ($activeServices.Count -gt 0) {
             Write-Error "Cloudbase-Init service is still active: $($activeServices.Name -join ', ')"
             exit 1
           }
-
           Write-Output "Cloudbase-Init completed at $flagTime and WinRM is reachable"
       register: cloudbase_init_after_reboot
       until: cloudbase_init_after_reboot is succeeded
       retries: 180
       delay: 10
 
-    - name: Confirm WinRM remains stable after Cloudbase-Init
+    - name: Confirmer la stabilité WinRM
       ansible.builtin.wait_for_connection:
         timeout: 120
         sleep: 5
