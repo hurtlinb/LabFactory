@@ -23,7 +23,7 @@ spec:
             - until pg_isready -h postgres -p 5432 -U labfactory; do echo "Attente de PostgreSQL..."; sleep 2; done
       containers:
         - name: dashboard
-          image: hurtlinb/labfactory:dashboard-1.0.5
+          image: hurtlinb/labfactory:dashboard-1.1.0
           imagePullPolicy: Always
           ports:
             - containerPort: 3000

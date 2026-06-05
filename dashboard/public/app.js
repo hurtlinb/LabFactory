@@ -133,12 +133,12 @@ const FALLBACK_LINUX_TIMEZONE_OPTIONS = [
 const PAGE_TITLES = {
   'dashboard':      { title: 'Dashboard',   breadcrumb: 'LabFactory' },
   'blueprint':      { title: 'Blueprints',  breadcrumb: 'Labs' },
-  'lifecycle':      { title: 'Lifecycle',   breadcrumb: 'Labs' },
+  'lifecycle':      { title: 'Labs',        breadcrumb: 'Labs' },
   'admin-users':    { title: 'Users',       breadcrumb: 'Administration' },
-  'admin-courses':  { title: 'Courses',     breadcrumb: 'Administration' },
+  'admin-courses':  { title: 'Courses',     breadcrumb: 'Labs' },
   'models':         { title: 'VM Models',   breadcrumb: 'Administration' },
   'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
-  'admin-settings': { title: 'Settings',    breadcrumb: 'Administration' },
+  'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
   'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
 };
 
@@ -965,100 +965,45 @@ function renderDashboard() {
     }
   }
 
-  // VM Models list
-  const modelsList = elById('dashModelsList');
-  if (modelsList) {
-    if (!state.templates.length) {
-      modelsList.innerHTML = '<p class="placeholder">No VM models yet.</p>';
+  // Classrooms overview
+  const classroomsGrid = elById('dashClassroomsGrid');
+  if (classroomsGrid) {
+    if (!state.classrooms.length) {
+      classroomsGrid.innerHTML = '<p class="placeholder">No classrooms configured yet.</p>';
     } else {
-      modelsList.innerHTML = state.templates.slice(0, 5).map(t => {
-        const dotClass = getOsDotClass(t.osType);
+      classroomsGrid.innerHTML = state.classrooms.map(classroom => {
+        const labs = state.deployments.filter(d => d.classroom.id === classroom.id);
+        const labsHtml = labs.length
+          ? labs.map(d => {
+              const badgeClass =
+                ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
+                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
+                d.status === 'stopped' ? 'dash-badge-stopped' : 'dash-badge-destroyed';
+              const badgeText =
+                ['running', 'deployed', 'mixed'].includes(d.status) ? 'Actif' :
+                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'En cours' :
+                d.status === 'stopped' ? 'Arrêté' : escapeHtml(d.status || 'idle');
+              return `
+                <div class="dash-classroom-lab">
+                  <div class="dash-row-info">
+                    <p class="dash-row-name">${escapeHtml(d.blueprint.name)}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
+                  </div>
+                  <span class="dash-badge ${badgeClass}">${badgeText}</span>
+                </div>`;
+            }).join('')
+          : '<p class="dash-classroom-empty">Aucun lab déployé</p>';
+
         return `
-          <div class="dash-row">
-            <div class="dash-row-icon">
-              <img src="${escapeHtmlAttr(getOsLogo(t.osType))}" alt="">
+          <div class="dash-classroom-card">
+            <div class="dash-classroom-header">
+              <strong>${escapeHtml(classroom.name)}</strong>
+              <span class="muted">${classroom.workstationCount} poste${classroom.workstationCount !== 1 ? 's' : ''}</span>
             </div>
-            <div class="dash-row-info">
-              <p class="dash-row-name">${escapeHtml(t.name)}</p>
-              <p class="dash-row-meta">VMID ${t.proxmoxTemplateVmid} · ${getOsLabel(t.osType)}</p>
-            </div>
-            <span class="vm-lib-dot ${dotClass}"></span>
+            <div class="dash-classroom-labs">${labsHtml}</div>
           </div>`;
       }).join('');
     }
-  }
-
-  // Active lifecycle tracker
-  const lcCard  = elById('dashLifecycleCard');
-  const lcTitle = elById('dashLifecycleTitle');
-  const lcBadge = elById('dashLifecycleBadge');
-  const lcSteps = elById('dashLifecycleSteps');
-  const lcActs  = elById('dashLifecycleActions');
-
-  const activeDeploy = state.deployments.find(d =>
-    ['queued', 'deploying', 'customizing', 'deployed', 'starting', 'running', 'mixed', 'stopping'].includes(d.status)
-  );
-
-  if (lcCard) lcCard.hidden = !activeDeploy;
-
-  if (activeDeploy) {
-    if (lcTitle) lcTitle.textContent = `${activeDeploy.blueprint.name} · ${activeDeploy.classroom.name}`;
-    if (lcBadge) {
-      const ready = Number(activeDeploy.readyCount ?? 0);
-      const total = Number(activeDeploy.totalVmCount ?? 0);
-      lcBadge.textContent = `${ready}/${total} VMs`;
-    }
-    if (lcSteps) lcSteps.innerHTML = renderLifecycleSteps(activeDeploy.status);
-    if (lcActs) {
-      const acts = resolveLifecycleActions(activeDeploy.status);
-      if (acts.busy) {
-        lcActs.innerHTML = '<span class="loading-spinner"></span>';
-      } else {
-        lcActs.innerHTML = acts.items
-          .map(a => `<button class="btn lifecycle-action" type="button" data-action="${a.action}" data-deployment-id="${activeDeploy.id}">${a.icon} ${a.label}</button>`)
-          .join('');
-        lcActs.querySelectorAll('.lifecycle-action').forEach(btn => {
-          btn.addEventListener('click', async event => {
-            event.stopPropagation();
-            btn.disabled = true;
-            try {
-              const result = await fetchJson(`/api/lifecycle/deployments/${btn.dataset.deploymentId}/${btn.dataset.action}`, { method: 'POST' });
-              await refreshLifecycleLabs();
-              renderDashboard();
-              showMessage(globalStatus, `${btn.dataset.action} queued with job ${result.jobId}.`, 'success');
-            } catch (error) {
-              showMessage(globalStatus, error.message, 'danger');
-            } finally {
-              btn.disabled = false;
-            }
-          });
-        });
-      }
-    }
-  }
-
-  // Per-seat grid (derive from classroom + deployment)
-  const seatCard  = elById('dashSeatCard');
-  const seatTitle = elById('dashSeatTitle');
-  const seatGrid  = elById('dashSeatGrid');
-
-  if (seatCard) seatCard.hidden = !activeDeploy;
-
-  if (activeDeploy && seatGrid) {
-    const classroom = state.classrooms.find(c => c.id === activeDeploy.classroom.id);
-    const seatCount = classroom?.workstationCount ?? Math.ceil(Number(activeDeploy.totalVmCount ?? 1) / 3);
-    const shown = Math.min(seatCount, 12);
-    const vmsPerSeat = seatCount > 0 ? Math.round(Number(activeDeploy.totalVmCount ?? 0) / seatCount) : 0;
-
-    if (seatTitle) seatTitle.textContent = `${activeDeploy.blueprint.name} · ${seatCount} workstation${seatCount !== 1 ? 's' : ''}`;
-
-    seatGrid.innerHTML = Array.from({ length: shown }, (_, i) => {
-      const num = String(i + 1).padStart(2, '0');
-      const tags = vmsPerSeat > 0
-        ? `<span class="seat-tag seat-tag-vm">${vmsPerSeat} VM</span>`
-        : '';
-      return `<div class="seat-cell"><p class="seat-num">Poste ${num}</p><div class="seat-tags">${tags}</div></div>`;
-    }).join('');
   }
 }
 

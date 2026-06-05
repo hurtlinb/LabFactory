@@ -1396,6 +1396,46 @@ input:focus, textarea:focus, select:focus {
 .dash-badge-preparing  { background: var(--warning-soft); color: var(--warning); }
 .dash-badge-destroyed  { background: var(--surface-soft); color: var(--muted); }
 
+/* Classrooms overview grid */
+.dash-classrooms-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+  padding: 12px 0 4px;
+}
+.dash-classroom-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.dash-classroom-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  background: var(--surface-soft);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+}
+.dash-classroom-labs {
+  padding: 6px 0;
+}
+.dash-classroom-lab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--line);
+}
+.dash-classroom-lab:last-child { border-bottom: none; }
+.dash-classroom-empty {
+  padding: 10px 14px;
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+}
+
 /* Per-seat grid */
 .seat-grid {
   display: grid;
