@@ -8,4 +8,3 @@ const connection = {
 };
 
 export const schedulerQueue = new Queue(queueConfig.schedulerQueueName, { connection });
-export const launcherQueue = new Queue(queueConfig.launcherQueueName, { connection });

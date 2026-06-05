@@ -272,6 +272,37 @@ button, input, textarea, select { font: inherit; }
   flex-shrink: 0;
 }
 
+/* ── Dev environment indicator ──────────────────────────────── */
+.dev-banner {
+  display: none;
+}
+
+.dev-env .app-topbar {
+  background: #f59e0b;
+  border-bottom: 0.5px solid #d97706;
+  color: #1c1917;
+}
+.dev-env .app-topbar * {
+  color: #1c1917;
+}
+.dev-env .dev-banner {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  background: #d97706;
+  color: #1c1917;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+  letter-spacing: 0.02em;
+}
+.dev-banner-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
 .page-header {
   display: flex;
   align-items: baseline;

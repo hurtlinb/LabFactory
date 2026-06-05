@@ -27,28 +27,5 @@ export const redisConfig = {
 };
 
 export const queueConfig = {
-  schedulerQueueName: process.env.SCHEDULER_QUEUE_NAME ?? 'execution-scheduler',
-  launcherQueueName: process.env.LAUNCHER_QUEUE_NAME ?? 'execution-launcher'
-};
-
-export const kubernetesConfig = {
-  namespace: process.env.K8S_NAMESPACE ?? 'labfactory',
-  terraformRunnerImage: process.env.TERRAFORM_RUNNER_IMAGE ?? 'labfactory/terraform-runner:latest',
-  ansibleRunnerImage: process.env.ANSIBLE_RUNNER_IMAGE ?? 'labfactory/ansible-runner:latest',
-  serviceAccount: process.env.K8S_SERVICE_ACCOUNT ?? 'labfactory-runner-job'
-};
-
-export const lockConfig = {
-  ttlMs: parseNumber(process.env.LOCK_TTL_MS, 12 * 60 * 60 * 1000),
-  retryDelayMs: parseNumber(process.env.LOCK_RETRY_DELAY_MS, 5000)
-};
-
-export const launcherConfig = {
-  pollIntervalMs: parseNumber(process.env.LAUNCHER_POLL_INTERVAL_MS, 5000),
-  jobTimeoutMs: parseNumber(process.env.LAUNCHER_JOB_TIMEOUT_MS, 30 * 60 * 1000)
-};
-
-export const artifactConfig = {
-  storageAdapter: process.env.ARTIFACT_STORAGE_ADAPTER ?? 'filesystem',
-  baseUri: process.env.ARTIFACT_BASE_URI ?? 'file://./artifacts'
+  schedulerQueueName: process.env.SCHEDULER_QUEUE_NAME ?? 'execution-scheduler'
 };
