@@ -20,10 +20,13 @@
   gather_facts: false
   tasks:
     - name: Pointer le DNS vers 127.0.0.1 avant la promotion
-      ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "$idx = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1).ifIndex; Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses '127.0.0.1'; Write-Output 'dns-loopback-set'"
+      ansible.windows.win_powershell:
+        script: |
+          $idx = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1).ifIndex
+          Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses '127.0.0.1'
+          Write-Output 'dns-loopback-set'
       register: dns_loopback_result
-      changed_when: "'dns-loopback-set' in (dns_loopback_result.stdout | default(''))"
+      changed_when: "'dns-loopback-set' in (dns_loopback_result.output | default([]) | join(' '))"
       when:
         - domain_role is defined
         - domain_role == 'controller'
@@ -68,9 +71,24 @@
         - domain_role == 'controller'
         - dc_promo_result.changed | default(false)
 
-    - name: Vérifier que les services AD sont prêts
-      ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "for ($i=0; $i -lt 30; $i++) { try { Get-ADDomain -ErrorAction Stop | Out-Null; Write-Output 'ad-ready'; exit 0 } catch { Start-Sleep -Seconds 10 } }; Write-Error 'AD not ready after timeout'; exit 1"
+    - name: Vérifier que les services AD sont prêts (Netlogon + SYSVOL)
+      ansible.windows.win_powershell:
+        script: |
+          for ($i = 0; $i -lt 120; $i++) {
+            try {
+              Get-ADDomain -ErrorAction Stop | Out-Null
+              $nl = Get-Service -Name 'netlogon' -ErrorAction Stop
+              if ($nl.Status -ne 'Running') { throw 'netlogon not running' }
+              $sysvol = Get-SmbShare -Name 'SYSVOL' -ErrorAction SilentlyContinue
+              if (-not $sysvol) { throw 'SYSVOL share not ready' }
+              Write-Output 'ad-ready'
+              exit 0
+            } catch {
+              Start-Sleep -Seconds 10
+            }
+          }
+          Write-Error 'AD services not ready after 20 minutes'
+          exit 1
       register: ad_ready_result
       changed_when: false
       when:
@@ -94,22 +112,30 @@
   gather_facts: false
   tasks:
     - name: Attendre que le DNS du DC soit opérationnel (port 53)
-      ansible.builtin.wait_for:
-        host: "{{ domain_controller_ip }}"
-        port: 53
-        timeout: 300
-        sleep: 5
-        delay: 10
+      ansible.windows.win_powershell:
+        script: |
+          $ip = '{{ domain_controller_ip }}'
+          $deadline = (Get-Date).AddSeconds(300)
+          while ((Get-Date) -lt $deadline) {
+            $conn = Test-NetConnection -ComputerName $ip -Port 53 -WarningAction SilentlyContinue
+            if ($conn.TcpTestSucceeded) { Write-Output 'dns-ready'; exit 0 }
+            Start-Sleep -Seconds 5
+          }
+          Write-Error "DNS port 53 non joignable sur $ip apres 300s"
+          exit 1
       when:
         - domain_role is defined
         - domain_role == 'member'
         - domain_controller_ip is defined
 
     - name: Pointer le DNS vers le DC
-      ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "$idx = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1).ifIndex; Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses '{{ domain_controller_ip }}'; Write-Output 'dns-set'"
+      ansible.windows.win_powershell:
+        script: |
+          $idx = (Get-NetAdapter | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1).ifIndex
+          Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses '{{ domain_controller_ip }}'
+          Write-Output 'dns-set'
       register: dns_set_result
-      changed_when: "'dns-set' in (dns_set_result.stdout | default(''))"
+      changed_when: "'dns-set' in (dns_set_result.output | default([]) | join(' '))"
       when:
         - domain_role is defined
         - domain_role == 'member'
@@ -124,15 +150,41 @@
         - domain_role == 'member'
 
     - name: Joindre le domaine
-      ansible.builtin.raw: |
-        powershell -NoProfile -NonInteractive -Command "if (-not (Get-CimInstance Win32_ComputerSystem).PartOfDomain) { $pass = ConvertTo-SecureString '{{ ansible_password }}' -AsPlainText -Force; $cred = New-Object System.Management.Automation.PSCredential('Administrator@{{ domain_name }}', $pass); Add-Computer -DomainName '{{ domain_name }}' -Credential $cred -Server '{{ domain_controller_ip }}' -Force | Out-Null; Write-Output 'joined' } else { Write-Output 'already-joined' }"
+      microsoft.ad.membership:
+        dns_domain_name: "{{ domain_name }}"
+        domain_admin_user: "{{ domain_admin_username | default('Administrator') }}@{{ domain_name }}"
+        domain_admin_password: "{{ ansible_password }}"
+        state: domain
+        reboot: false
       register: domain_join_result
-      changed_when: "'joined' in (domain_join_result.stdout | default(''))"
       when:
         - domain_role is defined
         - domain_role == 'member'
         - domain_name is defined
         - domain_controller_ip is defined
+
+    - name: Ouvrir WinRM et ICMP sur le profil pare-feu Domain
+      ansible.windows.win_powershell:
+        script: |
+          $ErrorActionPreference = 'Stop'
+          $rule = Get-NetFirewallRule -DisplayName 'WinRM HTTPS 5986 AllProfiles' -ErrorAction SilentlyContinue
+          if (-not $rule) {
+            New-NetFirewallRule -DisplayName 'WinRM HTTPS 5986 AllProfiles' `
+              -Direction Inbound -Protocol TCP -LocalPort 5986 `
+              -Action Allow -Profile Any | Out-Null
+          } else {
+            Set-NetFirewallRule -DisplayName 'WinRM HTTPS 5986 AllProfiles' -Profile Any -Enabled True | Out-Null
+          }
+          Get-NetFirewallRule | Where-Object {
+            $_.DisplayName -like '*Echo Request*ICMPv4*' -and $_.Direction -eq 'Inbound'
+          } | Set-NetFirewallRule -Profile Any -Enabled True | Out-Null
+          Write-Output 'firewall-domain-configured'
+      register: fw_domain_result
+      changed_when: "'firewall-domain-configured' in (fw_domain_result.output | default([]) | join(' '))"
+      when:
+        - domain_role is defined
+        - domain_role == 'member'
+        - domain_join_result is not skipped
 
     - name: Redémarrer après jonction au domaine
       ansible.builtin.raw: |
@@ -142,7 +194,7 @@
       when:
         - domain_role is defined
         - domain_role == 'member'
-        - domain_join_result.changed | default(false)
+        - domain_join_result.reboot_required | default(false)
 
     - name: Attendre le retour du membre
       ansible.builtin.wait_for_connection:
@@ -152,4 +204,4 @@
       when:
         - domain_role is defined
         - domain_role == 'member'
-        - domain_join_result.changed | default(false)
+        - domain_join_result.reboot_required | default(false)

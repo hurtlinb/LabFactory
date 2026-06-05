@@ -7,7 +7,7 @@ RUN apt-get update \
   && unzip /tmp/terraform.zip -d /usr/local/bin \
   && pip3 install --no-cache-dir --upgrade pip setuptools wheel \
   && pip3 install --no-cache-dir "ansible-core>=2.15,<2.16" pywinrm \
-  && ansible-galaxy collection install "ansible.windows:==2.3.0" "community.general:==8.5.0" \
+  && ansible-galaxy collection install "ansible.windows:==2.3.0" "community.general:==8.5.0" "microsoft.ad:==1.7.1" \
   && rm /tmp/terraform.zip \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*

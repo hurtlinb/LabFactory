@@ -40,36 +40,4 @@
       ansible.builtin.wait_for_connection:
         timeout: 1800
         sleep: 10
-        delay: 15
-
-    - name: Attendre la fin de Cloudbase-Init
-      ansible.windows.win_powershell:
-        script: |
-          $flag = 'C:\ProgramData\cloudbase-init\done.flag'
-          if (-not (Test-Path -LiteralPath $flag)) {
-            Write-Error 'Cloudbase-Init has not finished'
-            exit 1
-          }
-          $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
-          $flagTime = (Get-Item -LiteralPath $flag).LastWriteTime
-          if ($flagTime -lt $bootTime) {
-            Write-Error "Cloudbase-Init done flag is stale: $flagTime is before boot $bootTime"
-            exit 1
-          }
-          $cloudbaseServices = Get-Service -Name 'cloudbase-init','cloudbaseinit' -ErrorAction SilentlyContinue
-          $activeServices = @($cloudbaseServices | Where-Object { $_.Status -in @('StartPending', 'Running', 'ContinuePending') })
-          if ($activeServices.Count -gt 0) {
-            Write-Error "Cloudbase-Init service is still active: $($activeServices.Name -join ', ')"
-            exit 1
-          }
-          Write-Output "Cloudbase-Init completed at $flagTime and WinRM is reachable"
-      register: cloudbase_init_after_reboot
-      until: cloudbase_init_after_reboot is succeeded
-      retries: 180
-      delay: 10
-
-    - name: Confirmer la stabilité WinRM
-      ansible.builtin.wait_for_connection:
-        timeout: 120
-        sleep: 5
-        delay: 30
+        delay: 60

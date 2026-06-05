@@ -93,6 +93,8 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, all
         );
         if (dc?.ipAddress) {
           lines.push(`          domain_controller_ip: ${JSON.stringify(dc.ipAddress)}`);
+          const dcAdminUsername = String(dc.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(dc.language);
+          lines.push(`          domain_admin_username: ${JSON.stringify(dcAdminUsername)}`);
         }
       }
       return lines.join('\n');
