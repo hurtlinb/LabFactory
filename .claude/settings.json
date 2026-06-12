@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"sql$\")",
+      "Bash(grep -v \"//.*dns\")",
+      "Bash(git commit -m ' *)"
+    ]
+  }
+}
