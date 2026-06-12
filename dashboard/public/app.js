@@ -927,9 +927,10 @@ function renderLifecycleLabs() {
                 <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
               </p>
-              <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready · ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}</p>
+              <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready</p>
             </div>
             <div class="inline-actions">
+              ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               <span class="pill ${statusPillClass}">${escapeHtml(s)}</span>
               <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details →</button>
             </div>
@@ -1615,11 +1616,20 @@ function renderTeacherIdentity(teacher) {
 
 function renderTeacherBadge(teacher) {
   const email = String(teacher?.email || '').trim();
-  const initials = String(teacher?.initials || '').trim();
   const displayName = String(teacher?.displayName || '').trim() || email || 'Unknown teacher';
-  const label = initials || displayName;
 
-  return `<span class="mini-pill teacher-pill" title="${escapeHtmlAttr(displayName)}">${escapeHtml(label)}</span>`;
+  let initials = String(teacher?.initials || '').trim();
+  if (!initials) {
+    const firstName = String(teacher?.firstName || '').trim();
+    const lastName = String(teacher?.lastName || '').trim();
+    initials = (firstName.slice(0, 1) + lastName.slice(0, 2)).toUpperCase();
+  }
+  if (!initials) {
+    initials = displayName.split(/\s+/).filter(Boolean).slice(0, 3).map(p => p[0]).join('').toUpperCase();
+  }
+  if (!initials) initials = '?';
+
+  return `<span class="mini-pill teacher-pill" title="${escapeHtmlAttr(displayName)}">${escapeHtml(initials)}</span>`;
 }
 
 async function fetchJson(url, options = {}) {
