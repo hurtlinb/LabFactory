@@ -1503,8 +1503,8 @@ async function promptDomainMember(vmId) {
   });
 }
 
-const DEPLOY_CONFLICT_PHRASE = 'je confirme';
-const DEPLOY_ACTIVE_STATUSES = ['deploying', 'customizing', 'deployed', 'running', 'mixed', 'stopped'];
+const DEPLOY_CONFLICT_PHRASE = 'deploy';
+const DEPLOY_ACTIVE_STATUSES = ['deploying', 'customizing', 'starting', 'deployed', 'running', 'mixed'];
 
 function promptDeploymentConflict(existingDeployment) {
   const dialog = document.getElementById('deploymentConflictDialog');
@@ -1515,15 +1515,15 @@ function promptDeploymentConflict(existingDeployment) {
   if (!dialog || !form || !messageEl || !input || !cancelBtn) return Promise.resolve(false);
 
   const teacher = existingDeployment.teacher || { email: existingDeployment.teacherEmail };
-  const ownerName = escapeHtml(teacher.displayName || teacher.email || 'Propriétaire inconnu');
+  const ownerName = escapeHtml(teacher.displayName || teacher.email || 'Unknown owner');
   const blueprintName = escapeHtml(existingDeployment.blueprint?.name || '');
   const labNum = escapeHtml(String(existingDeployment.deploymentNumber ?? '?'));
   const status = escapeHtml(existingDeployment.status || '');
 
   messageEl.innerHTML =
-    `Le lab <strong>#${labNum} « ${blueprintName} »</strong> appartenant à <strong>${ownerName}</strong>` +
-    ` (statut : ${status}) est déjà actif dans cette classroom.` +
-    ` Déployer un second lab risque de provoquer des <strong>conflits d'adresses IP</strong>.`;
+    `Lab <strong>#${labNum} &ldquo;${blueprintName}&rdquo;</strong> owned by <strong>${ownerName}</strong>` +
+    ` (status: ${status}) is already active in this classroom.` +
+    ` Deploying a second lab may cause <strong>IP address conflicts</strong>.`;
 
   input.value = '';
   input.setCustomValidity('');
@@ -1532,7 +1532,7 @@ function promptDeploymentConflict(existingDeployment) {
     const onSubmit = event => {
       event.preventDefault();
       if (input.value.trim().toLowerCase() !== DEPLOY_CONFLICT_PHRASE) {
-        input.setCustomValidity(`Saisissez exactement « ${DEPLOY_CONFLICT_PHRASE} »`);
+        input.setCustomValidity(`Type exactly « ${DEPLOY_CONFLICT_PHRASE} »`);
         input.reportValidity();
         return;
       }
