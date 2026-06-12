@@ -11,3 +11,6 @@ terraform/.terraform-vars.json
 # Secrets Kubernetes – ne jamais committer
 k8s/dev/02-secrets.yaml
 k8s/prod/02-secrets.yaml
+
+# Claude Code
+.claude/
