@@ -1126,12 +1126,12 @@ function getDeploymentWorkstationNumber(vm) {
   return match?.[1] ?? 'n/a';
 }
 
-function renderDeploymentVmRows(vms, deploymentId) {
+function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
   return vms
     .map(
       vm => {
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
-        const resetButton = hasStaticIp
+        const resetButton = canResetIp && hasStaticIp
           ? `<button class="btn btn-secondary btn-sm reset-ip-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">Reset IP</button>`
           : '';
         return `
@@ -1219,6 +1219,7 @@ function renderDeploymentVmDetails(payload) {
   const orderedWorkstations = [...workstationGroups.keys()].sort((left, right) => Number(left) - Number(right));
   const activeWorkstationNumbers = new Set(Array.isArray(deployment.activeWorkstationNumbers) ? deployment.activeWorkstationNumbers : []);
   const canRedeployWorkstations = Boolean(deployment.canRedeployWorkstations) && !isDeploymentBusy(deployment.status);
+  const canResetIp = deployment.status === 'running';
 
   deploymentVmDetailsList.innerHTML = `
     <div class="workstation-detail-list">
@@ -1256,7 +1257,7 @@ function renderDeploymentVmDetails(payload) {
                       <th></th>
                     </tr>
                   </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id)}</tbody>
+                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp)}</tbody>
                 </table>
               </div>
             </section>
