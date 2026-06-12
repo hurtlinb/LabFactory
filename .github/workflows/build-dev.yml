@@ -1,0 +1,72 @@
+name: Build & Deploy Dev
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get short SHA
+        id: sha
+        run: echo "sha=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build & push dashboard
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/dashboard/Dockerfile
+          push: true
+          tags: hurtlinb/labfactory:dashboard-${{ steps.sha.outputs.sha }}
+          cache-from: type=registry,ref=hurtlinb/labfactory:dashboard-buildcache
+          cache-to: type=registry,ref=hurtlinb/labfactory:dashboard-buildcache,mode=max
+
+      - name: Build & push worker
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: hurtlinb/labfactory:worker-${{ steps.sha.outputs.sha }}
+          cache-from: type=registry,ref=hurtlinb/labfactory:worker-buildcache
+          cache-to: type=registry,ref=hurtlinb/labfactory:worker-buildcache,mode=max
+
+      - name: Update gitops repo (dev)
+        env:
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
+          GITLAB_GITOPS_REPO_URL: ${{ secrets.GITLAB_GITOPS_REPO_URL }}
+          SHA: ${{ steps.sha.outputs.sha }}
+        run: |
+          git clone "https://oauth2:${GITLAB_TOKEN}@${GITLAB_GITOPS_REPO_URL#https://}" gitops
+          cd gitops/overlays/dev
+
+          # Update container image tags
+          kustomize edit set image \
+            labfactory/dashboard=hurtlinb/labfactory:dashboard-${SHA} \
+            labfactory/worker=hurtlinb/labfactory:worker-${SHA}
+
+          # Update runner images in ConfigMap
+          sed -i "s|TERRAFORM_RUNNER_IMAGE:.*|TERRAFORM_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${SHA}\"|" configmap-patch.yaml
+          sed -i "s|ANSIBLE_RUNNER_IMAGE:.*|ANSIBLE_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${SHA}\"|" configmap-patch.yaml
+
+          cd ../..
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git add overlays/dev/
+          git diff --cached --quiet && echo "No changes to commit" && exit 0
+          git commit -m "deploy(dev): dashboard-${SHA} + worker-${SHA}"
+          git push
