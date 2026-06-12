@@ -33,6 +33,7 @@ jobs:
           file: docker/dashboard/Dockerfile
           push: true
           tags: hurtlinb/labfactory:dashboard-${{ steps.version.outputs.version }}
+          build-args: BUILD_TAG=${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=hurtlinb/labfactory:dashboard-buildcache
           cache-to: type=registry,ref=hurtlinb/labfactory:dashboard-buildcache,mode=max
 

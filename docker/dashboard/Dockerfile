@@ -12,5 +12,7 @@ COPY dashboard ./dashboard
 COPY config ./config
 COPY lib ./lib
 COPY db ./db
+ARG BUILD_TAG
 ENV NODE_ENV=production
+ENV BUILD_TAG=${BUILD_TAG}
 CMD ["node", "dashboard/server.js"]

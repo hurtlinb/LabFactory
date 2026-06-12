@@ -1696,6 +1696,7 @@ app.get('/api/app-info', (req, res) => {
   res.json({
     name: packageJson.name ?? 'LabFactory',
     version: packageJson.version ?? '0.0.0',
+    buildTag: process.env.BUILD_TAG ?? null,
     env: process.env.NODE_ENV ?? 'production',
     auth: auth.describeSession(req)
   });
