@@ -1673,7 +1673,9 @@ export function startTerraformWorker(connection) {
                 vm =>
                   (
                     String(vm.timezone ?? '').trim() ||
-                    String(vm.hostname ?? '').trim()
+                    String(vm.hostname ?? '').trim() ||
+                    String(vm.domainRole ?? '').trim() ||
+                    vm.installDocker
                   ) &&
                   [isWindowsOsType(vm.osType), isLinuxOsType(vm.osType)].some(Boolean)
               )
@@ -1687,7 +1689,10 @@ export function startTerraformWorker(connection) {
                   vm.ipLastOctet != null && vm.subnetBase
                     ? `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
                     : null,
-                timezone: String(vm.timezone).trim(),
+                timezone: String(vm.timezone ?? '').trim() || null,
+                domainRole: String(vm.domainRole ?? '').trim() || null,
+                domainName: String(vm.domainName ?? '').trim() || null,
+                installDocker: Boolean(vm.installDocker),
                 osType: vm.osType ?? 'other'
               }))
           : [];
@@ -1748,6 +1753,22 @@ export function startTerraformWorker(connection) {
     { connection, concurrency: 1 }
   );
 
+  worker.on('stalled', async (jobId) => {
+    try {
+      const job = await terraformQueue.getJob(jobId);
+      if (job?.data?.labInstanceId) {
+        await safeUpdateLifecycleStatus(job.data.labInstanceId, 'failed', {
+          action: job.data.action ?? 'deploy',
+          jobId: String(jobId),
+          runId: job.data.runId
+        });
+        console.warn(`[stalled] Terraform job ${jobId} → deployment ${job.data.labInstanceId} marqué failed`);
+      }
+    } catch (err) {
+      console.error(`[stalled] Impossible de traiter le job stalled ${jobId}:`, err);
+    }
+  });
+
   worker.cancelActiveJobs = async () => {
     for (const controller of activeAbortControllers.values()) {
       controller.abort(new Error('Job cancelled from dashboard clear history action'));
@@ -1755,4 +1776,21 @@ export function startTerraformWorker(connection) {
   };
 
   return worker;
+}
+
+export async function resetStalledTerraformDeployments() {
+  const transient = ['queued', 'deploying', 'destroying', 'starting', 'stopping'];
+  try {
+    const result = await dbPool.query(
+      `UPDATE lab_deployments
+         SET status = 'failed', last_action = 'worker-restarted', updated_at = NOW()
+       WHERE status = ANY($1::text[])`,
+      [transient]
+    );
+    if (result.rowCount > 0) {
+      console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) remis à failed`);
+    }
+  } catch (err) {
+    console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
+  }
 }

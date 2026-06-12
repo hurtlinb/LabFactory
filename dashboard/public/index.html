@@ -46,7 +46,14 @@
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
             </svg>
-            Lifecycle
+            Labs
+          </button>
+          <button data-view="admin-courses">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
+              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
+            </svg>
+            Courses
           </button>
         </div>
         <div class="nav-group">
@@ -59,13 +66,6 @@
               <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
             </svg>
             Users
-          </button>
-          <button data-view="admin-courses">
-            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
-              <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-            </svg>
-            Courses
           </button>
           <button data-view="models">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -91,7 +91,7 @@
               <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
               <circle cx="12" cy="12" r="3"/>
             </svg>
-            Settings
+            Maintenance
           </button>
           <button data-view="admin-queues">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -180,48 +180,25 @@
             </div>
           </div>
 
-          <!-- Two-column: recent labs + VM models -->
-          <div class="dash-grid">
-            <div class="panel">
-              <div class="panel-head">
-                <p class="eyebrow">Recent labs</p>
-                <button class="btn btn-ghost" type="button" id="dashGotoLifecycle">View all</button>
-              </div>
-              <div id="dashRecentLabsList" class="saved-list">
-                <p class="placeholder">Loading…</p>
-              </div>
+          <!-- Classrooms overview -->
+          <div class="panel">
+            <div class="panel-head">
+              <p class="eyebrow">Classrooms</p>
             </div>
-            <div class="panel">
-              <div class="panel-head">
-                <p class="eyebrow">VM Models</p>
-                <button class="btn btn-ghost" type="button" id="dashGotoModels">Manage</button>
-              </div>
-              <div id="dashModelsList" class="saved-list">
-                <p class="placeholder">Loading…</p>
-              </div>
+            <div id="dashClassroomsGrid" class="dash-classrooms-grid">
+              <p class="placeholder">Loading…</p>
             </div>
           </div>
 
-          <!-- Active lifecycle tracker -->
-          <div id="dashLifecycleCard" class="panel" hidden>
+          <!-- Recent labs -->
+          <div class="panel">
             <div class="panel-head">
-              <div>
-                <p class="eyebrow">Active lifecycle</p>
-                <h3 id="dashLifecycleTitle">—</h3>
-              </div>
-              <span id="dashLifecycleBadge" class="mini-pill">—</span>
+              <p class="eyebrow">Recent labs</p>
+              <button class="btn btn-ghost" type="button" id="dashGotoLifecycle">View all</button>
             </div>
-            <div id="dashLifecycleSteps"></div>
-            <div id="dashLifecycleActions" class="lc-actions"></div>
-          </div>
-
-          <!-- Per-seat grid -->
-          <div id="dashSeatCard" class="panel" hidden>
-            <div class="panel-head">
-              <p class="eyebrow">Workstation view</p>
-              <span id="dashSeatTitle" class="muted">—</span>
+            <div id="dashRecentLabsList" class="saved-list">
+              <p class="placeholder">Loading…</p>
             </div>
-            <div id="dashSeatGrid" class="seat-grid"></div>
           </div>
         </section>
 
@@ -450,7 +427,7 @@
           </div>
         </section>
 
-        <!-- ── Lifecycle ──────────────────────────────────────── -->
+        <!-- ── Labs ──────────────────────────────────────────── -->
         <section class="page" data-view="lifecycle" hidden>
           <div class="stack">
             <article class="panel">
@@ -508,10 +485,10 @@
           </article>
         </dialog>
 
-        <!-- ── Settings ───────────────────────────────────────── -->
+        <!-- ── Maintenance ─────────────────────────────────────── -->
         <section class="page" data-view="admin-settings" hidden>
           <article class="panel">
-            <p class="eyebrow">settings</p>
+            <p class="eyebrow">Maintenance</p>
             <div class="inline-actions section-actions">
               <button type="button" id="refreshLabsStateButton" class="btn btn-secondary">Refresh labs state</button>
               <div id="settingsStatus" class="status-message" hidden></div>
@@ -704,6 +681,69 @@
       <div class="inline-actions">
         <button id="vmTimezoneCancelButton" class="btn btn-ghost" type="button">Cancel</button>
         <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ── Domain Controller dialog ─────────────────────────── -->
+  <dialog id="vmDomainControllerDialog" class="modal-dialog">
+    <form id="vmDomainControllerForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Windows — Customization</p>
+          <h3>Domain Controller</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Nom de domaine</span>
+        <input id="vmDomainControllerValue" type="text" autocomplete="off" placeholder="example.local" required>
+      </label>
+      <p class="muted modal-help">Ce serveur sera promu contrôleur de domaine Active Directory.</p>
+      <div class="inline-actions">
+        <button id="vmDomainControllerCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ── Domain Member dialog ───────────────────────────────── -->
+  <dialog id="vmDomainMemberDialog" class="modal-dialog">
+    <form id="vmDomainMemberForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Windows — Customization</p>
+          <h3>Domain Member</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Domaine</span>
+        <select id="vmDomainMemberValue"></select>
+      </label>
+      <p class="muted modal-help">Cette VM sera jointe au domaine sélectionné.</p>
+      <div class="inline-actions">
+        <button id="vmDomainMemberCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- ── Deployment conflict dialog ──────────────────────── -->
+  <dialog id="deploymentConflictDialog" class="modal-dialog">
+    <form id="deploymentConflictForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">⚠ Warning</p>
+          <h3>Classroom already in use</h3>
+        </div>
+      </div>
+      <p id="deploymentConflictMessage" class="modal-help"></p>
+      <label class="field">
+        <span>Type <strong>deploy</strong> to continue</span>
+        <input id="deploymentConflictConfirmInput" type="text" autocomplete="off" placeholder="deploy">
+      </label>
+      <div class="inline-actions">
+        <button id="deploymentConflictCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-danger" type="submit">Deploy anyway</button>
       </div>
     </form>
   </dialog>

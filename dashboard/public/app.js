@@ -133,12 +133,12 @@ const FALLBACK_LINUX_TIMEZONE_OPTIONS = [
 const PAGE_TITLES = {
   'dashboard':      { title: 'Dashboard',   breadcrumb: 'LabFactory' },
   'blueprint':      { title: 'Blueprints',  breadcrumb: 'Labs' },
-  'lifecycle':      { title: 'Lifecycle',   breadcrumb: 'Labs' },
+  'lifecycle':      { title: 'Labs',        breadcrumb: 'Labs' },
   'admin-users':    { title: 'Users',       breadcrumb: 'Administration' },
-  'admin-courses':  { title: 'Courses',     breadcrumb: 'Administration' },
+  'admin-courses':  { title: 'Courses',     breadcrumb: 'Labs' },
   'models':         { title: 'VM Models',   breadcrumb: 'Administration' },
   'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
-  'admin-settings': { title: 'Settings',    breadcrumb: 'Administration' },
+  'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
   'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
 };
 
@@ -447,6 +447,24 @@ function renderTemplates() {
         <span class="vm-lib-cust-name">Timezone</span>
       </article>
     </div>
+    <div class="vm-lib-group">
+      <p class="vm-lib-group-label">Linux uniquement</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="docker-install">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('docker-install')}</span>
+        <span class="vm-lib-cust-name">Docker CE</span>
+      </article>
+    </div>
+    <div class="vm-lib-group">
+      <p class="vm-lib-group-label">Windows uniquement</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="domain-controller">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('domain-controller')}</span>
+        <span class="vm-lib-cust-name">Domain Controller</span>
+      </article>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="domain-member">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('domain-member')}</span>
+        <span class="vm-lib-cust-name">Domain Member</span>
+      </article>
+    </div>
     <p class="vm-lib-hint">→ Drag to canvas</p>`;
 
   templatePalette.innerHTML = `
@@ -576,6 +594,19 @@ function renderClassrooms() {
           </div>
           <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
           <p class="muted">Assigned subnets: ${classroom.subnetOctets.join(', ')}</p>
+          ${(() => {
+            const activeLabs = state.deployments.filter(
+              d => d.classroom?.id === classroom.id && DEPLOY_ACTIVE_STATUSES.includes(d.status)
+            );
+            if (!activeLabs.length) return '';
+            const pills = activeLabs.map(d =>
+              `<span class="mini-pill" title="${escapeHtmlAttr(d.blueprint?.name || '')} — Lab #${escapeHtmlAttr(String(d.deploymentNumber ?? ''))}">` +
+              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ` +
+              renderTeacherBadge(d.teacher || { email: d.teacherEmail }) +
+              `</span>`
+            ).join('');
+            return `<div class="template-meta">${pills}</div>`;
+          })()}
         </article>
       `
     )
@@ -645,6 +676,30 @@ function renderCanvas() {
           </span>
         `);
       }
+      if (vm.config?.domainRole === 'controller' && vm.config?.domainName) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill vm-domain-pill">
+            <span>DC: ${escapeHtml(vm.config.domainName)}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="domain-controller" aria-label="Remove Domain Controller" title="Remove Domain Controller">×</button>
+          </span>
+        `);
+      }
+      if (vm.config?.domainRole === 'member' && vm.config?.domainName) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill vm-domain-pill">
+            <span>Member: ${escapeHtml(vm.config.domainName)}</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="domain-member" aria-label="Remove Domain Member" title="Remove Domain Member">×</button>
+          </span>
+        `);
+      }
+      if (vm.config?.dockerInstall) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill">
+            <span>Docker CE</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="docker-install" aria-label="Remove Docker CE" title="Remove Docker CE">×</button>
+          </span>
+        `);
+      }
       return `
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
@@ -698,6 +753,33 @@ function renderCanvas() {
       if (customizationKey === 'timezone') {
         await promptVmTimezone(vmId);
       }
+      if (customizationKey === 'docker-install') {
+        const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+        const template = state.templates.find(t => t.id === vm?.templateId);
+        const isLinux = !['windows11', 'windows-server'].includes(String(template?.osType || ''));
+        if (!isLinux) {
+          showMessage(globalStatus, 'Docker CE est réservé aux VMs Linux.', 'danger', 3000);
+          return;
+        }
+        updateVm(vmId, nextVm => {
+          nextVm.config.dockerInstall = true;
+        });
+        renderCanvas();
+      }
+      if (customizationKey === 'domain-controller' || customizationKey === 'domain-member') {
+        const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+        const template = state.templates.find(t => t.id === vm?.templateId);
+        const isWindows = ['windows11', 'windows-server'].includes(String(template?.osType || ''));
+        if (!isWindows) {
+          showMessage(globalStatus, 'Les customisations de domaine sont réservées aux VMs Windows.', 'danger', 3000);
+          return;
+        }
+        if (customizationKey === 'domain-controller') {
+          await promptDomainController(vmId);
+        } else {
+          await promptDomainMember(vmId);
+        }
+      }
     });
     card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
       button.addEventListener('click', event => {
@@ -712,6 +794,19 @@ function renderCanvas() {
         if (button.dataset.customizationKey === 'timezone') {
           updateVm(vmId, vm => {
             delete vm.config.timezone;
+          });
+          renderCanvas();
+        }
+        if (button.dataset.customizationKey === 'docker-install') {
+          updateVm(vmId, vm => {
+            delete vm.config.dockerInstall;
+          });
+          renderCanvas();
+        }
+        if (button.dataset.customizationKey === 'domain-controller' || button.dataset.customizationKey === 'domain-member') {
+          updateVm(vmId, vm => {
+            delete vm.config.domainRole;
+            delete vm.config.domainName;
           });
           renderCanvas();
         }
@@ -845,9 +940,10 @@ function renderLifecycleLabs() {
                 <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
               </p>
-              <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready · ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}</p>
+              <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready</p>
             </div>
             <div class="inline-actions">
+              ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               <span class="pill ${statusPillClass}">${escapeHtml(s)}</span>
               <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details →</button>
             </div>
@@ -864,10 +960,23 @@ function renderLifecycleLabs() {
   lifecycleList.querySelectorAll('.lifecycle-action').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const action = button.dataset.action;
+      if (action === 'deploy' || action === 'start') {
+        const thisDeployment = state.deployments.find(d => d.id === button.dataset.deploymentId);
+        const conflicting = state.deployments.find(
+          d => d.id !== button.dataset.deploymentId &&
+               d.classroom?.id === thisDeployment?.classroom?.id &&
+               DEPLOY_ACTIVE_STATUSES.includes(d.status)
+        );
+        if (conflicting) {
+          const confirmed = await promptDeploymentConflict(conflicting);
+          if (!confirmed) return;
+        }
+      }
       button.disabled = true;
       try {
         const result = await fetchJson(
-          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${button.dataset.action}`,
+          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${action}`,
           { method: 'POST' }
         );
         await refreshLifecycleLabs();
@@ -965,100 +1074,45 @@ function renderDashboard() {
     }
   }
 
-  // VM Models list
-  const modelsList = elById('dashModelsList');
-  if (modelsList) {
-    if (!state.templates.length) {
-      modelsList.innerHTML = '<p class="placeholder">No VM models yet.</p>';
+  // Classrooms overview
+  const classroomsGrid = elById('dashClassroomsGrid');
+  if (classroomsGrid) {
+    if (!state.classrooms.length) {
+      classroomsGrid.innerHTML = '<p class="placeholder">No classrooms configured yet.</p>';
     } else {
-      modelsList.innerHTML = state.templates.slice(0, 5).map(t => {
-        const dotClass = getOsDotClass(t.osType);
+      classroomsGrid.innerHTML = state.classrooms.map(classroom => {
+        const labs = state.deployments.filter(d => d.classroom.id === classroom.id);
+        const labsHtml = labs.length
+          ? labs.map(d => {
+              const badgeClass =
+                ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
+                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
+                d.status === 'stopped' ? 'dash-badge-stopped' : 'dash-badge-destroyed';
+              const badgeText =
+                ['running', 'deployed', 'mixed'].includes(d.status) ? 'Actif' :
+                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'En cours' :
+                d.status === 'stopped' ? 'Arrêté' : escapeHtml(d.status || 'idle');
+              return `
+                <div class="dash-classroom-lab">
+                  <div class="dash-row-info">
+                    <p class="dash-row-name">${escapeHtml(d.blueprint.name)}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''} · ${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</p>
+                  </div>
+                  <span class="dash-badge ${badgeClass}">${badgeText}</span>
+                </div>`;
+            }).join('')
+          : '<p class="dash-classroom-empty">Aucun lab déployé</p>';
+
         return `
-          <div class="dash-row">
-            <div class="dash-row-icon">
-              <img src="${escapeHtmlAttr(getOsLogo(t.osType))}" alt="">
+          <div class="dash-classroom-card">
+            <div class="dash-classroom-header">
+              <strong>${escapeHtml(classroom.name)}</strong>
+              <span class="muted">${classroom.workstationCount} poste${classroom.workstationCount !== 1 ? 's' : ''}</span>
             </div>
-            <div class="dash-row-info">
-              <p class="dash-row-name">${escapeHtml(t.name)}</p>
-              <p class="dash-row-meta">VMID ${t.proxmoxTemplateVmid} · ${getOsLabel(t.osType)}</p>
-            </div>
-            <span class="vm-lib-dot ${dotClass}"></span>
+            <div class="dash-classroom-labs">${labsHtml}</div>
           </div>`;
       }).join('');
     }
-  }
-
-  // Active lifecycle tracker
-  const lcCard  = elById('dashLifecycleCard');
-  const lcTitle = elById('dashLifecycleTitle');
-  const lcBadge = elById('dashLifecycleBadge');
-  const lcSteps = elById('dashLifecycleSteps');
-  const lcActs  = elById('dashLifecycleActions');
-
-  const activeDeploy = state.deployments.find(d =>
-    ['queued', 'deploying', 'customizing', 'deployed', 'starting', 'running', 'mixed', 'stopping'].includes(d.status)
-  );
-
-  if (lcCard) lcCard.hidden = !activeDeploy;
-
-  if (activeDeploy) {
-    if (lcTitle) lcTitle.textContent = `${activeDeploy.blueprint.name} · ${activeDeploy.classroom.name}`;
-    if (lcBadge) {
-      const ready = Number(activeDeploy.readyCount ?? 0);
-      const total = Number(activeDeploy.totalVmCount ?? 0);
-      lcBadge.textContent = `${ready}/${total} VMs`;
-    }
-    if (lcSteps) lcSteps.innerHTML = renderLifecycleSteps(activeDeploy.status);
-    if (lcActs) {
-      const acts = resolveLifecycleActions(activeDeploy.status);
-      if (acts.busy) {
-        lcActs.innerHTML = '<span class="loading-spinner"></span>';
-      } else {
-        lcActs.innerHTML = acts.items
-          .map(a => `<button class="btn lifecycle-action" type="button" data-action="${a.action}" data-deployment-id="${activeDeploy.id}">${a.icon} ${a.label}</button>`)
-          .join('');
-        lcActs.querySelectorAll('.lifecycle-action').forEach(btn => {
-          btn.addEventListener('click', async event => {
-            event.stopPropagation();
-            btn.disabled = true;
-            try {
-              const result = await fetchJson(`/api/lifecycle/deployments/${btn.dataset.deploymentId}/${btn.dataset.action}`, { method: 'POST' });
-              await refreshLifecycleLabs();
-              renderDashboard();
-              showMessage(globalStatus, `${btn.dataset.action} queued with job ${result.jobId}.`, 'success');
-            } catch (error) {
-              showMessage(globalStatus, error.message, 'danger');
-            } finally {
-              btn.disabled = false;
-            }
-          });
-        });
-      }
-    }
-  }
-
-  // Per-seat grid (derive from classroom + deployment)
-  const seatCard  = elById('dashSeatCard');
-  const seatTitle = elById('dashSeatTitle');
-  const seatGrid  = elById('dashSeatGrid');
-
-  if (seatCard) seatCard.hidden = !activeDeploy;
-
-  if (activeDeploy && seatGrid) {
-    const classroom = state.classrooms.find(c => c.id === activeDeploy.classroom.id);
-    const seatCount = classroom?.workstationCount ?? Math.ceil(Number(activeDeploy.totalVmCount ?? 1) / 3);
-    const shown = Math.min(seatCount, 12);
-    const vmsPerSeat = seatCount > 0 ? Math.round(Number(activeDeploy.totalVmCount ?? 0) / seatCount) : 0;
-
-    if (seatTitle) seatTitle.textContent = `${activeDeploy.blueprint.name} · ${seatCount} workstation${seatCount !== 1 ? 's' : ''}`;
-
-    seatGrid.innerHTML = Array.from({ length: shown }, (_, i) => {
-      const num = String(i + 1).padStart(2, '0');
-      const tags = vmsPerSeat > 0
-        ? `<span class="seat-tag seat-tag-vm">${vmsPerSeat} VM</span>`
-        : '';
-      return `<div class="seat-cell"><p class="seat-num">Poste ${num}</p><div class="seat-tags">${tags}</div></div>`;
-    }).join('');
   }
 }
 
@@ -1072,10 +1126,15 @@ function getDeploymentWorkstationNumber(vm) {
   return match?.[1] ?? 'n/a';
 }
 
-function renderDeploymentVmRows(vms) {
+function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
   return vms
     .map(
-      vm => `
+      vm => {
+        const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
+        const resetButton = canResetIp && hasStaticIp
+          ? `<button class="btn btn-secondary btn-sm reset-ip-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">Reset IP</button>`
+          : '';
+        return `
         <tr>
           <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
           <td class="vm-state-name-cell">
@@ -1088,8 +1147,10 @@ function renderDeploymentVmRows(vms) {
           <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
+          <td>${resetButton}</td>
         </tr>
-      `
+      `;
+      }
     )
     .join('');
 }
@@ -1109,6 +1170,31 @@ async function redeployDeploymentWorkstation(deploymentId, workstationNumber, bu
   } finally {
     if (button.isConnected) {
       button.disabled = false;
+    }
+  }
+}
+
+async function resetVmIp(deploymentId, vmid, button) {
+  if (!confirm(`Reset IP configuration for VMID ${vmid}?\n\nThis will re-apply the network settings from the blueprint via the Proxmox guest agent.`)) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = 'Resetting…';
+  try {
+    const result = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms/${vmid}/reset-ip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, `IP reset to ${result.ip || vmid}`, 'success', 6000);
+    }
+  } catch (error) {
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, error.message, 'danger', 8000);
+    }
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = originalText;
     }
   }
 }
@@ -1133,6 +1219,7 @@ function renderDeploymentVmDetails(payload) {
   const orderedWorkstations = [...workstationGroups.keys()].sort((left, right) => Number(left) - Number(right));
   const activeWorkstationNumbers = new Set(Array.isArray(deployment.activeWorkstationNumbers) ? deployment.activeWorkstationNumbers : []);
   const canRedeployWorkstations = Boolean(deployment.canRedeployWorkstations) && !isDeploymentBusy(deployment.status);
+  const canResetIp = deployment.status === 'running';
 
   deploymentVmDetailsList.innerHTML = `
     <div class="workstation-detail-list">
@@ -1167,9 +1254,10 @@ function renderDeploymentVmDetails(payload) {
                       <th>IP</th>
                       <th>State</th>
                       <th>Proxmox</th>
+                      <th></th>
                     </tr>
                   </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms)}</tbody>
+                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp)}</tbody>
                 </table>
               </div>
             </section>
@@ -1187,6 +1275,13 @@ function renderDeploymentVmDetails(payload) {
         button.dataset.workstationNumber,
         button
       );
+    });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.reset-ip-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      await resetVmIp(button.dataset.deploymentId, button.dataset.vmid, button);
     });
   });
 }
@@ -1376,6 +1471,142 @@ async function promptVmTimezone(vmId) {
   }
 }
 
+async function promptDomainController(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+  const dialog = document.getElementById('vmDomainControllerDialog');
+  const form = document.getElementById('vmDomainControllerForm');
+  const input = document.getElementById('vmDomainControllerValue');
+  const cancelBtn = document.getElementById('vmDomainControllerCancelButton');
+  if (!dialog || !form || !input) return;
+
+  input.value = vm.config?.domainRole === 'controller' ? (vm.config.domainName ?? '') : '';
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      const domainName = input.value.trim();
+      if (!domainName) { resolve(false); return; }
+      updateVm(vmId, nextVm => {
+        nextVm.config.domainRole = 'controller';
+        nextVm.config.domainName = domainName;
+      });
+      renderCanvas();
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit, { once: true });
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+  });
+}
+
+async function promptDomainMember(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+
+  const domains = state.currentBlueprint.vms
+    .filter(v => v.id !== vmId && v.config?.domainRole === 'controller' && v.config?.domainName)
+    .map(v => v.config.domainName)
+    .filter((v, i, arr) => arr.indexOf(v) === i);
+
+  if (!domains.length) {
+    showMessage(globalStatus, "Aucun Domain Controller défini dans ce blueprint. Ajoutez d'abord un DC.", 'warning', 4000);
+    return;
+  }
+
+  const dialog = document.getElementById('vmDomainMemberDialog');
+  const form = document.getElementById('vmDomainMemberForm');
+  const select = document.getElementById('vmDomainMemberValue');
+  const cancelBtn = document.getElementById('vmDomainMemberCancelButton');
+  if (!dialog || !form || !select) return;
+
+  select.innerHTML = domains.map(d => `<option value="${escapeHtmlAttr(d)}">${escapeHtml(d)}</option>`).join('');
+  if (vm.config?.domainRole === 'member' && vm.config?.domainName) {
+    select.value = vm.config.domainName;
+  }
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      const domainName = select.value.trim();
+      if (!domainName) { resolve(false); return; }
+      updateVm(vmId, nextVm => {
+        nextVm.config.domainRole = 'member';
+        nextVm.config.domainName = domainName;
+      });
+      renderCanvas();
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit, { once: true });
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+  });
+}
+
+const DEPLOY_CONFLICT_PHRASE = 'deploy';
+const DEPLOY_ACTIVE_STATUSES = ['deploying', 'customizing', 'starting', 'deployed', 'running', 'mixed'];
+
+function promptDeploymentConflict(existingDeployment) {
+  const dialog = document.getElementById('deploymentConflictDialog');
+  const form = document.getElementById('deploymentConflictForm');
+  const messageEl = document.getElementById('deploymentConflictMessage');
+  const input = document.getElementById('deploymentConflictConfirmInput');
+  const cancelBtn = document.getElementById('deploymentConflictCancelButton');
+  if (!dialog || !form || !messageEl || !input || !cancelBtn) return Promise.resolve(false);
+
+  const teacher = existingDeployment.teacher || { email: existingDeployment.teacherEmail };
+  const ownerName = escapeHtml(teacher.displayName || teacher.email || 'Unknown owner');
+  const blueprintName = escapeHtml(existingDeployment.blueprint?.name || '');
+  const labNum = escapeHtml(String(existingDeployment.deploymentNumber ?? '?'));
+  const status = escapeHtml(existingDeployment.status || '');
+
+  messageEl.innerHTML =
+    `Lab <strong>#${labNum} &ldquo;${blueprintName}&rdquo;</strong> owned by <strong>${ownerName}</strong>` +
+    ` (status: ${status}) is already active in this classroom.` +
+    ` Deploying a second lab may cause <strong>IP address conflicts</strong>.`;
+
+  input.value = '';
+  input.setCustomValidity('');
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      if (input.value.trim().toLowerCase() !== DEPLOY_CONFLICT_PHRASE) {
+        input.setCustomValidity(`Type exactly « ${DEPLOY_CONFLICT_PHRASE} »`);
+        input.reportValidity();
+        return;
+      }
+      input.setCustomValidity('');
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit);
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+    window.setTimeout(() => input.focus(), 0);
+  });
+}
+
 async function loadTimezoneOptions() {
   try {
     const payload = await fetchJson('/api/timezones');
@@ -1502,11 +1733,20 @@ function renderTeacherIdentity(teacher) {
 
 function renderTeacherBadge(teacher) {
   const email = String(teacher?.email || '').trim();
-  const initials = String(teacher?.initials || '').trim();
   const displayName = String(teacher?.displayName || '').trim() || email || 'Unknown teacher';
-  const label = initials || displayName;
 
-  return `<span class="mini-pill teacher-pill" title="${escapeHtmlAttr(displayName)}">${escapeHtml(label)}</span>`;
+  let initials = String(teacher?.initials || '').trim();
+  if (!initials) {
+    const firstName = String(teacher?.firstName || '').trim();
+    const lastName = String(teacher?.lastName || '').trim();
+    initials = (firstName.slice(0, 1) + lastName.slice(0, 2)).toUpperCase();
+  }
+  if (!initials) {
+    initials = displayName.split(/\s+/).filter(Boolean).slice(0, 3).map(p => p[0]).join('').toUpperCase();
+  }
+  if (!initials) initials = '?';
+
+  return `<span class="mini-pill teacher-pill" title="${escapeHtmlAttr(displayName)}">${escapeHtml(initials)}</span>`;
 }
 
 async function fetchJson(url, options = {}) {
@@ -1741,6 +1981,7 @@ async function refreshLifecycleLabs() {
     };
   });
   renderLifecycleLabs();
+  renderClassrooms();
   renderDashboard();
 }
 
@@ -1894,12 +2135,30 @@ function getOsLogo(osType) {
 }
 
 function getCustomizationIcon(key) {
+  if (key === 'domain-controller') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
+      <path d="M7 8h.01"/><path d="M11 8h6"/>
+    </svg>`;
+  }
+  if (key === 'domain-member') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+    </svg>`;
+  }
   if (key === 'name') {
     return `
       <svg viewBox="0 0 24 24" focusable="false">
         <path d="M5 18 9.5 6h1.8L16 18h-1.9l-1.1-3.1H8L6.9 18H5Zm3.6-4.7h3.8L10.5 8 8.6 13.3Z"></path>
       </svg>
     `;
+  }
+  if (key === 'docker-install') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+      <line x1="12" y1="22.08" x2="12" y2="12"/>
+    </svg>`;
   }
   return `
     <svg viewBox="0 0 24 24" focusable="false">

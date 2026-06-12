@@ -1,6 +1,6 @@
 import { createClient } from 'redis';
 import { redisConnectionOptions } from '../config/redis.js';
-import { startAnsibleWorker } from './ansibleWorker.js';
+import { startAnsibleWorker, resetStalledAnsibleDeployments } from './ansibleWorker.js';
 
 const WORKER_NAME = 'ansible';
 const CONTROL_CHANNEL = `control:${WORKER_NAME}`;
@@ -8,6 +8,7 @@ const STATUS_KEY = `worker:${WORKER_NAME}`;
 
 (async () => {
   const connection = redisConnectionOptions();
+  await resetStalledAnsibleDeployments();
   const worker = startAnsibleWorker(connection);
   console.log('Ansible worker started');
 

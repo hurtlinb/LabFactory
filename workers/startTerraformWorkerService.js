@@ -1,6 +1,6 @@
 import { createClient } from 'redis';
 import { redisConnectionOptions } from '../config/redis.js';
-import { startTerraformWorker } from './terraformWorker.js';
+import { startTerraformWorker, resetStalledTerraformDeployments } from './terraformWorker.js';
 
 const WORKER_NAME = 'terraform';
 const CONTROL_CHANNEL = `control:${WORKER_NAME}`;
@@ -8,6 +8,7 @@ const STATUS_KEY = `worker:${WORKER_NAME}`;
 
 (async () => {
   const connection = redisConnectionOptions();
+  await resetStalledTerraformDeployments();
   const worker = startTerraformWorker(connection);
   console.log('Terraform worker started');
 

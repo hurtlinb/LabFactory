@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { promises as fs } from 'node:fs';
 import { runCommand } from '../lib/runCommand.js';
@@ -13,6 +13,7 @@ const getWindowsAdminUsername = language =>
   (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
 const linuxPlaybookPath = path.join(ansibleDir, 'linux-playbook.yml');
 const windowsPlaybookPath = path.join(ansibleDir, 'windows-playbook.yml');
+const windowsDomainPlaybookPath = path.join(ansibleDir, 'windows-domain-playbook.yml');
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
 });
@@ -53,7 +54,7 @@ const safeUpdateDeploymentStatus = async (deploymentId, status, details = {}) =>
   }
 };
 
-const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) => {
+const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, allTargets = [] }) => {
   const hosts = timezoneTargets
     .map((target, index) => {
       const hostName = `vm_${index + 1}`;
@@ -76,6 +77,25 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets }) =
       }
       if (String(target.hostname ?? '').trim()) {
         lines.push(`          target_hostname: ${JSON.stringify(target.hostname)}`);
+      }
+      if (String(target.domainRole ?? '').trim()) {
+        lines.push(`          domain_role: ${JSON.stringify(target.domainRole)}`);
+      }
+      if (String(target.domainName ?? '').trim()) {
+        lines.push(`          domain_name: ${JSON.stringify(target.domainName)}`);
+      }
+      if (target.domainRole === 'member' && target.domainName && target.ipAddress) {
+        const subnet = target.ipAddress.split('.').slice(0, 3).join('.');
+        const dc = allTargets.find(t =>
+          t.domainRole === 'controller' &&
+          t.domainName === target.domainName &&
+          t.ipAddress?.startsWith(subnet + '.')
+        );
+        if (dc?.ipAddress) {
+          lines.push(`          domain_controller_ip: ${JSON.stringify(dc.ipAddress)}`);
+          const dcAdminUsername = String(dc.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(dc.language);
+          lines.push(`          domain_admin_username: ${JSON.stringify(dcAdminUsername)}`);
+        }
       }
       return lines.join('\n');
     })
@@ -107,6 +127,9 @@ const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets })
       if (String(target.hostname ?? '').trim()) {
         lines.push(`          target_hostname: ${JSON.stringify(target.hostname)}`);
       }
+      if (target.installDocker) {
+        lines.push(`          install_docker: true`);
+      }
       return lines.join('\n');
     })
     .join('\n');
@@ -118,6 +141,7 @@ ${hosts}`;
 
 export function startAnsibleWorker(connection) {
   const activeAbortControllers = new Map();
+  const ansibleQueue = new Queue(ansibleQueueName, { connection });
 
   const worker = new Worker(
     ansibleQueueName,
@@ -145,14 +169,14 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname) &&
+            (target.timezone || target.hostname || target.domainRole) &&
             ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
         const linuxTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname) &&
+            (target.timezone || target.hostname || target.installDocker) &&
             isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
@@ -174,7 +198,8 @@ export function startAnsibleWorker(connection) {
           inventoryParts.push(
             buildWindowsInventoryHosts({
               windowsAdminPassword: extraVars.windows_admin_password,
-              timezoneTargets: windowsTimezoneTargets
+              timezoneTargets: windowsTimezoneTargets,
+              allTargets: extraVars.timezone_targets
             })
           );
         }
@@ -241,6 +266,19 @@ export function startAnsibleWorker(connection) {
                 signal: abortController.signal
               }
             );
+
+            const hasDomainTargets = windowsTimezoneTargets.some(t => t.domainRole);
+            if (hasDomainTargets) {
+              await runCommand(
+                'ansible-playbook',
+                [windowsDomainPlaybookPath, ...commonArgs],
+                {
+                  cwd: ansibleDir,
+                  env: { ...process.env },
+                  signal: abortController.signal
+                }
+              );
+            }
           }
         } finally {
           await fs.rm(inventoryPath, { force: true });
@@ -269,6 +307,23 @@ export function startAnsibleWorker(connection) {
     { connection, concurrency: 1 }
   );
 
+  worker.on('stalled', async (jobId) => {
+    try {
+      const stalledJob = await ansibleQueue.getJob(jobId);
+      const deploymentId = stalledJob?.data?.deploymentId;
+      if (deploymentId) {
+        await safeUpdateDeploymentStatus(deploymentId, 'failed', {
+          action: 'customize',
+          jobId: String(jobId),
+          runId: stalledJob?.data?.runId
+        });
+        console.warn(`[stalled] Ansible job ${jobId} → deployment ${deploymentId} marqué failed`);
+      }
+    } catch (err) {
+      console.error(`[stalled] Impossible de traiter le job stalled ${jobId}:`, err);
+    }
+  });
+
   worker.cancelActiveJobs = async () => {
     for (const controller of activeAbortControllers.values()) {
       controller.abort(new Error('Job cancelled from dashboard clear history action'));
@@ -276,4 +331,19 @@ export function startAnsibleWorker(connection) {
   };
 
   return worker;
+}
+
+export async function resetStalledAnsibleDeployments() {
+  try {
+    const result = await dbPool.query(
+      `UPDATE lab_deployments
+         SET status = 'failed', last_action = 'worker-restarted', updated_at = NOW()
+       WHERE status = 'customizing'`
+    );
+    if (result.rowCount > 0) {
+      console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) en customizing remis à failed`);
+    }
+  } catch (err) {
+    console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
+  }
 }

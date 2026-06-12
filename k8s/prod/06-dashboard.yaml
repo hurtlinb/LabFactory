@@ -16,6 +16,8 @@ spec:
         app: labfactory-dashboard
     spec:
       serviceAccountName: labfactory-dashboard
+      imagePullSecrets:
+        - name: dockerhub-pull-secret
       initContainers:
         # Attend que PostgreSQL soit prêt avant de démarrer (les migrations tournent au démarrage)
         - name: wait-for-postgres
@@ -26,7 +28,7 @@ spec:
             - until pg_isready -h postgres -p 5432 -U labfactory; do echo "Attente de PostgreSQL..."; sleep 2; done
       containers:
         - name: dashboard
-          image: hurtlinb/labfactory:dashboard-1.0.5
+          image: hurtlinb/labfactory:dashboard-1.3.2
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 3000
