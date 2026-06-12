@@ -1859,8 +1859,7 @@ async function loadAppInfo() {
   state.currentUser = info.auth?.user || null;
 
   if (appVersion) {
-    const tag = info.buildTag ?? info.version ?? '--';
-    appVersion.textContent = info.env === 'production' ? tag : `Version ${tag}`;
+    appVersion.textContent = info.buildTag ?? info.version ?? '--';
   }
 
   if (info.env === 'development') {
