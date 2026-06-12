@@ -448,6 +448,13 @@ function renderTemplates() {
       </article>
     </div>
     <div class="vm-lib-group">
+      <p class="vm-lib-group-label">Linux uniquement</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="docker-install">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('docker-install')}</span>
+        <span class="vm-lib-cust-name">Docker CE</span>
+      </article>
+    </div>
+    <div class="vm-lib-group">
       <p class="vm-lib-group-label">Windows uniquement</p>
       <article class="vm-lib-cust" draggable="true" data-customization-key="domain-controller">
         <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('domain-controller')}</span>
@@ -672,6 +679,14 @@ function renderCanvas() {
           </span>
         `);
       }
+      if (vm.config?.dockerInstall) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill">
+            <span>Docker CE</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="docker-install" aria-label="Remove Docker CE" title="Remove Docker CE">×</button>
+          </span>
+        `);
+      }
       return `
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
@@ -725,6 +740,19 @@ function renderCanvas() {
       if (customizationKey === 'timezone') {
         await promptVmTimezone(vmId);
       }
+      if (customizationKey === 'docker-install') {
+        const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+        const template = state.templates.find(t => t.id === vm?.templateId);
+        const isLinux = !['windows11', 'windows-server'].includes(String(template?.osType || ''));
+        if (!isLinux) {
+          showMessage(globalStatus, 'Docker CE est réservé aux VMs Linux.', 'danger', 3000);
+          return;
+        }
+        updateVm(vmId, nextVm => {
+          nextVm.config.dockerInstall = true;
+        });
+        renderCanvas();
+      }
       if (customizationKey === 'domain-controller' || customizationKey === 'domain-member') {
         const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
         const template = state.templates.find(t => t.id === vm?.templateId);
@@ -753,6 +781,12 @@ function renderCanvas() {
         if (button.dataset.customizationKey === 'timezone') {
           updateVm(vmId, vm => {
             delete vm.config.timezone;
+          });
+          renderCanvas();
+        }
+        if (button.dataset.customizationKey === 'docker-install') {
+          updateVm(vmId, vm => {
+            delete vm.config.dockerInstall;
           });
           renderCanvas();
         }
@@ -1990,6 +2024,13 @@ function getCustomizationIcon(key) {
         <path d="M5 18 9.5 6h1.8L16 18h-1.9l-1.1-3.1H8L6.9 18H5Zm3.6-4.7h3.8L10.5 8 8.6 13.3Z"></path>
       </svg>
     `;
+  }
+  if (key === 'docker-install') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+      <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+      <line x1="12" y1="22.08" x2="12" y2="12"/>
+    </svg>`;
   }
   return `
     <svg viewBox="0 0 24 24" focusable="false">

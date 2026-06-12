@@ -17,7 +17,7 @@ spec:
     spec:
       containers:
         - name: terraform-worker
-          image: hurtlinb/labfactory:worker-1.2.1
+          image: hurtlinb/labfactory:worker-1.2.3
           imagePullPolicy: Always
           command: ["npm", "run", "terraform-worker"]
           env:
@@ -56,11 +56,11 @@ spec:
               mountPath: /usr/src/app/.terraform
           resources:
             requests:
-              cpu: "100m"
-              memory: "256Mi"
-            limits:
-              cpu: "500m"
+              cpu: "200m"
               memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1536Mi"
       volumes:
         - name: terraform-cache
           emptyDir: {}

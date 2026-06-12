@@ -22,6 +22,67 @@
         - target_hostname is defined
         - target_hostname | string | trim != ""
 
+    - name: Install Docker CE prerequisites
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+        state: present
+        update_cache: true
+      when: install_docker | default(false) | bool
+
+    - name: Create /etc/apt/keyrings directory
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      when: install_docker | default(false) | bool
+
+    - name: Download Docker GPG key
+      ansible.builtin.get_url:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        dest: /etc/apt/keyrings/docker.asc
+        mode: '0444'
+      when: install_docker | default(false) | bool
+
+    - name: Get dpkg architecture
+      ansible.builtin.command: dpkg --print-architecture
+      register: dpkg_arch
+      changed_when: false
+      when: install_docker | default(false) | bool
+
+    - name: Get Ubuntu version codename
+      ansible.builtin.shell: ". /etc/os-release && echo $VERSION_CODENAME"
+      register: ubuntu_codename
+      changed_when: false
+      when: install_docker | default(false) | bool
+
+    - name: Add Docker apt repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch={{ dpkg_arch.stdout }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ubuntu_codename.stdout }} stable"
+        state: present
+        filename: docker
+      when: install_docker | default(false) | bool
+
+    - name: Install Docker CE
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+        update_cache: true
+      when: install_docker | default(false) | bool
+
+    - name: Add user to docker group
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: true
+      when: install_docker | default(false) | bool
+
     - name: Reboot Linux at end of customization
       ansible.builtin.reboot:
         reboot_timeout: 1800

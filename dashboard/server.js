@@ -380,7 +380,7 @@ const validateBlueprintGuestPassword = async payload => {
     if (!isLinuxOsType(osType)) {
       return false;
     }
-    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim());
+    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall);
   });
 
   if ((hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
@@ -1117,7 +1117,8 @@ const buildTerraformBlueprintPayload = blueprint => {
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
         customNameEnabled: isVmCustomNameEnabled(vm),
-        timezone: String(vm.config?.timezone ?? '').trim() || null
+        timezone: String(vm.config?.timezone ?? '').trim() || null,
+        installDocker: Boolean(vm.config?.dockerInstall)
       };
     })
   };
@@ -1250,6 +1251,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         timezone: String(vm.config?.timezone ?? '').trim() || null,
         domainRole: String(vm.config?.domainRole ?? '').trim() || null,
         domainName: String(vm.config?.domainName ?? '').trim() || null,
+        installDocker: Boolean(vm.config?.dockerInstall),
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
         vlanTag

@@ -12,6 +12,29 @@ RUN apt-get update \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*
 
+# Pre-cache Terraform provider to avoid registry downloads at runtime
+RUN mkdir -p /tmp/tf-mirror-init /usr/local/share/terraform/plugins \
+  && { echo 'terraform {'; \
+       echo '  required_providers {'; \
+       echo '    proxmox = {'; \
+       echo '      source  = "Telmate/proxmox"'; \
+       echo '      version = "3.0.2-rc07"'; \
+       echo '    }'; \
+       echo '  }'; \
+       echo '}'; } > /tmp/tf-mirror-init/main.tf \
+  && terraform -chdir=/tmp/tf-mirror-init providers mirror /usr/local/share/terraform/plugins \
+  && rm -rf /tmp/tf-mirror-init
+
+RUN { echo 'provider_installation {'; \
+      echo '  filesystem_mirror {'; \
+      echo '    path    = "/usr/local/share/terraform/plugins"'; \
+      echo '    include = ["registry.terraform.io/telmate/proxmox"]'; \
+      echo '  }'; \
+      echo '  direct {'; \
+      echo '    exclude = ["registry.terraform.io/telmate/proxmox"]'; \
+      echo '  }'; \
+      echo '}'; } > /root/.terraformrc
+
 WORKDIR /usr/src/app
 
 COPY package.json package-lock.json* ./

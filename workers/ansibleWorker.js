@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { promises as fs } from 'node:fs';
 import { runCommand } from '../lib/runCommand.js';
@@ -127,6 +127,9 @@ const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets })
       if (String(target.hostname ?? '').trim()) {
         lines.push(`          target_hostname: ${JSON.stringify(target.hostname)}`);
       }
+      if (target.installDocker) {
+        lines.push(`          install_docker: true`);
+      }
       return lines.join('\n');
     })
     .join('\n');
@@ -138,6 +141,7 @@ ${hosts}`;
 
 export function startAnsibleWorker(connection) {
   const activeAbortControllers = new Map();
+  const ansibleQueue = new Queue(ansibleQueueName, { connection });
 
   const worker = new Worker(
     ansibleQueueName,
@@ -172,7 +176,7 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname) &&
+            (target.timezone || target.hostname || target.installDocker) &&
             isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
@@ -303,6 +307,23 @@ export function startAnsibleWorker(connection) {
     { connection, concurrency: 1 }
   );
 
+  worker.on('stalled', async (jobId) => {
+    try {
+      const stalledJob = await ansibleQueue.getJob(jobId);
+      const deploymentId = stalledJob?.data?.deploymentId;
+      if (deploymentId) {
+        await safeUpdateDeploymentStatus(deploymentId, 'failed', {
+          action: 'customize',
+          jobId: String(jobId),
+          runId: stalledJob?.data?.runId
+        });
+        console.warn(`[stalled] Ansible job ${jobId} → deployment ${deploymentId} marqué failed`);
+      }
+    } catch (err) {
+      console.error(`[stalled] Impossible de traiter le job stalled ${jobId}:`, err);
+    }
+  });
+
   worker.cancelActiveJobs = async () => {
     for (const controller of activeAbortControllers.values()) {
       controller.abort(new Error('Job cancelled from dashboard clear history action'));
@@ -310,4 +331,19 @@ export function startAnsibleWorker(connection) {
   };
 
   return worker;
+}
+
+export async function resetStalledAnsibleDeployments() {
+  try {
+    const result = await dbPool.query(
+      `UPDATE lab_deployments
+         SET status = 'failed', last_action = 'worker-restarted', updated_at = NOW()
+       WHERE status = 'customizing'`
+    );
+    if (result.rowCount > 0) {
+      console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) en customizing remis à failed`);
+    }
+  } catch (err) {
+    console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
+  }
 }

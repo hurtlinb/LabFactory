@@ -1751,6 +1751,22 @@ export function startTerraformWorker(connection) {
     { connection, concurrency: 1 }
   );
 
+  worker.on('stalled', async (jobId) => {
+    try {
+      const job = await terraformQueue.getJob(jobId);
+      if (job?.data?.labInstanceId) {
+        await safeUpdateLifecycleStatus(job.data.labInstanceId, 'failed', {
+          action: job.data.action ?? 'deploy',
+          jobId: String(jobId),
+          runId: job.data.runId
+        });
+        console.warn(`[stalled] Terraform job ${jobId} → deployment ${job.data.labInstanceId} marqué failed`);
+      }
+    } catch (err) {
+      console.error(`[stalled] Impossible de traiter le job stalled ${jobId}:`, err);
+    }
+  });
+
   worker.cancelActiveJobs = async () => {
     for (const controller of activeAbortControllers.values()) {
       controller.abort(new Error('Job cancelled from dashboard clear history action'));
@@ -1758,4 +1774,21 @@ export function startTerraformWorker(connection) {
   };
 
   return worker;
+}
+
+export async function resetStalledTerraformDeployments() {
+  const transient = ['queued', 'deploying', 'destroying', 'starting', 'stopping'];
+  try {
+    const result = await dbPool.query(
+      `UPDATE lab_deployments
+         SET status = 'failed', last_action = 'worker-restarted', updated_at = NOW()
+       WHERE status = ANY($1::text[])`,
+      [transient]
+    );
+    if (result.rowCount > 0) {
+      console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) remis à failed`);
+    }
+  } catch (err) {
+    console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
+  }
 }
