@@ -1126,10 +1126,15 @@ function getDeploymentWorkstationNumber(vm) {
   return match?.[1] ?? 'n/a';
 }
 
-function renderDeploymentVmRows(vms) {
+function renderDeploymentVmRows(vms, deploymentId) {
   return vms
     .map(
-      vm => `
+      vm => {
+        const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
+        const resetButton = hasStaticIp
+          ? `<button class="btn btn-secondary btn-sm reset-ip-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">Reset IP</button>`
+          : '';
+        return `
         <tr>
           <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
           <td class="vm-state-name-cell">
@@ -1142,8 +1147,10 @@ function renderDeploymentVmRows(vms) {
           <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
+          <td>${resetButton}</td>
         </tr>
-      `
+      `;
+      }
     )
     .join('');
 }
@@ -1163,6 +1170,31 @@ async function redeployDeploymentWorkstation(deploymentId, workstationNumber, bu
   } finally {
     if (button.isConnected) {
       button.disabled = false;
+    }
+  }
+}
+
+async function resetVmIp(deploymentId, vmid, button) {
+  if (!confirm(`Reset IP configuration for VMID ${vmid}?\n\nThis will re-apply the network settings from the blueprint via the Proxmox guest agent.`)) return;
+  button.disabled = true;
+  const originalText = button.textContent;
+  button.textContent = 'Resetting…';
+  try {
+    const result = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms/${vmid}/reset-ip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, `IP reset to ${result.ip || vmid}`, 'success', 6000);
+    }
+  } catch (error) {
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, error.message, 'danger', 8000);
+    }
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.textContent = originalText;
     }
   }
 }
@@ -1221,9 +1253,10 @@ function renderDeploymentVmDetails(payload) {
                       <th>IP</th>
                       <th>State</th>
                       <th>Proxmox</th>
+                      <th></th>
                     </tr>
                   </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms)}</tbody>
+                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id)}</tbody>
                 </table>
               </div>
             </section>
@@ -1241,6 +1274,13 @@ function renderDeploymentVmDetails(payload) {
         button.dataset.workstationNumber,
         button
       );
+    });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.reset-ip-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      await resetVmIp(button.dataset.deploymentId, button.dataset.vmid, button);
     });
   });
 }

@@ -2149,6 +2149,136 @@ app.get(
 );
 
 app.post(
+  '/api/lifecycle/deployments/:id/vms/:vmid/reset-ip',
+  wrapAsync(async (req, res) => {
+    const vmid = Number(req.params.vmid);
+    if (!Number.isInteger(vmid) || vmid <= 0) {
+      res.status(400).json({ error: 'invalid vmid' });
+      return;
+    }
+
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+
+    const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
+    if (!targetVm) {
+      res.status(404).json({ error: 'VM not found in deployment plan' });
+      return;
+    }
+
+    const targetIp = buildDeploymentVmIpAddress(targetVm);
+    if (targetIp === 'dhcp' || targetIp === 'n/a') {
+      res.status(400).json({ error: 'VM does not have a static IP configured' });
+      return;
+    }
+
+    const envSettings = readTerraformEnvSettings();
+    assertRequiredTerraformEnvSettings(envSettings);
+
+    let vmResource;
+    try {
+      const resources = await fetchClusterVmResources({ context: `reset-ip vmid ${vmid}` });
+      vmResource = resources.find(r => Number(r.vmid) === vmid);
+    } catch {
+      res.status(502).json({ error: 'Unable to reach Proxmox cluster' });
+      return;
+    }
+
+    if (!vmResource) {
+      res.status(404).json({ error: 'VM not found in Proxmox cluster' });
+      return;
+    }
+    if (vmResource.status !== 'running') {
+      res.status(409).json({ error: 'VM must be running to reset IP' });
+      return;
+    }
+
+    const node = vmResource.node;
+    const maskBits = parseVlanMaskBits(classroom.networkVlanMask ?? '/24') ?? 24;
+    const gateway = classroom.networkGateway;
+    const osType = String(targetVm.osType ?? '');
+    const isWindows = ['windows11', 'windows-server'].includes(osType);
+
+    let command;
+    if (isWindows) {
+      const psScript = [
+        `$idx = (Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1).ifIndex`,
+        `Remove-NetIPAddress -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue`,
+        `Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue`,
+        `New-NetIPAddress -InterfaceIndex $idx -IPAddress '${targetIp}' -PrefixLength ${maskBits} -DefaultGateway '${gateway}'`,
+        `Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses ('${gateway}')`,
+      ].join('; ');
+      command = ['powershell.exe', '-NonInteractive', '-Command', psScript];
+    } else {
+      const bashScript =
+        `IFACE=$(ip -o link show | awk '$2~/^e/{gsub(":","", $2); print $2; exit}')` +
+        ` && printf 'network:\\n  version: 2\\n  ethernets:\\n    %s:\\n      dhcp4: no\\n      addresses: [${targetIp}/${maskBits}]\\n      routes:\\n        - to: default\\n          via: ${gateway}\\n      nameservers:\\n        addresses: [${gateway}]\\n' "$IFACE"` +
+        ` > /etc/netplan/99-labfactory-reset.yaml` +
+        ` && chmod 600 /etc/netplan/99-labfactory-reset.yaml` +
+        ` && netplan apply`;
+      command = ['/bin/bash', '-c', bashScript];
+    }
+
+    let pid;
+    try {
+      const execPayload = await requestProxmoxJson(
+        envSettings,
+        `nodes/${encodeURIComponent(node)}/qemu/${vmid}/agent/exec`,
+        { method: 'POST', body: { command }, timeoutMs: 10000 }
+      );
+      pid = execPayload?.data?.pid;
+    } catch (error) {
+      console.error(`Guest agent exec failed for vmid ${vmid}:`, error);
+      let detail = error.message;
+      try { detail = JSON.parse(error.responseBody)?.errors ?? detail; } catch { /* noop */ }
+      res.status(502).json({ error: `Guest agent exec failed: ${detail}` });
+      return;
+    }
+
+    if (!pid) {
+      res.status(502).json({ error: 'Guest agent did not return a PID' });
+      return;
+    }
+
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      let execStatus;
+      try {
+        const statusPayload = await requestProxmoxJson(
+          envSettings,
+          `nodes/${encodeURIComponent(node)}/qemu/${vmid}/agent/exec-status?pid=${pid}`,
+          { timeoutMs: 8000 }
+        );
+        execStatus = statusPayload?.data ?? {};
+      } catch {
+        continue;
+      }
+
+      if (execStatus.exited) {
+        const exitCode = execStatus.exitcode ?? execStatus['exit-code'] ?? -1;
+        if (exitCode === 0) {
+          res.json({ success: true, ip: targetIp });
+        } else {
+          const details = String(execStatus['err-data'] || execStatus['out-data'] || `Exit code: ${exitCode}`).trim();
+          res.status(422).json({ error: 'IP reset command failed', details });
+        }
+        return;
+      }
+    }
+
+    res.status(504).json({ error: 'IP reset timed out waiting for command completion' });
+  })
+);
+
+app.post(
   '/api/lifecycle/deployments/:id/workstations/:workstationNumber/redeploy',
   wrapAsync(async (req, res) => {
     const deployment = await fetchDeploymentById(req.params.id);
