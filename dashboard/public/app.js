@@ -1083,7 +1083,7 @@ function renderDashboard() {
                 <div class="dash-classroom-lab">
                   <div class="dash-row-info">
                     <p class="dash-row-name">${escapeHtml(d.blueprint.name)}</p>
-                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''} · ${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</p>
                   </div>
                   <span class="dash-badge ${badgeClass}">${badgeText}</span>
                 </div>`;
