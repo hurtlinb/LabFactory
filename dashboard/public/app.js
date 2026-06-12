@@ -594,6 +594,19 @@ function renderClassrooms() {
           </div>
           <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
           <p class="muted">Assigned subnets: ${classroom.subnetOctets.join(', ')}</p>
+          ${(() => {
+            const activeLabs = state.deployments.filter(
+              d => d.classroom?.id === classroom.id && DEPLOY_ACTIVE_STATUSES.includes(d.status)
+            );
+            if (!activeLabs.length) return '';
+            const pills = activeLabs.map(d =>
+              `<span class="mini-pill" title="${escapeHtmlAttr(d.blueprint?.name || '')} — Lab #${escapeHtmlAttr(String(d.deploymentNumber ?? ''))}">` +
+              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ` +
+              renderTeacherBadge(d.teacher || { email: d.teacherEmail }) +
+              `</span>`
+            ).join('');
+            return `<div class="template-meta">${pills}</div>`;
+          })()}
         </article>
       `
     )
@@ -1490,6 +1503,56 @@ async function promptDomainMember(vmId) {
   });
 }
 
+const DEPLOY_CONFLICT_PHRASE = 'je confirme';
+const DEPLOY_ACTIVE_STATUSES = ['deploying', 'customizing', 'deployed', 'running', 'mixed', 'stopped'];
+
+function promptDeploymentConflict(existingDeployment) {
+  const dialog = document.getElementById('deploymentConflictDialog');
+  const form = document.getElementById('deploymentConflictForm');
+  const messageEl = document.getElementById('deploymentConflictMessage');
+  const input = document.getElementById('deploymentConflictConfirmInput');
+  const cancelBtn = document.getElementById('deploymentConflictCancelButton');
+  if (!dialog || !form || !messageEl || !input || !cancelBtn) return Promise.resolve(false);
+
+  const teacher = existingDeployment.teacher || { email: existingDeployment.teacherEmail };
+  const ownerName = escapeHtml(teacher.displayName || teacher.email || 'Propriétaire inconnu');
+  const blueprintName = escapeHtml(existingDeployment.blueprint?.name || '');
+  const labNum = escapeHtml(String(existingDeployment.deploymentNumber ?? '?'));
+  const status = escapeHtml(existingDeployment.status || '');
+
+  messageEl.innerHTML =
+    `Le lab <strong>#${labNum} « ${blueprintName} »</strong> appartenant à <strong>${ownerName}</strong>` +
+    ` (statut : ${status}) est déjà actif dans cette classroom.` +
+    ` Déployer un second lab risque de provoquer des <strong>conflits d'adresses IP</strong>.`;
+
+  input.value = '';
+  input.setCustomValidity('');
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      if (input.value.trim().toLowerCase() !== DEPLOY_CONFLICT_PHRASE) {
+        input.setCustomValidity(`Saisissez exactement « ${DEPLOY_CONFLICT_PHRASE} »`);
+        input.reportValidity();
+        return;
+      }
+      input.setCustomValidity('');
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit);
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+    window.setTimeout(() => input.focus(), 0);
+  });
+}
+
 async function loadTimezoneOptions() {
   try {
     const payload = await fetchJson('/api/timezones');
@@ -1864,6 +1927,7 @@ async function refreshLifecycleLabs() {
     };
   });
   renderLifecycleLabs();
+  renderClassrooms();
   renderDashboard();
 }
 
@@ -2382,6 +2446,14 @@ deploymentForm?.addEventListener('submit', async event => {
     blueprintId: String(form.get('blueprintId') || ''),
     classroomId: String(form.get('classroomId') || '')
   };
+
+  const conflicting = state.deployments.find(
+    d => d.classroom?.id === payload.classroomId && DEPLOY_ACTIVE_STATUSES.includes(d.status)
+  );
+  if (conflicting) {
+    const confirmed = await promptDeploymentConflict(conflicting);
+    if (!confirmed) return;
+  }
 
   try {
     await fetchJson('/api/lifecycle/deployments', {

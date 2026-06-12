@@ -727,6 +727,27 @@
     </form>
   </dialog>
 
+  <!-- ── Deployment conflict dialog ──────────────────────── -->
+  <dialog id="deploymentConflictDialog" class="modal-dialog">
+    <form id="deploymentConflictForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">⚠ Avertissement</p>
+          <h3>Classroom déjà occupée</h3>
+        </div>
+      </div>
+      <p id="deploymentConflictMessage" class="modal-help"></p>
+      <label class="field">
+        <span>Tapez <strong>je confirme</strong> pour continuer</span>
+        <input id="deploymentConflictConfirmInput" type="text" autocomplete="off" placeholder="je confirme">
+      </label>
+      <div class="inline-actions">
+        <button id="deploymentConflictCancelButton" class="btn btn-ghost" type="button">Annuler</button>
+        <button class="btn btn-danger" type="submit">Déployer quand même</button>
+      </div>
+    </form>
+  </dialog>
+
   <script type="module" src="/app.js"></script>
 </body>
 </html>
