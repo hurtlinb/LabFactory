@@ -960,10 +960,23 @@ function renderLifecycleLabs() {
   lifecycleList.querySelectorAll('.lifecycle-action').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const action = button.dataset.action;
+      if (action === 'deploy' || action === 'start') {
+        const thisDeployment = state.deployments.find(d => d.id === button.dataset.deploymentId);
+        const conflicting = state.deployments.find(
+          d => d.id !== button.dataset.deploymentId &&
+               d.classroom?.id === thisDeployment?.classroom?.id &&
+               DEPLOY_ACTIVE_STATUSES.includes(d.status)
+        );
+        if (conflicting) {
+          const confirmed = await promptDeploymentConflict(conflicting);
+          if (!confirmed) return;
+        }
+      }
       button.disabled = true;
       try {
         const result = await fetchJson(
-          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${button.dataset.action}`,
+          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${action}`,
           { method: 'POST' }
         );
         await refreshLifecycleLabs();
@@ -2446,14 +2459,6 @@ deploymentForm?.addEventListener('submit', async event => {
     blueprintId: String(form.get('blueprintId') || ''),
     classroomId: String(form.get('classroomId') || '')
   };
-
-  const conflicting = state.deployments.find(
-    d => d.classroom?.id === payload.classroomId && DEPLOY_ACTIVE_STATUSES.includes(d.status)
-  );
-  if (conflicting) {
-    const confirmed = await promptDeploymentConflict(conflicting);
-    if (!confirmed) return;
-  }
 
   try {
     await fetchJson('/api/lifecycle/deployments', {
