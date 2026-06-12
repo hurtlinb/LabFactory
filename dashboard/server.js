@@ -2213,13 +2213,13 @@ app.post(
         `Remove-NetIPAddress -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue`,
         `Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue`,
         `New-NetIPAddress -InterfaceIndex $idx -IPAddress '${targetIp}' -PrefixLength ${maskBits} -DefaultGateway '${gateway}'`,
-        `Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses ('${gateway}')`,
+        `Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses ('195.186.4.162', '195.186.4.163')`,
       ].join('; ');
       command = ['powershell.exe', '-NonInteractive', '-Command', psScript];
     } else {
       const bashScript =
         `IFACE=$(ip -o link show | awk '$2~/^e/{gsub(":","", $2); print $2; exit}')` +
-        ` && printf 'network:\\n  version: 2\\n  ethernets:\\n    %s:\\n      dhcp4: no\\n      addresses: [${targetIp}/${maskBits}]\\n      routes:\\n        - to: default\\n          via: ${gateway}\\n      nameservers:\\n        addresses: [${gateway}]\\n' "$IFACE"` +
+        ` && printf 'network:\\n  version: 2\\n  ethernets:\\n    %s:\\n      dhcp4: no\\n      addresses: [${targetIp}/${maskBits}]\\n      routes:\\n        - to: default\\n          via: ${gateway}\\n      nameservers:\\n        addresses: [195.186.4.162, 195.186.4.163]\\n' "$IFACE"` +
         ` > /etc/netplan/99-labfactory-reset.yaml` +
         ` && chmod 600 /etc/netplan/99-labfactory-reset.yaml` +
         ` && netplan apply`;
