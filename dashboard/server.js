@@ -2220,9 +2220,12 @@ app.post(
     } else {
       const bashScript =
         `IFACE=$(ip -o link show | awk '$2~/^e/{gsub(":","", $2); print $2; exit}')` +
+        ` && NETPLAN_FILE=$(grep -rl "$IFACE" /etc/netplan/ 2>/dev/null | grep '\\.yaml$' | head -1)` +
+        ` && [ -z "$NETPLAN_FILE" ] && NETPLAN_FILE=$(ls /etc/netplan/*.yaml 2>/dev/null | head -1)` +
+        ` && [ -z "$NETPLAN_FILE" ] && NETPLAN_FILE=/etc/netplan/50-cloud-init.yaml` +
         ` && printf 'network:\\n  version: 2\\n  ethernets:\\n    %s:\\n      dhcp4: no\\n      addresses: [${targetIp}/${maskBits}]\\n      routes:\\n        - to: default\\n          via: ${gateway}\\n      nameservers:\\n        addresses: [195.186.4.162, 195.186.4.163]\\n' "$IFACE"` +
-        ` > /etc/netplan/99-labfactory-reset.yaml` +
-        ` && chmod 600 /etc/netplan/99-labfactory-reset.yaml` +
+        ` > "$NETPLAN_FILE"` +
+        ` && chmod 600 "$NETPLAN_FILE"` +
         ` && netplan apply`;
       command = ['/bin/bash', '-c', bashScript];
     }
