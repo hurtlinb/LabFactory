@@ -1126,12 +1126,12 @@ function getDeploymentWorkstationNumber(vm) {
   return match?.[1] ?? 'n/a';
 }
 
-function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
+function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false) {
   return vms
     .map(
       vm => {
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
-        const resetButton = canResetIp && hasStaticIp
+        const resetIpButton = canResetIp && hasStaticIp
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
               <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                 <circle cx="78" cy="70" r="34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
@@ -1142,6 +1142,19 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
                 <circle cx="112" cy="108" r="22" fill="#3b82f6"/>
                 <path d="M112 96 A12 12 0 1 1 101 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                 <polygon points="97,119 97,108 106,114" fill="#fff"/>
+              </svg>
+            </button>`
+          : '';
+        const resetPasswordButton = canResetPassword
+          ? `<button class="icon-btn reset-password-button" type="button" title="Reset Password" aria-label="Reset Password" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
+              <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <rect x="54" y="67" width="52" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M64 67 L64 53 Q80 38 96 53 L96 67" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <circle cx="80" cy="85" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
+                <rect x="77" y="88" width="6" height="9" rx="2" fill="currentColor"/>
+                <circle cx="114" cy="108" r="22" fill="#3b82f6"/>
+                <path d="M114 96 A12 12 0 1 1 103 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <polygon points="99,119 99,108 108,114" fill="#fff"/>
               </svg>
             </button>`
           : '';
@@ -1158,7 +1171,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
           <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
-          <td>${resetButton}</td>
+          <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}</td>
         </tr>
       `;
       }
@@ -1210,6 +1223,28 @@ async function resetVmIp(deploymentId, vmid, button) {
   }
 }
 
+async function resetVmPassword(deploymentId, vmid, button) {
+  if (!confirm(`Reset admin password for VMID ${vmid}?\n\nThis will re-apply the blueprint password via the Proxmox guest agent.`)) return;
+  button.disabled = true;
+  try {
+    await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms/${vmid}/reset-password`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, `Password reset for VMID ${vmid}`, 'success', 6000);
+    }
+  } catch (error) {
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, error.message, 'danger', 8000);
+    }
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+    }
+  }
+}
+
 function renderDeploymentVmDetails(payload) {
   if (!deploymentVmDetailsList) return;
   const deployment = payload?.deployment ?? {};
@@ -1231,6 +1266,7 @@ function renderDeploymentVmDetails(payload) {
   const activeWorkstationNumbers = new Set(Array.isArray(deployment.activeWorkstationNumbers) ? deployment.activeWorkstationNumbers : []);
   const canRedeployWorkstations = Boolean(deployment.canRedeployWorkstations) && !isDeploymentBusy(deployment.status);
   const canResetIp = deployment.status === 'running';
+  const canResetPassword = deployment.status === 'running';
 
   deploymentVmDetailsList.innerHTML = `
     <div class="workstation-detail-list">
@@ -1239,9 +1275,28 @@ function renderDeploymentVmDetails(payload) {
           const workstationVms = workstationGroups.get(workstationNumber) ?? [];
           const isActiveWorkstation = activeWorkstationNumbers.has(workstationNumber);
           const actionMarkup = canRedeployWorkstations
-            ? `<button class="btn btn-secondary workstation-redeploy-button" type="button" data-deployment-id="${escapeHtmlAttr(deployment.id || '')}" data-workstation-number="${escapeHtmlAttr(workstationNumber)}">Redeploy VMs</button>`
+            ? `<button class="icon-btn workstation-redeploy-button" type="button" title="Redeploy VMs" aria-label="Redeploy VMs" data-deployment-id="${escapeHtmlAttr(deployment.id || '')}" data-workstation-number="${escapeHtmlAttr(workstationNumber)}">
+                <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                  <rect x="33" y="22" width="94" height="96" rx="6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <rect x="41" y="32" width="78" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="52" cy="40" r="3" fill="currentColor" opacity="0.7"/>
+                  <line x1="62" y1="37" x2="112" y2="37" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
+                  <line x1="62" y1="43" x2="100" y2="43" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
+                  <rect x="41" y="54" width="78" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="52" cy="62" r="3" fill="currentColor" opacity="0.7"/>
+                  <line x1="62" y1="59" x2="112" y2="59" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
+                  <line x1="62" y1="65" x2="100" y2="65" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
+                  <rect x="41" y="76" width="78" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                  <circle cx="52" cy="84" r="3" fill="currentColor" opacity="0.7"/>
+                  <line x1="62" y1="81" x2="112" y2="81" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
+                  <line x1="62" y1="87" x2="100" y2="87" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
+                  <circle cx="97" cy="118" r="22" fill="#3b82f6"/>
+                  <path d="M97 106 A12 12 0 1 1 86 122" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                  <polygon points="82,129 82,118 91,124" fill="#fff"/>
+                </svg>
+              </button>`
             : isActiveWorkstation
-              ? '<button class="btn btn-secondary" type="button" disabled>Redeploying...</button>'
+              ? '<button class="icon-btn" type="button" disabled aria-label="Redeploying" title="Redeploying...">…</button>'
               : '';
 
           return `
@@ -1268,7 +1323,7 @@ function renderDeploymentVmDetails(payload) {
                       <th></th>
                     </tr>
                   </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp)}</tbody>
+                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword)}</tbody>
                 </table>
               </div>
             </section>
@@ -1293,6 +1348,13 @@ function renderDeploymentVmDetails(payload) {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       await resetVmIp(button.dataset.deploymentId, button.dataset.vmid, button);
+    });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.reset-password-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      await resetVmPassword(button.dataset.deploymentId, button.dataset.vmid, button);
     });
   });
 }
