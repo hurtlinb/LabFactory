@@ -1133,9 +1133,15 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
         const resetButton = canResetIp && hasStaticIp
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
-              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <polyline points="1 4 1 10 7 10"></polyline>
-                <path d="M3.51 15a9 9 0 1 0 .49-3.51"></path>
+              <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                <circle cx="78" cy="70" r="34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
+                <path d="M44 70 Q61 60 78 70 Q95 80 112 70" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
+                <path d="M47 53 Q62 46 78 50 Q94 46 109 53" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.28"/>
+                <path d="M47 87 Q62 94 78 90 Q94 94 109 87" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.28"/>
+                <path d="M78 36 Q68 53 68 70 Q68 87 78 104" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
+                <circle cx="112" cy="108" r="22" fill="#3b82f6"/>
+                <path d="M112 96 A12 12 0 1 1 101 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                <polygon points="97,119 97,108 106,114" fill="#fff"/>
               </svg>
             </button>`
           : '';
