@@ -4,55 +4,58 @@ All notable changes to LabFactory are documented here.
 
 ## [Unreleased]
 
-### Added
-- Reset Password button per VM via Proxmox guest agent (Linux: `chpasswd`, Windows: `Set-LocalUser`)
-- CHANGELOG visible from the dashboard (icon next to version number)
-- Build tag displayed in UI footer: SHA for dev, version number for prod
+---
 
-### Changed
-- Reset IP, Reset Password and Redeploy VMs actions now use SVG icon buttons instead of text buttons
-- Reset IP script overwrites the existing netplan file instead of creating a new `99-labfactory-reset.yaml`
-- `terraform-settings.json` mounted via Kubernetes ConfigMap in terraform worker pod
+## [1.5.0] — 2026-06-16
 
-### Fixed
-- Reset IP bash script rewritten with `set -e` and semicolons to avoid broken `&&` chain when `grep` returns no matches
+### Ajouts
+- Réinitialisation du mot de passe administrateur par VM via le guest agent Proxmox (Linux : `chpasswd`, Windows : `Set-LocalUser`)
+- Réinitialisation de l'IP par VM via le guest agent Proxmox — modifie le fichier netplan existant (Linux) ou reconfigure l'interface réseau (Windows)
+- Changelog accessible depuis le dashboard (icône à côté du numéro de version)
+- Numéro de version affiché dans le pied de page : SHA du build en dev, numéro de release en prod
+
+### Améliorations
+- Les boutons Reset IP, Reset Password et Redeploy VMs remplacés par des icônes SVG
+- Le fichier `terraform-settings.json` est monté via un ConfigMap Kubernetes dans le pod worker Terraform
+
+### Corrections
+- Script bash de reset IP réécrit avec `set -e` pour éviter une chaîne `&&` cassée si `grep` ne trouve aucun fichier netplan
 
 ---
 
 ## [1.4.0] — 2026-06-12
 
-### Added
-- GitHub Actions CI/CD: push to `main` builds and deploys to dev (SHA tag); GitHub Release deploys to prod (semver tag)
-- GitOps repository (`labfactory-gitops`) with Kustomize base + overlays for dev and prod
-- ArgoCD Applications for dev (auto self-heal) and prod (manual sync)
-- Image tags: `dashboard-<sha7>` / `worker-<sha7>` for dev, `dashboard-<version>` / `worker-<version>` for prod
+### Ajouts
+- Pipeline CI/CD via GitHub Actions : chaque commit sur `main` déploie en dev (tag SHA) ; une GitHub Release déploie en prod (tag semver)
+- Dépôt GitOps (`labfactory-gitops`) avec Kustomize base + overlays dev et prod
+- Applications ArgoCD pour dev (auto-sync) et prod (sync manuel)
 
-### Changed
-- Single `main` branch workflow — dev branch removed
-- Kubernetes manifests moved out of the app repo into `labfactory-gitops`
+### Améliorations
+- Workflow sur branche unique `main` — branche dev supprimée
+- Manifests Kubernetes déplacés dans `labfactory-gitops`
 
 ---
 
 ## [1.3.2] — 2026-06-12
 
-### Added
-- Reset IP button per VM (only visible when deployment is running)
-- IP reset via Proxmox guest agent: Linux (netplan) and Windows (PowerShell `NetIPAddress` cmdlets)
-- DNS reset to Swisscom servers (`195.186.4.162`, `195.186.4.163`) on IP reset
+### Ajouts
+- Bouton Reset IP par VM (visible uniquement quand le déploiement est en cours)
+- Reset via guest agent Proxmox : Linux (netplan) et Windows (cmdlets `NetIPAddress`)
+- DNS Swisscom (`195.186.4.162`, `195.186.4.163`) appliqués lors du reset IP
 
 ---
 
 ## [1.3.1] — 2026-06-12
 
-### Changed
-- Conflict warning moved from prepare to deploy/start actions
-- Conflict warning restricted to active labs only
+### Améliorations
+- Avertissement de conflit de classroom déplacé sur les actions déployer/démarrer
+- Avertissement de conflit limité aux labs actifs
 
 ---
 
 ## [1.3.0] — 2026-06-12
 
-### Added
-- Classroom conflict warning when starting a lab on an already-occupied classroom
-- Owner initials pill on each lab card
-- Active lab owner displayed in classroom card
+### Ajouts
+- Avertissement de conflit de classroom lors du démarrage d'un lab sur une salle déjà occupée
+- Badge initiales du propriétaire sur chaque carte de lab
+- Propriétaire du lab actif affiché dans la carte classroom
