@@ -1702,6 +1702,16 @@ app.get('/api/app-info', (req, res) => {
   });
 });
 
+const changelogPath = path.resolve(__dirname, '../CHANGELOG.md');
+app.get('/api/changelog', async (_req, res) => {
+  try {
+    const content = await fs.readFile(changelogPath, 'utf8');
+    res.json({ content });
+  } catch {
+    res.status(404).json({ error: 'Changelog not found' });
+  }
+});
+
 app.get(
   '/api/health',
   wrapAsync(async (_req, res) => {

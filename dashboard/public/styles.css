@@ -243,10 +243,65 @@ button, input, textarea, select { font: inherit; }
 
 .user-session-link:hover { color: var(--brand); }
 
+.app-version-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .app-version {
   font-size: 10px;
   color: var(--muted);
   letter-spacing: 0.03em;
+}
+
+.changelog-btn {
+  display: inline-grid;
+  place-items: center;
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--muted);
+  opacity: 0.7;
+  transition: opacity 120ms;
+}
+.changelog-btn:hover { opacity: 1; }
+
+.changelog-dialog { max-width: 560px; width: 100%; }
+
+.changelog-content {
+  padding: 0 4px 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.changelog-content h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 16px 0 6px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--line);
+}
+.changelog-content h2:first-child { margin-top: 0; }
+.changelog-content h3 {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin: 10px 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.changelog-content ul {
+  margin: 0 0 6px;
+  padding-left: 18px;
+}
+.changelog-content li { margin-bottom: 3px; }
+.changelog-content hr {
+  border: none;
+  border-top: 1px solid var(--line);
+  margin: 12px 0;
 }
 
 /* ── Main ─────────────────────────────────────────────────────── */

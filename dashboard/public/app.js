@@ -103,6 +103,10 @@ const terraformWorkerStatusLabel = document.getElementById('terraformWorkerStatu
 const ansibleWorkerStatusIndicator = document.getElementById('ansibleWorkerStatusIndicator');
 const ansibleWorkerStatusLabel = document.getElementById('ansibleWorkerStatusLabel');
 const appVersion = document.getElementById('appVersion');
+const changelogBtn = document.getElementById('changelogBtn');
+const changelogDialog = document.getElementById('changelogDialog');
+const changelogClose = document.getElementById('changelogClose');
+const changelogContent = document.getElementById('changelogContent');
 const teacherList = document.getElementById('teacherList');
 const userSession = document.getElementById('userSession');
 const userSessionName = document.getElementById('userSessionName');
@@ -1924,6 +1928,48 @@ function resetClassroomForm({ keepVisible = false } = {}) {
   }
   renderClassroomEditor();
   renderClassrooms();
+}
+
+function renderChangelog(markdown) {
+  const lines = markdown.split('\n');
+  let html = '';
+  let inList = false;
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    if (line.startsWith('## ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h2>${escapeHtml(line.slice(3))}</h2>`;
+    } else if (line.startsWith('### ')) {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += `<h3>${escapeHtml(line.slice(4))}</h3>`;
+    } else if (line.startsWith('- ')) {
+      if (!inList) { html += '<ul>'; inList = true; }
+      html += `<li>${escapeHtml(line.slice(2)).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`(.+?)`/g, '<code>$1</code>')}</li>`;
+    } else if (line === '---') {
+      if (inList) { html += '</ul>'; inList = false; }
+      html += '<hr>';
+    } else if (line.startsWith('# ') || line === '') {
+      if (inList) { html += '</ul>'; inList = false; }
+    }
+  }
+  if (inList) html += '</ul>';
+  return html;
+}
+
+if (changelogBtn && changelogDialog) {
+  changelogBtn.addEventListener('click', async () => {
+    if (!changelogContent.innerHTML) {
+      try {
+        const data = await fetchJson('/api/changelog');
+        changelogContent.innerHTML = renderChangelog(data.content ?? '');
+      } catch {
+        changelogContent.textContent = 'Unable to load changelog.';
+      }
+    }
+    changelogDialog.showModal();
+  });
+  changelogClose?.addEventListener('click', () => changelogDialog.close());
+  changelogDialog.addEventListener('click', e => { if (e.target === changelogDialog) changelogDialog.close(); });
 }
 
 async function loadAppInfo() {

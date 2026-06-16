@@ -131,9 +131,31 @@
           <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
         </div>
 
-        <span id="appVersion" class="app-version">Version --</span>
+        <div class="app-version-row">
+          <span id="appVersion" class="app-version">Version --</span>
+          <button id="changelogBtn" class="changelog-btn" type="button" title="Changelog" aria-label="View changelog">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
+        </div>
       </div>
     </aside>
+
+    <!-- ── Changelog dialog ──────────────────────────────────── -->
+    <dialog id="changelogDialog" class="modal-dialog changelog-dialog">
+      <div class="modal-card">
+        <div class="panel-head">
+          <h2 class="panel-title">Changelog</h2>
+          <button class="icon-btn" type="button" id="changelogClose" aria-label="Close">×</button>
+        </div>
+        <div id="changelogContent" class="changelog-content"></div>
+      </div>
+    </dialog>
 
     <!-- ── Main content ───────────────────────────────────────── -->
     <main class="main">
