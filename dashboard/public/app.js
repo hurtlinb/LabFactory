@@ -1132,7 +1132,12 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false) {
       vm => {
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
         const resetButton = canResetIp && hasStaticIp
-          ? `<button class="btn btn-secondary btn-sm reset-ip-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">Reset IP</button>`
+          ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
+              <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="1 4 1 10 7 10"></polyline>
+                <path d="M3.51 15a9 9 0 1 0 .49-3.51"></path>
+              </svg>
+            </button>`
           : '';
         return `
         <tr>
