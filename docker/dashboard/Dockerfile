@@ -12,6 +12,7 @@ COPY dashboard ./dashboard
 COPY config ./config
 COPY lib ./lib
 COPY db ./db
+COPY CHANGELOG.md ./
 ARG BUILD_TAG
 ENV NODE_ENV=production
 ENV BUILD_TAG=${BUILD_TAG}
