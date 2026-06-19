@@ -50,7 +50,10 @@ const buildExternalBaseUrl = req => {
 
 const asBoolean = value => ['1', 'true', 'yes', 'on'].includes(String(value ?? '').trim().toLowerCase());
 
-const resolveUser = claims => {
+const ROLES = { ADMIN: 'admin', TEACHER: 'teacher' };
+const ROLE_GROUPS = { ADMIN_ONLY: [ROLES.ADMIN], LABS: [ROLES.TEACHER, ROLES.ADMIN] };
+
+const resolveUser = (claims, clientId) => {
   if (!claims || typeof claims !== 'object') {
     return null;
   }
@@ -63,6 +66,9 @@ const resolveUser = claims => {
   const familyName = String(claims.family_name ?? '').trim();
   const displayName = name || [givenName, familyName].filter(Boolean).join(' ').trim();
 
+  const clientRoles = Array.isArray(claims.resource_access?.[clientId]?.roles) ? claims.resource_access[clientId].roles : [];
+  const realmRoles = Array.isArray(claims.realm_access?.roles) ? claims.realm_access.roles : [];
+
   return {
     subject: String(claims.sub ?? '').trim(),
     username: preferredUsername || null,
@@ -71,7 +77,7 @@ const resolveUser = claims => {
     initials: initials || null,
     firstName: givenName || null,
     lastName: familyName || null,
-    roles: Array.isArray(claims.realm_access?.roles) ? claims.realm_access.roles : []
+    roles: [...new Set([...clientRoles, ...realmRoles])]
   };
 };
 
@@ -99,6 +105,9 @@ export const initializeOidcAuth = async app => {
       enabled: false,
       attachUser: (_req, _res, next) => next(),
       requireAuth: (_req, _res, next) => next(),
+      requireRole: () => (_req, _res, next) => next(),
+      ROLES,
+      ROLE_GROUPS,
       describeSession: () => ({
         enabled: false,
         user: null,
@@ -212,7 +221,19 @@ export const initializeOidcAuth = async app => {
             })
           : idTokenClaims;
 
-      req.session.user = resolveUser(userInfo);
+      // Keycloak client roles (resource_access) are reliably present on the access token;
+      // the userinfo response and ID token may omit them depending on protocol-mapper config.
+      const accessTokenClaims = tokenResponse.access_token ? decodeJwtPayload(tokenResponse.access_token) : {};
+      const roleSource = accessTokenClaims.resource_access
+        ? accessTokenClaims
+        : idTokenClaims.resource_access
+          ? idTokenClaims
+          : userInfo;
+
+      req.session.user = resolveUser(
+        { ...userInfo, resource_access: roleSource.resource_access, realm_access: roleSource.realm_access },
+        clientId
+      );
       req.session.oidcTokens = {
         idToken: tokenResponse.id_token ?? null
       };
@@ -280,6 +301,15 @@ export const initializeOidcAuth = async app => {
     startLogin(req, res);
   };
 
+  const requireRole = allowedRoles => (req, res, next) => {
+    const roles = req.session?.user?.roles ?? [];
+    if (allowedRoles.some(role => roles.includes(role))) {
+      next();
+      return;
+    }
+    res.status(403).json({ error: 'forbidden' });
+  };
+
   const describeSession = req => ({
     enabled: true,
     user: req.session?.user ?? null,
@@ -291,6 +321,9 @@ export const initializeOidcAuth = async app => {
     enabled: true,
     attachUser,
     requireAuth,
+    requireRole,
+    ROLES,
+    ROLE_GROUPS,
     describeSession
   };
 };

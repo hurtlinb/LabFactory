@@ -79,6 +79,21 @@ button, input, textarea, select { font: inherit; }
   min-height: 100vh;
 }
 
+.access-denied-screen {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  background: var(--bg);
+}
+
+.access-denied-card {
+  max-width: 380px;
+  display: grid;
+  gap: 10px;
+  text-align: center;
+  justify-items: center;
+}
+
 /* ── Sidebar ──────────────────────────────────────────────────── */
 .sidebar {
   background: var(--surface);
@@ -696,6 +711,10 @@ input:focus, textarea:focus, select:focus {
 
 .warning-pill { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
 .teacher-pill { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.role-badge-admin    { border-color: rgba(83, 74, 183, 0.3); background: var(--brand-soft);  color: var(--brand); }
+.role-badge-teacher  { border-color: var(--accent-line);     background: var(--accent-soft); color: var(--accent); }
+.role-badge-none     { border-color: var(--line-strong);     background: var(--surface-soft); color: var(--muted); }
 
 .teacher-chip { display: inline-flex; align-items: center; gap: 6px; vertical-align: middle; }
 

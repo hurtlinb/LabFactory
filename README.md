@@ -30,6 +30,16 @@ Optional environment variables:
 - `SESSION_COOKIE_SECURE`
 - `TRUST_PROXY`
 
+### Authorization
+Page and API access is controlled by two Keycloak **client roles** (not realm roles), created on the client identified by `OIDC_CLIENT_ID` and assigned per-user:
+- `teacher` — access to the Labs pages (Dashboard, Blueprints, Labs, Courses)
+- `admin` — access to everything, including Administration (Users, VM Models, Classrooms, Maintenance, Jobs)
+
+Notes:
+- Client roles are read from the access token's `resource_access.<clientId>.roles` claim. In Keycloak, the `roles` client scope must remain a **Default** (not Optional) scope on the client so this claim is included.
+- A user authenticated via Keycloak but with neither role is shown a blocked "Access denied" screen, and all role-gated `/api/*` routes return `403`.
+- The "Users" page shows each synchronized teacher's role as of their last blueprint/deployment activity — it does not live-sync with Keycloak, so a role change there only reflects after that user's next action.
+
 ## Stack
 - `dashboard`: Express server + static UI
 - `postgres`: persistent storage for models, blueprints, classrooms, and deployments

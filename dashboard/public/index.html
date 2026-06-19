@@ -56,9 +56,9 @@
             Courses
           </button>
         </div>
-        <div class="nav-group">
+        <div class="nav-group" data-role-group="admin">
           <p class="nav-group-title">Administration</p>
-          <button data-view="admin-users">
+          <button data-view="admin-users" data-role-group="admin">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
               <circle cx="9" cy="7" r="4"/>
@@ -67,7 +67,7 @@
             </svg>
             Users
           </button>
-          <button data-view="models">
+          <button data-view="models" data-role-group="admin">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect width="20" height="8" x="2" y="2" rx="2" ry="2"/>
               <rect width="20" height="8" x="2" y="14" rx="2" ry="2"/>
@@ -76,7 +76,7 @@
             </svg>
             VM Models
           </button>
-          <button data-view="classrooms">
+          <button data-view="classrooms" data-role-group="admin">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/>
               <path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/>
@@ -86,14 +86,14 @@
             </svg>
             Classrooms
           </button>
-          <button data-view="admin-settings">
+          <button data-view="admin-settings" data-role-group="admin">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
               <circle cx="12" cy="12" r="3"/>
             </svg>
             Maintenance
           </button>
-          <button data-view="admin-queues">
+          <button data-view="admin-queues" data-role-group="admin">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
               <rect width="8" height="4" x="8" y="2" rx="1" ry="1"/>
               <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
@@ -225,7 +225,7 @@
         </section>
 
         <!-- ── VM Models ──────────────────────────────────────── -->
-        <section class="page" data-view="models" hidden>
+        <section class="page" data-view="models" data-role-group="admin" hidden>
           <div class="builder-grid">
             <article class="panel">
               <div class="panel-head">
@@ -382,7 +382,7 @@
         </section>
 
         <!-- ── Classrooms ─────────────────────────────────────── -->
-        <section class="page" data-view="classrooms" hidden>
+        <section class="page" data-view="classrooms" data-role-group="admin" hidden>
           <div class="builder-grid">
             <article class="panel">
               <div class="panel-head">
@@ -508,7 +508,7 @@
         </dialog>
 
         <!-- ── Maintenance ─────────────────────────────────────── -->
-        <section class="page" data-view="admin-settings" hidden>
+        <section class="page" data-view="admin-settings" data-role-group="admin" hidden>
           <article class="panel">
             <p class="eyebrow">Maintenance</p>
             <div class="inline-actions section-actions">
@@ -528,7 +528,7 @@
         </section>
 
         <!-- ── Users ──────────────────────────────────────────── -->
-        <section class="page" data-view="admin-users" hidden>
+        <section class="page" data-view="admin-users" data-role-group="admin" hidden>
           <article class="panel">
             <div class="panel-head">
               <div>
@@ -579,7 +579,7 @@
         </section>
 
         <!-- ── Jobs / Queues ──────────────────────────────────── -->
-        <section class="page" data-view="admin-queues" hidden>
+        <section class="page" data-view="admin-queues" data-role-group="admin" hidden>
           <div class="hero-grid">
             <article class="panel">
               <div class="panel-head">
@@ -645,6 +645,16 @@
       </div><!-- /.main-content -->
     </main>
   </div><!-- /.shell -->
+
+  <!-- ── Access denied (no recognized Keycloak role) ──────────── -->
+  <div id="accessDeniedScreen" class="access-denied-screen" hidden>
+    <div class="panel access-denied-card">
+      <p class="eyebrow">Access denied</p>
+      <h3>No role assigned</h3>
+      <p class="muted">Your account is authenticated but has no <strong>teacher</strong> or <strong>admin</strong> role assigned in Keycloak. Contact an administrator to request access.</p>
+      <a class="btn btn-secondary" href="/auth/logout">Sign out</a>
+    </div>
+  </div>
 
   <!-- ── VM customization dialog ───────────────────────────── -->
   <dialog id="vmCustomizationDialog" class="modal-dialog">

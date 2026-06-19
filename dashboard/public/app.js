@@ -19,6 +19,8 @@
     enabled: false
   },
   currentUser: null,
+  isAdmin: false,
+  isLabsUser: false,
   activeDeploymentDetailsId: null,
   currentBlueprint: createEmptyBlueprint()
 };
@@ -112,6 +114,8 @@ const userSession = document.getElementById('userSession');
 const userSessionName = document.getElementById('userSessionName');
 const userSessionMeta = document.getElementById('userSessionMeta');
 const logoutLink = document.getElementById('logoutLink');
+const shellEl = document.querySelector('.shell');
+const accessDeniedScreen = document.getElementById('accessDeniedScreen');
 
 const statusTimers = new WeakMap();
 let pendingVmCustomization = null;
@@ -196,6 +200,10 @@ function showMessage(target, message, status = 'success', timeout = 3200) {
 }
 
 function setActiveView(view) {
+  const targetPage = pages.find(page => page.dataset.view === view);
+  if (targetPage?.dataset.roleGroup === 'admin' && !state.isAdmin) {
+    return;
+  }
   navButtons.forEach(button => {
     button.classList.toggle('active', button.dataset.view === view);
   });
@@ -343,6 +351,17 @@ function renderBlueprintCourseOptions() {
   blueprintCourseIdInput.value = selected;
 }
 
+function renderRoleBadge(teacher) {
+  const roles = Array.isArray(teacher?.roles) ? teacher.roles : [];
+  if (roles.includes('admin')) {
+    return '<span class="mini-pill role-badge-admin">Admin</span>';
+  }
+  if (roles.includes('teacher')) {
+    return '<span class="mini-pill role-badge-teacher">Teacher</span>';
+  }
+  return '<span class="mini-pill role-badge-none" title="No recognized Keycloak role as of their last activity">No role</span>';
+}
+
 function renderTeachers() {
   if (!teacherList) return;
   if (!state.teachers.length) {
@@ -361,6 +380,7 @@ function renderTeachers() {
               <p class="muted">${secondaryLabel ? escapeHtml(secondaryLabel) : ''}</p>
             </div>
             <div class="inline-actions">
+              ${renderRoleBadge(teacher)}
               ${renderTeacherBadge(teacher)}
               <span class="mini-pill">${new Date(teacher.updatedAt).toLocaleString()}</span>
             </div>
@@ -1972,6 +1992,28 @@ if (changelogBtn && changelogDialog) {
   changelogDialog.addEventListener('click', e => { if (e.target === changelogDialog) changelogDialog.close(); });
 }
 
+function hasRole(role) {
+  return Array.isArray(state.currentUser?.roles) && state.currentUser.roles.includes(role);
+}
+
+function applyRoleVisibility() {
+  // Auth disabled (local/dev mode): no real identity to gate on, same bypass as the backend's requireRole.
+  state.isAdmin = !state.auth.enabled || hasRole('admin');
+  state.isLabsUser = state.isAdmin || hasRole('teacher');
+
+  if (!state.isLabsUser) {
+    if (shellEl) shellEl.hidden = true;
+    if (accessDeniedScreen) accessDeniedScreen.hidden = false;
+    return false;
+  }
+
+  document.querySelectorAll('[data-role-group="admin"]').forEach(el => {
+    el.hidden = !state.isAdmin;
+  });
+
+  return true;
+}
+
 async function loadAppInfo() {
   const info = await fetchJson('/api/app-info');
   state.auth = info.auth || { enabled: false };
@@ -2875,27 +2917,33 @@ async function bootstrap() {
   renderTemplateEditor();
   renderClassroomEditor();
   renderCanvas();
-  await Promise.all([
-    loadAppInfo(),
+
+  await loadAppInfo();
+  if (!applyRoleVisibility()) {
+    return;
+  }
+
+  const loaders = [
     loadConnectionStatuses(),
-    loadTeachers(),
     loadCourses(),
-    loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),
     loadTimezoneOptions(),
-    refreshLifecycleLabs(),
-    loadTerraformSettings(),
-    refreshQueues(),
-    refreshJobs(),
-    refreshWorkers()
-  ]);
+    refreshLifecycleLabs()
+  ];
+  if (state.isAdmin) {
+    loaders.push(loadTeachers(), loadClassrooms(), loadTerraformSettings(), refreshQueues(), refreshJobs(), refreshWorkers());
+  }
+  await Promise.all(loaders);
+
   setInterval(() => {
-    refreshQueues();
-    refreshJobs();
-    refreshWorkers();
     refreshLifecycleLabs();
     refreshOpenDeploymentDetails();
+    if (state.isAdmin) {
+      refreshQueues();
+      refreshJobs();
+      refreshWorkers();
+    }
   }, 5000);
   setInterval(() => {
     loadConnectionStatuses();

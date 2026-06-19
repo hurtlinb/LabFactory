@@ -875,6 +875,7 @@ const mapTeacher = row => ({
     row.display_name ||
     [row.first_name, row.last_name].filter(Boolean).join(' ').trim() ||
     row.email,
+  roles: Array.isArray(row.roles) ? row.roles : [],
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -1535,19 +1536,21 @@ const upsertTeacher = async user => {
     String(user?.name ?? '').trim() ||
     [firstName, lastName].filter(Boolean).join(' ').trim() ||
     email;
+  const roles = Array.isArray(user?.roles) ? user.roles : [];
 
   await dbPool.query(
     `INSERT INTO teachers
-      (email, initials, first_name, last_name, display_name, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
+      (email, initials, first_name, last_name, display_name, roles, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
      ON CONFLICT (email)
      DO UPDATE SET
        initials = COALESCE(NULLIF(EXCLUDED.initials, ''), teachers.initials),
        first_name = COALESCE(NULLIF(EXCLUDED.first_name, ''), teachers.first_name),
        last_name = COALESCE(NULLIF(EXCLUDED.last_name, ''), teachers.last_name),
        display_name = COALESCE(NULLIF(EXCLUDED.display_name, ''), teachers.display_name),
+       roles = EXCLUDED.roles,
        updated_at = NOW()`,
-    [email, initials, firstName, lastName, displayName]
+    [email, initials, firstName, lastName, displayName, roles]
   );
 
   return email;
@@ -1755,6 +1758,7 @@ app.get(
 
 app.get(
   '/api/timezones',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const [windows, linux] = await Promise.all([
       loadWindowsTimezones(),
@@ -1766,6 +1770,7 @@ app.get(
 
 app.get(
   '/api/classrooms',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const result = await dbPool.query('SELECT * FROM classrooms ORDER BY name ASC');
     res.json(result.rows.map(mapClassroom));
@@ -1774,6 +1779,7 @@ app.get(
 
 app.post(
   '/api/classrooms',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const parsed = classroomSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1805,6 +1811,7 @@ app.post(
 
 app.put(
   '/api/classrooms/:id',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const parsed = classroomSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1849,6 +1856,7 @@ app.put(
 
 app.delete(
   '/api/classrooms/:id',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const result = await dbPool.query('DELETE FROM classrooms WHERE id = $1 RETURNING id', [req.params.id]);
     if (!result.rowCount) {
@@ -1861,9 +1869,10 @@ app.delete(
 
 app.get(
   '/api/teachers',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (_req, res) => {
     const result = await dbPool.query(
-      `SELECT email, initials, first_name, last_name, display_name, created_at, updated_at
+      `SELECT email, initials, first_name, last_name, display_name, roles, created_at, updated_at
          FROM teachers
         ORDER BY
           LOWER(COALESCE(display_name, CONCAT_WS(' ', first_name, last_name), email)) ASC,
@@ -1875,6 +1884,7 @@ app.get(
 
 app.get(
   '/api/courses',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (_req, res) => {
     const result = await dbPool.query(
       `SELECT id, course_number, description, created_at, updated_at
@@ -1887,6 +1897,7 @@ app.get(
 
 app.post(
   '/api/courses',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const parsed = courseSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -1915,6 +1926,7 @@ app.post(
 
 app.delete(
   '/api/courses/:id',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     try {
       const result = await dbPool.query('DELETE FROM courses WHERE id = $1 RETURNING id', [req.params.id]);
@@ -1935,6 +1947,7 @@ app.delete(
 
 app.get(
   '/api/lifecycle/deployments',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const rows = await fetchDeploymentRows();
     let resourceByVmid = null;
@@ -1986,6 +1999,7 @@ app.get(
 
 app.post(
   '/api/lifecycle/deployments/refresh-state',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const resources = await fetchClusterVmResources({ context: 'lifecycle deployments refresh-state' });
     const resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
@@ -2032,6 +2046,7 @@ app.post(
 
 app.post(
   '/api/lifecycle/deployments',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const parsed = deploymentCreateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2075,6 +2090,7 @@ app.post(
 
 app.get(
   '/api/lifecycle/deployments/:id/vms',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const deployment = await fetchDeploymentById(req.params.id);
     if (!deployment) {
@@ -2161,6 +2177,7 @@ app.get(
 
 app.post(
   '/api/lifecycle/deployments/:id/vms/:vmid/reset-ip',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const vmid = Number(req.params.vmid);
     if (!Number.isInteger(vmid) || vmid <= 0) {
@@ -2295,6 +2312,7 @@ app.post(
 
 app.post(
   '/api/lifecycle/deployments/:id/vms/:vmid/reset-password',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const vmid = Number(req.params.vmid);
     if (!Number.isInteger(vmid) || vmid <= 0) {
@@ -2416,6 +2434,7 @@ app.post(
 
 app.post(
   '/api/lifecycle/deployments/:id/workstations/:workstationNumber/redeploy',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const deployment = await fetchDeploymentById(req.params.id);
     if (!deployment) {
@@ -2510,6 +2529,7 @@ app.post(
 
 app.post(
   '/api/lifecycle/deployments/:id/:action',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const action = req.params.action;
     if (!['deploy', 'start', 'stop', 'destroy'].includes(action)) {
@@ -2586,6 +2606,7 @@ app.post(
 
 app.delete(
   '/api/lifecycle/deployments/:id',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const deployment = await fetchDeploymentById(req.params.id);
     if (!deployment) {
@@ -2605,6 +2626,7 @@ app.delete(
 
 app.get(
   '/api/templates',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const result = await dbPool.query('SELECT * FROM vm_templates ORDER BY name ASC');
     res.json(result.rows.map(mapTemplate));
@@ -2613,6 +2635,7 @@ app.get(
 
 app.post(
   '/api/templates',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const parsed = templateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2643,6 +2666,7 @@ app.post(
 
 app.put(
   '/api/templates/:id',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const parsed = templateSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2683,6 +2707,7 @@ app.put(
 
 app.delete(
   '/api/templates/:id',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     const deploymentCount = await countDeploymentsUsingTemplate(req.params.id);
     if (deploymentCount > 0) {
@@ -2709,6 +2734,7 @@ app.delete(
 
 app.get(
   '/api/blueprints',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const result = await dbPool.query(
       `SELECT
@@ -2740,6 +2766,7 @@ app.get(
 
 app.get(
   '/api/blueprints/:id',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const blueprint = await fetchBlueprintById(req.params.id);
     if (!blueprint) {
@@ -2752,6 +2779,7 @@ app.get(
 
 app.post(
   '/api/blueprints',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const parsed = blueprintSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2773,6 +2801,7 @@ app.post(
 
 app.put(
   '/api/blueprints/:id',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const parsed = blueprintSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -2799,6 +2828,7 @@ app.put(
 
 app.delete(
   '/api/blueprints/:id',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const deploymentCount = await countDeploymentsUsingBlueprint(req.params.id);
     if (deploymentCount > 0) {
@@ -2817,6 +2847,7 @@ app.delete(
 
 app.get(
   '/api/lifecycle/labs',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const result = await dbPool.query(
       `SELECT
@@ -2867,6 +2898,7 @@ app.get(
 
 app.post(
   '/api/lifecycle/labs/:id/:action',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const action = req.params.action;
     if (!['deploy', 'destroy', 'start', 'stop'].includes(action)) {
@@ -2928,7 +2960,7 @@ app.post(
   })
 );
 
-app.get('/api/queues', async (req, res) => {
+app.get('/api/queues', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const payload = [];
     for (const [name, queue] of Object.entries(queues)) {
@@ -2942,7 +2974,7 @@ app.get('/api/queues', async (req, res) => {
   }
 });
 
-app.get('/api/jobs', async (req, res) => {
+app.get('/api/jobs', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const payload = [];
     for (const [name, queue] of Object.entries(queues)) {
@@ -2993,7 +3025,7 @@ app.get('/api/jobs', async (req, res) => {
   }
 });
 
-app.post('/api/jobs/clear-history', async (req, res) => {
+app.post('/api/jobs/clear-history', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const workerStates = Object.fromEntries(
       await Promise.all(
@@ -3067,7 +3099,7 @@ app.post('/api/jobs/clear-history', async (req, res) => {
   }
 });
 
-app.get('/api/workers', async (req, res) => {
+app.get('/api/workers', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const workers = [];
     for (const workerName of Object.keys(queueNames)) {
@@ -3085,7 +3117,7 @@ app.get('/api/workers', async (req, res) => {
   }
 });
 
-app.get('/api/settings/terraform', async (req, res) => {
+app.get('/api/settings/terraform', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const settings = await readPublicTerraformSettings();
     delete settings.windows_admin_password;
@@ -3096,7 +3128,7 @@ app.get('/api/settings/terraform', async (req, res) => {
   }
 });
 
-app.post('/api/settings/terraform', async (req, res) => {
+app.post('/api/settings/terraform', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const sanitized = sanitizeSettingsInput(req.body);
     delete sanitized.windows_admin_password;
@@ -3117,6 +3149,7 @@ app.post('/api/settings/terraform', async (req, res) => {
 
 app.post(
   '/api/settings/clean-orphaned-disks',
+  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
   wrapAsync(async (req, res) => {
     if (orphanedDiskCleanupRunning) {
       res.status(409).json({ error: 'orphaned disk cleanup already running' });
@@ -3138,7 +3171,7 @@ app.post(
   })
 );
 
-app.post('/api/control', async (req, res) => {
+app.post('/api/control', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   const { worker, action } = req.body;
   if (!queueNames[worker] || !['pause', 'resume'].includes(action)) {
     return res.status(400).json({ error: 'invalid worker or action' });
@@ -3153,7 +3186,7 @@ app.post('/api/control', async (req, res) => {
   }
 });
 
-app.post('/api/jobs/terraform', async (req, res) => {
+app.post('/api/jobs/terraform', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const job = await queues.terraform.add(
       'apply',
