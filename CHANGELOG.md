@@ -6,6 +6,14 @@ All notable changes to LabFactory are documented here.
 
 ---
 
+## [1.6.1] — 2026-06-19
+
+### Corrections
+- **Critique** — Un teacher ne pouvait pas préparer de lab : `GET /api/classrooms` était restreint au rôle `admin` alors que la sélection d'une salle est nécessaire à la préparation d'un lab (page Labs, accessible au teacher). La lecture est désormais ouverte aux rôles `teacher` et `admin` ; la gestion (création/modification/suppression) reste `admin`-only
+- **Critique** — Les actions accessibles au teacher (préparer un lab, déployer/démarrer/arrêter/détruire) déclenchaient ensuite un appel admin-only en arrière-plan (`/api/teachers`, `/api/queues`) qui échouait avec `403 forbidden`, affichant un message d'erreur trompeur alors que l'action principale avait réussi. Ces appels sont désormais conditionnés au rôle admin
+
+---
+
 ## [1.6.0] — 2026-06-19
 
 ### Ajouts
