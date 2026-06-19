@@ -1770,7 +1770,7 @@ app.get(
 
 app.get(
   '/api/classrooms',
-  auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY),
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
     const result = await dbPool.query('SELECT * FROM classrooms ORDER BY name ASC');
     res.json(result.rows.map(mapClassroom));

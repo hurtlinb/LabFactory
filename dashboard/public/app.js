@@ -2926,13 +2926,14 @@ async function bootstrap() {
   const loaders = [
     loadConnectionStatuses(),
     loadCourses(),
+    loadClassrooms(),
     loadTemplates(),
     loadBlueprints(),
     loadTimezoneOptions(),
     refreshLifecycleLabs()
   ];
   if (state.isAdmin) {
-    loaders.push(loadTeachers(), loadClassrooms(), loadTerraformSettings(), refreshQueues(), refreshJobs(), refreshWorkers());
+    loaders.push(loadTeachers(), loadTerraformSettings(), refreshQueues(), refreshJobs(), refreshWorkers());
   }
   await Promise.all(loaders);
 
