@@ -10,7 +10,7 @@
 
   --text:           #1a1a18;
   --text-secondary: #5f5e5a;
-  --muted:          #888780;
+  --muted:          #76756e;
 
   --line:        rgba(0, 0, 0, 0.12);
   --line-strong: rgba(0, 0, 0, 0.22);
@@ -29,6 +29,15 @@
   --warning:      #854F0B;
   --warning-soft: #FAEEDA;
   --warning-line: #f0c080;
+  --danger-soft-hover: #f8d7d7;
+
+  --os-linux:   #639922;
+  --os-windows: #378ADD;
+  --os-server:  #D85A30;
+
+  --dev-banner-bg:     #f59e0b;
+  --dev-banner-border: #d97706;
+  --dev-banner-text:   #1c1917;
 
   --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.04);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05), 0 1px 6px rgba(0, 0, 0, 0.03);
@@ -333,20 +342,20 @@ button, input, textarea, select { font: inherit; }
 }
 
 .dev-env .app-topbar {
-  background: #f59e0b;
-  border-bottom: 0.5px solid #d97706;
-  color: #1c1917;
+  background: var(--dev-banner-bg);
+  border-bottom: 0.5px solid var(--dev-banner-border);
+  color: var(--dev-banner-text);
 }
 .dev-env .app-topbar * {
-  color: #1c1917;
+  color: var(--dev-banner-text);
 }
 .dev-env .dev-banner {
   display: flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
-  background: #d97706;
-  color: #1c1917;
+  background: var(--dev-banner-border);
+  color: var(--dev-banner-text);
   font-size: 0.8rem;
   font-weight: 600;
   padding: 4px 10px;
@@ -634,7 +643,7 @@ input:focus, textarea:focus, select:focus {
 .btn-ghost:hover { background: var(--surface-soft); color: var(--text); }
 
 .btn-danger { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); }
-.btn-danger:hover { background: #f8d7d7; }
+.btn-danger:hover { background: var(--danger-soft-hover); }
 
 .icon-btn {
   width: 28px;
@@ -785,9 +794,9 @@ input:focus, textarea:focus, select:focus {
   flex-shrink: 0;
 }
 
-.dot-linux  { background: #639922; }
-.dot-win    { background: #378ADD; }
-.dot-server { background: #D85A30; }
+.dot-linux  { background: var(--os-linux); }
+.dot-win    { background: var(--os-windows); }
+.dot-server { background: var(--os-server); }
 
 .vm-lib-name {
   font-size: 11px;

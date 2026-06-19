@@ -255,7 +255,7 @@ function renderClassroomEditor() {
 
 function renderBlueprintList() {
   if (!state.blueprints.length) {
-    blueprintList.innerHTML = '<p class="placeholder">No blueprints saved yet.</p>';
+    blueprintList.innerHTML = '<p class="placeholder">No blueprints yet.</p>';
     return;
   }
 
@@ -374,7 +374,7 @@ function renderTeachers() {
 function renderCourses() {
   if (!courseList) return;
   if (!state.courses.length) {
-    courseList.innerHTML = '<p class="placeholder">No courses registered yet.</p>';
+    courseList.innerHTML = '<p class="placeholder">No courses yet.</p>';
     return;
   }
 
@@ -452,14 +452,14 @@ function renderTemplates() {
       </article>
     </div>
     <div class="vm-lib-group">
-      <p class="vm-lib-group-label">Linux uniquement</p>
+      <p class="vm-lib-group-label">Linux only</p>
       <article class="vm-lib-cust" draggable="true" data-customization-key="docker-install">
         <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('docker-install')}</span>
         <span class="vm-lib-cust-name">Docker CE</span>
       </article>
     </div>
     <div class="vm-lib-group">
-      <p class="vm-lib-group-label">Windows uniquement</p>
+      <p class="vm-lib-group-label">Windows only</p>
       <article class="vm-lib-cust" draggable="true" data-customization-key="domain-controller">
         <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('domain-controller')}</span>
         <span class="vm-lib-cust-name">Domain Controller</span>
@@ -507,7 +507,7 @@ function renderTemplates() {
 
 function renderModelList() {
   if (!state.templates.length) {
-    modelList.innerHTML = '<p class="placeholder">No VM models registered yet.</p>';
+    modelList.innerHTML = '<p class="placeholder">No VM models yet.</p>';
     return;
   }
 
@@ -574,7 +574,7 @@ function renderModelList() {
 function renderClassrooms() {
   if (!classroomList) return;
   if (!state.classrooms.length) {
-    classroomList.innerHTML = '<p class="placeholder">No classrooms registered yet.</p>';
+    classroomList.innerHTML = '<p class="placeholder">No classrooms yet.</p>';
     return;
   }
 
@@ -762,7 +762,7 @@ function renderCanvas() {
         const template = state.templates.find(t => t.id === vm?.templateId);
         const isLinux = !['windows11', 'windows-server'].includes(String(template?.osType || ''));
         if (!isLinux) {
-          showMessage(globalStatus, 'Docker CE est réservé aux VMs Linux.', 'danger', 3000);
+          showMessage(globalStatus, 'Docker CE is only available for Linux VMs.', 'danger', 3000);
           return;
         }
         updateVm(vmId, nextVm => {
@@ -775,7 +775,7 @@ function renderCanvas() {
         const template = state.templates.find(t => t.id === vm?.templateId);
         const isWindows = ['windows11', 'windows-server'].includes(String(template?.osType || ''));
         if (!isWindows) {
-          showMessage(globalStatus, 'Les customisations de domaine sont réservées aux VMs Windows.', 'danger', 3000);
+          showMessage(globalStatus, 'Domain customizations are only available for Windows VMs.', 'danger', 3000);
           return;
         }
         if (customizationKey === 'domain-controller') {
@@ -1082,7 +1082,7 @@ function renderDashboard() {
   const classroomsGrid = elById('dashClassroomsGrid');
   if (classroomsGrid) {
     if (!state.classrooms.length) {
-      classroomsGrid.innerHTML = '<p class="placeholder">No classrooms configured yet.</p>';
+      classroomsGrid.innerHTML = '<p class="placeholder">No classrooms yet.</p>';
     } else {
       classroomsGrid.innerHTML = state.classrooms.map(classroom => {
         const labs = state.deployments.filter(d => d.classroom.id === classroom.id);
@@ -1093,9 +1093,9 @@ function renderDashboard() {
                 ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
                 d.status === 'stopped' ? 'dash-badge-stopped' : 'dash-badge-destroyed';
               const badgeText =
-                ['running', 'deployed', 'mixed'].includes(d.status) ? 'Actif' :
-                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'En cours' :
-                d.status === 'stopped' ? 'Arrêté' : escapeHtml(d.status || 'idle');
+                ['running', 'deployed', 'mixed'].includes(d.status) ? 'Active' :
+                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
+                d.status === 'stopped' ? 'Stopped' : escapeHtml(d.status || 'idle');
               return `
                 <div class="dash-classroom-lab">
                   <div class="dash-row-info">
@@ -1105,7 +1105,7 @@ function renderDashboard() {
                   <span class="dash-badge ${badgeClass}">${badgeText}</span>
                 </div>`;
             }).join('')
-          : '<p class="dash-classroom-empty">Aucun lab déployé</p>';
+          : '<p class="dash-classroom-empty">No labs deployed</p>';
 
         return `
           <div class="dash-classroom-card">
@@ -1143,7 +1143,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
                 <path d="M47 53 Q62 46 78 50 Q94 46 109 53" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.28"/>
                 <path d="M47 87 Q62 94 78 90 Q94 94 109 87" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.28"/>
                 <path d="M78 36 Q68 53 68 70 Q68 87 78 104" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
-                <circle cx="112" cy="108" r="22" fill="#3b82f6"/>
+                <circle cx="112" cy="108" r="22" fill="var(--brand)"/>
                 <path d="M112 96 A12 12 0 1 1 101 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                 <polygon points="97,119 97,108 106,114" fill="#fff"/>
               </svg>
@@ -1156,7 +1156,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
                 <path d="M64 67 L64 53 Q80 38 96 53 L96 67" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
                 <circle cx="80" cy="85" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
                 <rect x="77" y="88" width="6" height="9" rx="2" fill="currentColor"/>
-                <circle cx="114" cy="108" r="22" fill="#3b82f6"/>
+                <circle cx="114" cy="108" r="22" fill="var(--brand)"/>
                 <path d="M114 96 A12 12 0 1 1 103 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                 <polygon points="99,119 99,108 108,114" fill="#fff"/>
               </svg>
@@ -1294,7 +1294,7 @@ function renderDeploymentVmDetails(payload) {
                   <circle cx="52" cy="84" r="3" fill="currentColor" opacity="0.7"/>
                   <line x1="62" y1="81" x2="112" y2="81" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
                   <line x1="62" y1="87" x2="100" y2="87" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
-                  <circle cx="97" cy="118" r="22" fill="#3b82f6"/>
+                  <circle cx="97" cy="118" r="22" fill="var(--brand)"/>
                   <path d="M97 106 A12 12 0 1 1 86 122" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
                   <polygon points="82,129 82,118 91,124" fill="#fff"/>
                 </svg>
@@ -1316,15 +1316,15 @@ function renderDeploymentVmDetails(payload) {
                 <table class="queue-table vm-state-table">
                   <thead>
                     <tr>
-                      <th></th>
-                      <th>VM</th>
-                      <th>VMID</th>
-                      <th>OS</th>
-                      <th>VLAN</th>
-                      <th>IP</th>
-                      <th>State</th>
-                      <th>Proxmox</th>
-                      <th></th>
+                      <th scope="col"></th>
+                      <th scope="col">VM</th>
+                      <th scope="col">VMID</th>
+                      <th scope="col">OS</th>
+                      <th scope="col">VLAN</th>
+                      <th scope="col">IP</th>
+                      <th scope="col">State</th>
+                      <th scope="col">Proxmox</th>
+                      <th scope="col"></th>
                     </tr>
                   </thead>
                   <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword)}</tbody>
@@ -1367,7 +1367,7 @@ async function openDeploymentDetails(deploymentId) {
   if (!deploymentDetailsDialog || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) return;
   state.activeDeploymentDetailsId = deploymentId;
   deploymentDetailsTitle.textContent = 'Deployment';
-  deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs...</p>';
+  deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs…</p>';
   deploymentDetailsStatus.hidden = true;
   if (!deploymentDetailsDialog.open) {
     deploymentDetailsDialog.showModal();
@@ -1594,7 +1594,7 @@ async function promptDomainMember(vmId) {
     .filter((v, i, arr) => arr.indexOf(v) === i);
 
   if (!domains.length) {
-    showMessage(globalStatus, "Aucun Domain Controller défini dans ce blueprint. Ajoutez d'abord un DC.", 'warning', 4000);
+    showMessage(globalStatus, 'No Domain Controller defined in this blueprint. Add a DC first.', 'warning', 4000);
     return;
   }
 

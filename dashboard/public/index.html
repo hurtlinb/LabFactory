@@ -166,9 +166,9 @@
           <p id="pageBreadcrumb" class="page-breadcrumb">Labs</p>
           <h1 id="pageTitle" class="page-title">Blueprints</h1>
         </div>
-        <div class="dev-banner" aria-label="Instance de développement">
+        <div class="dev-banner" aria-label="Development instance">
           <span class="dev-banner-icon">⚠️</span>
-          <span class="dev-banner-text">Instance de développement</span>
+          <span class="dev-banner-text">Development instance</span>
         </div>
       </div>
 
@@ -235,7 +235,7 @@
                 <button id="newTemplateButton" class="btn btn-ghost" type="button">New</button>
               </div>
               <div id="modelList" class="saved-list">
-                <p class="placeholder">Loading models...</p>
+                <p class="placeholder">Loading models…</p>
               </div>
             </article>
 
@@ -317,7 +317,7 @@
                 <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
               </div>
               <div id="blueprintList" class="saved-list">
-                <p class="placeholder">Loading blueprints...</p>
+                <p class="placeholder">Loading blueprints…</p>
               </div>
             </article>
           </div>
@@ -392,7 +392,7 @@
                 <button id="newClassroomButton" class="btn btn-ghost" type="button">New</button>
               </div>
               <div id="classroomList" class="saved-list">
-                <p class="placeholder">Loading classrooms...</p>
+                <p class="placeholder">Loading classrooms…</p>
               </div>
             </article>
 
@@ -484,7 +484,7 @@
                 </div>
               </div>
               <div id="lifecycleList" class="saved-list">
-                <p class="placeholder">Loading deployments...</p>
+                <p class="placeholder">Loading deployments…</p>
               </div>
             </article>
           </div>
@@ -502,7 +502,7 @@
             </div>
             <div id="deploymentDetailsStatus" class="status-message" hidden></div>
             <div id="deploymentVmDetailsList" class="saved-list">
-              <p class="placeholder">Loading deployment VMs...</p>
+              <p class="placeholder">Loading deployment VMs…</p>
             </div>
           </article>
         </dialog>
@@ -537,7 +537,7 @@
               </div>
             </div>
             <div id="teacherList" class="saved-list">
-              <p class="placeholder">Loading users...</p>
+              <p class="placeholder">Loading users…</p>
             </div>
           </article>
         </section>
@@ -553,7 +553,7 @@
                 </div>
               </div>
               <div id="courseList" class="saved-list">
-                <p class="placeholder">Loading courses...</p>
+                <p class="placeholder">Loading courses…</p>
               </div>
             </article>
 
@@ -591,16 +591,16 @@
                 <table class="queue-table">
                   <thead>
                     <tr>
-                      <th>Queue</th>
-                      <th>Waiting</th>
-                      <th>Active</th>
-                      <th>Delayed</th>
-                      <th>Completed</th>
-                      <th>Failed</th>
+                      <th scope="col">Queue</th>
+                      <th scope="col">Waiting</th>
+                      <th scope="col">Active</th>
+                      <th scope="col">Delayed</th>
+                      <th scope="col">Completed</th>
+                      <th scope="col">Failed</th>
                     </tr>
                   </thead>
                   <tbody id="queueTableBody">
-                    <tr><td colspan="6">Loading...</td></tr>
+                    <tr><td colspan="6">Loading…</td></tr>
                   </tbody>
                 </table>
               </div>
@@ -610,7 +610,7 @@
             <article class="panel">
               <p class="eyebrow">workers</p>
               <div id="workers" class="workers-grid">
-                <p class="placeholder">Loading workers...</p>
+                <p class="placeholder">Loading workers…</p>
               </div>
             </article>
           </div>
@@ -625,18 +625,18 @@
               <table class="queue-table jobs-table">
                 <thead>
                   <tr>
-                    <th>Job</th>
-                    <th>Queue</th>
-                    <th>Status</th>
-                    <th>Lab</th>
-                    <th>Action</th>
-                    <th>Duration</th>
-                    <th>Created</th>
-                    <th>Detail</th>
+                    <th scope="col">Job</th>
+                    <th scope="col">Queue</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Lab</th>
+                    <th scope="col">Action</th>
+                    <th scope="col">Duration</th>
+                    <th scope="col">Created</th>
+                    <th scope="col">Detail</th>
                   </tr>
                 </thead>
                 <tbody id="jobsTableBody">
-                  <tr><td colspan="8">Loading...</td></tr>
+                  <tr><td colspan="8">Loading…</td></tr>
                 </tbody>
               </table>
             </div>
@@ -717,10 +717,10 @@
         </div>
       </div>
       <label class="field">
-        <span>Nom de domaine</span>
+        <span>Domain name</span>
         <input id="vmDomainControllerValue" type="text" autocomplete="off" placeholder="example.local" required>
       </label>
-      <p class="muted modal-help">Ce serveur sera promu contrôleur de domaine Active Directory.</p>
+      <p class="muted modal-help">This server will be promoted to Active Directory domain controller.</p>
       <div class="inline-actions">
         <button id="vmDomainControllerCancelButton" class="btn btn-ghost" type="button">Cancel</button>
         <button class="btn btn-primary" type="submit">Apply</button>
@@ -738,10 +738,10 @@
         </div>
       </div>
       <label class="field">
-        <span>Domaine</span>
+        <span>Domain</span>
         <select id="vmDomainMemberValue"></select>
       </label>
-      <p class="muted modal-help">Cette VM sera jointe au domaine sélectionné.</p>
+      <p class="muted modal-help">This VM will be joined to the selected domain.</p>
       <div class="inline-actions">
         <button id="vmDomainMemberCancelButton" class="btn btn-ghost" type="button">Cancel</button>
         <button class="btn btn-primary" type="submit">Apply</button>
