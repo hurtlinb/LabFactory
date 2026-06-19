@@ -6,6 +6,25 @@ All notable changes to LabFactory are documented here.
 
 ---
 
+## [1.6.0] — 2026-06-19
+
+### Ajouts
+- Gestion des permissions RBAC basée sur deux rôles client Keycloak : `teacher` (accès aux pages du menu Labs) et `admin` (accès complet, y compris Administration)
+- Écran "Access denied" pour les comptes authentifiés ne possédant aucun des deux rôles
+- Badge de rôle (Admin / Teacher / No role) par utilisateur sur la page Users, basé sur le rôle Keycloak constaté lors de sa dernière activité
+
+### Améliorations
+- Interface entièrement traduite en anglais (suppression des dernières chaînes françaises résiduelles)
+- Couleurs codées en dur (icônes Reset IP/Password/Redeploy, bannière dev, indicateurs OS) centralisées dans des variables CSS du design system
+- Messages "Loading…" et messages d'état vide uniformisés
+- Contraste du texte secondaire (`--muted`) renforcé pour la conformité WCAG AA ; `scope="col"` ajouté aux en-têtes de tableaux
+
+### Corrections
+- Extraction des rôles Keycloak corrigée : lecture des rôles **client** (`resource_access`) depuis l'access token au lieu des rôles realm
+- Masquage RBAC inopérant sur `.shell`, le menu Administration et l'écran d'accès refusé — l'attribut `hidden` était neutralisé par des règles CSS `display` explicites sans `!important`
+
+---
+
 ## [1.5.0] — 2026-06-16
 
 ### Ajouts
