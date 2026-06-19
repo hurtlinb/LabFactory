@@ -1004,7 +1004,9 @@ function renderLifecycleLabs() {
           { method: 'POST' }
         );
         await refreshLifecycleLabs();
-        await refreshQueues();
+        if (state.isAdmin) {
+          await refreshQueues();
+        }
         showMessage(globalStatus, `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
@@ -2668,7 +2670,9 @@ deploymentForm?.addEventListener('submit', async event => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    await loadTeachers();
+    if (state.isAdmin) {
+      await loadTeachers();
+    }
     await refreshLifecycleLabs();
     showMessage(globalStatus, 'Deployment prepared.', 'success');
   } catch (error) {
