@@ -78,6 +78,9 @@ button, input, textarea, select { font: inherit; }
   grid-template-columns: var(--sidebar-w) 1fr;
   min-height: 100vh;
 }
+.shell[hidden] { display: none !important; }
+
+[data-role-group="admin"][hidden] { display: none !important; }
 
 .access-denied-screen {
   display: grid;
@@ -85,6 +88,7 @@ button, input, textarea, select { font: inherit; }
   min-height: 100vh;
   background: var(--bg);
 }
+.access-denied-screen[hidden] { display: none !important; }
 
 .access-denied-card {
   max-width: 380px;
