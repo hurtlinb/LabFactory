@@ -203,6 +203,16 @@ const blueprintVmSchema = z
         message: 'name is required when custom naming is enabled'
       });
     }
+    if (vm.config?.secondDiskSizeGb !== undefined) {
+      const secondDiskSizeGb = vm.config.secondDiskSizeGb;
+      if (!Number.isInteger(secondDiskSizeGb) || secondDiskSizeGb < 1 || secondDiskSizeGb > 16384) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['config', 'secondDiskSizeGb'],
+          message: 'secondDiskSizeGb must be an integer between 1 and 16384'
+        });
+      }
+    }
   });
 
 const blueprintSchema = z.object({
@@ -1253,6 +1263,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         domainRole: String(vm.config?.domainRole ?? '').trim() || null,
         domainName: String(vm.config?.domainName ?? '').trim() || null,
         installDocker: Boolean(vm.config?.dockerInstall),
+        secondDiskSizeGb: vm.config?.secondDiskSizeGb ? Number(vm.config.secondDiskSizeGb) : null,
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
         vlanTag

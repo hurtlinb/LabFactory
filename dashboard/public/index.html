@@ -717,6 +717,27 @@
     </form>
   </dialog>
 
+  <!-- ── Second disk dialog ───────────────────────────────── -->
+  <dialog id="vmSecondDiskDialog" class="modal-dialog">
+    <form id="vmSecondDiskForm" class="modal-card" method="dialog">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Customization</p>
+          <h3>Second Disk</h3>
+        </div>
+      </div>
+      <label class="field">
+        <span>Size (GB)</span>
+        <input id="vmSecondDiskValue" type="number" min="1" max="16384" step="1" autocomplete="off" placeholder="100" required>
+      </label>
+      <p class="muted modal-help">A second disk will be attached, partitioned and mounted automatically (/data on Linux, a new drive letter on Windows).</p>
+      <div class="inline-actions">
+        <button id="vmSecondDiskCancelButton" class="btn btn-ghost" type="button">Cancel</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- ── Domain Controller dialog ─────────────────────────── -->
   <dialog id="vmDomainControllerDialog" class="modal-dialog">
     <form id="vmDomainControllerForm" class="modal-card" method="dialog">

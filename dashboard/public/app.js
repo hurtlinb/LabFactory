@@ -470,6 +470,10 @@ function renderTemplates() {
         <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('timezone')}</span>
         <span class="vm-lib-cust-name">Timezone</span>
       </article>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="second-disk">
+        <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('second-disk')}</span>
+        <span class="vm-lib-cust-name">Second Disk</span>
+      </article>
     </div>
     <div class="vm-lib-group">
       <p class="vm-lib-group-label">Linux only</p>
@@ -692,6 +696,14 @@ function renderCanvas() {
           </span>
         `);
       }
+      if (vm.config?.secondDiskSizeGb) {
+        vmPills.push(`
+          <span class="mini-pill vm-customization-pill">
+            <span>Disk: ${escapeHtml(String(vm.config.secondDiskSizeGb))} GB</span>
+            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="second-disk" aria-label="Remove Second Disk customization" title="Remove Second Disk customization">×</button>
+          </span>
+        `);
+      }
       if (String(vm.config?.timezone || '').trim()) {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
@@ -777,6 +789,9 @@ function renderCanvas() {
       if (customizationKey === 'timezone') {
         await promptVmTimezone(vmId);
       }
+      if (customizationKey === 'second-disk') {
+        await promptSecondDiskSize(vmId);
+      }
       if (customizationKey === 'docker-install') {
         const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
         const template = state.templates.find(t => t.id === vm?.templateId);
@@ -812,6 +827,12 @@ function renderCanvas() {
           updateVm(vmId, vm => {
             vm.config.customNameEnabled = false;
             vm.name = '';
+          });
+          renderCanvas();
+        }
+        if (button.dataset.customizationKey === 'second-disk') {
+          updateVm(vmId, vm => {
+            delete vm.config.secondDiskSizeGb;
           });
           renderCanvas();
         }
@@ -1570,6 +1591,41 @@ async function promptVmTimezone(vmId) {
   }
 }
 
+async function promptSecondDiskSize(vmId) {
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+  const dialog = document.getElementById('vmSecondDiskDialog');
+  const form = document.getElementById('vmSecondDiskForm');
+  const input = document.getElementById('vmSecondDiskValue');
+  const cancelBtn = document.getElementById('vmSecondDiskCancelButton');
+  if (!dialog || !form || !input) return;
+
+  input.value = vm.config?.secondDiskSizeGb ?? '';
+
+  return new Promise(resolve => {
+    const onSubmit = event => {
+      event.preventDefault();
+      const sizeGb = Math.trunc(Number(input.value));
+      if (!Number.isFinite(sizeGb) || sizeGb < 1) { resolve(false); return; }
+      updateVm(vmId, nextVm => {
+        nextVm.config.secondDiskSizeGb = sizeGb;
+      });
+      renderCanvas();
+      cleanup();
+      dialog.close();
+      resolve(true);
+    };
+    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const cleanup = () => {
+      form.removeEventListener('submit', onSubmit);
+      cancelBtn.removeEventListener('click', onCancel);
+    };
+    form.addEventListener('submit', onSubmit, { once: true });
+    cancelBtn.addEventListener('click', onCancel, { once: true });
+    dialog.showModal();
+  });
+}
+
 async function promptDomainController(vmId) {
   const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
   if (!vm) return;
@@ -2321,6 +2377,13 @@ function getCustomizationIcon(key) {
       <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
       <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
       <line x1="12" y1="22.08" x2="12" y2="12"/>
+    </svg>`;
+  }
+  if (key === 'second-disk') {
+    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/>
+      <path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
+      <path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
     </svg>`;
   }
   return `

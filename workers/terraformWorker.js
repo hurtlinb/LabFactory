@@ -445,6 +445,19 @@ const extractTemplateCloudInitConfig = config => {
   };
 };
 
+const computeSecondDiskSlot = (primarySlot, cloudinitSlot) => {
+  const match = String(primarySlot ?? '').match(/^([a-z]+)(\d+)$/);
+  if (!match) return null;
+  const [, prefix, indexStr] = match;
+  let nextIndex = Number(indexStr) + 1;
+  let candidate = `${prefix}${nextIndex}`;
+  while (candidate === cloudinitSlot) {
+    nextIndex += 1;
+    candidate = `${prefix}${nextIndex}`;
+  }
+  return candidate;
+};
+
 const extractTemplateFirmwareConfig = config => ({
   bios: String(config?.bios ?? '').trim() || null,
   machine: String(config?.machine ?? '').trim() || null
@@ -510,6 +523,9 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
         diskSlot: diskConfig.diskSlot,
         diskStorage: diskConfig.diskStorage,
         diskSize: diskConfig.diskSize,
+        secondDiskSlot: vm.secondDiskSizeGb
+          ? computeSecondDiskSlot(diskConfig.diskSlot, cloudInitConfig.cloudinitSlot)
+          : null,
         cloudinitSlot: cloudInitConfig.cloudinitSlot,
         cloudinitStorage: cloudInitConfig.cloudinitStorage,
         bios: firmwareConfig.bios,
@@ -1436,6 +1452,9 @@ export function startTerraformWorker(connection) {
               disk_slot: vm.diskSlot ?? null,
               disk_storage: vm.diskStorage ?? null,
               disk_size: vm.diskSize ?? null,
+              secondary_disk_slot: vm.secondDiskSizeGb ? vm.secondDiskSlot : null,
+              secondary_disk_storage: vm.secondDiskSizeGb ? vm.diskStorage : null,
+              secondary_disk_size: vm.secondDiskSizeGb ? `${vm.secondDiskSizeGb}G` : null,
               cloudinit_slot: vm.cloudinitSlot ?? null,
               cloudinit_storage: vm.cloudinitStorage ?? null,
               bios: vm.bios ?? null,
@@ -1675,7 +1694,8 @@ export function startTerraformWorker(connection) {
                     String(vm.timezone ?? '').trim() ||
                     String(vm.hostname ?? '').trim() ||
                     String(vm.domainRole ?? '').trim() ||
-                    vm.installDocker
+                    vm.installDocker ||
+                    vm.secondDiskSizeGb
                   ) &&
                   [isWindowsOsType(vm.osType), isLinuxOsType(vm.osType)].some(Boolean)
               )
@@ -1693,6 +1713,7 @@ export function startTerraformWorker(connection) {
                 domainRole: String(vm.domainRole ?? '').trim() || null,
                 domainName: String(vm.domainName ?? '').trim() || null,
                 installDocker: Boolean(vm.installDocker),
+                secondDiskSizeGb: vm.secondDiskSizeGb ?? null,
                 osType: vm.osType ?? 'other'
               }))
           : [];

@@ -113,6 +113,16 @@ resource "proxmox_vm_qemu" "lab_vm" {
   }
 
   dynamic "disk" {
+    for_each = try(each.value.secondary_disk_size, null) == null ? [] : [1]
+    content {
+      type    = "disk"
+      slot    = each.value.secondary_disk_slot
+      storage = each.value.secondary_disk_storage
+      size    = each.value.secondary_disk_size
+    }
+  }
+
+  dynamic "disk" {
     for_each = try(each.value.cloudinit_slot, null) == null ? [] : [1]
     content {
       type    = "cloudinit"

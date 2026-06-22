@@ -30,6 +30,13 @@
         - target_timezone | string | trim != ""
         - target_timezone | string | lower != "null"
 
+    - name: Initialize and format second data disk
+      ansible.builtin.raw: |
+        powershell -NoProfile -NonInteractive -Command "$disk = Get-Disk | Where-Object PartitionStyle -eq 'RAW' | Select-Object -First 1; if ($disk) { Initialize-Disk -Number $disk.Number -PartitionStyle GPT -PassThru | New-Partition -UseMaximumSize -AssignDriveLetter | Format-Volume -FileSystem NTFS -NewFileSystemLabel 'Data' -Confirm:$false | Out-Null; Write-Output 'changed' }"
+      register: windows_second_disk_result
+      changed_when: "'changed' in (windows_second_disk_result.stdout | default(''))"
+      when: second_disk_size_gb is defined
+
     - name: Reboot (applique le nouveau nom d'ordinateur)
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"

@@ -83,6 +83,44 @@
         append: true
       when: install_docker | default(false) | bool
 
+    - name: Discover second data disk device
+      ansible.builtin.shell: |
+        set -o pipefail
+        lsblk -ndo NAME,TYPE | awk '$2=="disk"{print "/dev/"$1}' | sort | sed -n '2p'
+      args:
+        executable: /bin/bash
+      register: second_disk_device
+      changed_when: false
+      when: second_disk_size_gb is defined
+
+    - name: Partition second data disk
+      community.general.parted:
+        device: "{{ second_disk_device.stdout }}"
+        number: 1
+        state: present
+        fs_type: ext4
+      when:
+        - second_disk_size_gb is defined
+        - second_disk_device.stdout | default('') != ''
+
+    - name: Format second data disk
+      ansible.builtin.filesystem:
+        dev: "{{ second_disk_device.stdout }}1"
+        fstype: ext4
+      when:
+        - second_disk_size_gb is defined
+        - second_disk_device.stdout | default('') != ''
+
+    - name: Mount second data disk at /data
+      ansible.posix.mount:
+        path: /data
+        src: "{{ second_disk_device.stdout }}1"
+        fstype: ext4
+        state: mounted
+      when:
+        - second_disk_size_gb is defined
+        - second_disk_device.stdout | default('') != ''
+
     - name: Reboot Linux at end of customization
       ansible.builtin.reboot:
         reboot_timeout: 1800
