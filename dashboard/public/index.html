@@ -730,7 +730,11 @@
         <span>Size (GB)</span>
         <input id="vmSecondDiskValue" type="number" min="1" max="16384" step="1" autocomplete="off" placeholder="100" required>
       </label>
-      <p class="muted modal-help">A second disk will be attached, partitioned and mounted automatically (/data on Linux, a new drive letter on Windows).</p>
+      <label class="checkbox">
+        <input id="vmSecondDiskConfigureValue" type="checkbox" checked>
+        <span>Configure the disk (partition, format and mount automatically)</span>
+      </label>
+      <p class="muted modal-help">If unchecked, the disk is attached but left raw — partitioning and formatting it is left to whoever logs into the VM.</p>
       <div class="inline-actions">
         <button id="vmSecondDiskCancelButton" class="btn btn-ghost" type="button">Cancel</button>
         <button class="btn btn-primary" type="submit">Apply</button>

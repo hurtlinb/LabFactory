@@ -1695,7 +1695,7 @@ export function startTerraformWorker(connection) {
                     String(vm.hostname ?? '').trim() ||
                     String(vm.domainRole ?? '').trim() ||
                     vm.installDocker ||
-                    vm.secondDiskSizeGb
+                    (vm.secondDiskSizeGb && vm.secondDiskConfigure)
                   ) &&
                   [isWindowsOsType(vm.osType), isLinuxOsType(vm.osType)].some(Boolean)
               )
@@ -1714,6 +1714,7 @@ export function startTerraformWorker(connection) {
                 domainName: String(vm.domainName ?? '').trim() || null,
                 installDocker: Boolean(vm.installDocker),
                 secondDiskSizeGb: vm.secondDiskSizeGb ?? null,
+                secondDiskConfigure: Boolean(vm.secondDiskConfigure),
                 osType: vm.osType ?? 'other'
               }))
           : [];

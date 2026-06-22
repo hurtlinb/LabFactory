@@ -697,9 +697,10 @@ function renderCanvas() {
         `);
       }
       if (vm.config?.secondDiskSizeGb) {
+        const diskLabel = `Disk: ${vm.config.secondDiskSizeGb} GB${vm.config.secondDiskConfigure === false ? ' (raw)' : ''}`;
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
-            <span>Disk: ${escapeHtml(String(vm.config.secondDiskSizeGb))} GB</span>
+            <span>${escapeHtml(diskLabel)}</span>
             <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="second-disk" aria-label="Remove Second Disk customization" title="Remove Second Disk customization">×</button>
           </span>
         `);
@@ -833,6 +834,7 @@ function renderCanvas() {
         if (button.dataset.customizationKey === 'second-disk') {
           updateVm(vmId, vm => {
             delete vm.config.secondDiskSizeGb;
+            delete vm.config.secondDiskConfigure;
           });
           renderCanvas();
         }
@@ -1597,10 +1599,12 @@ async function promptSecondDiskSize(vmId) {
   const dialog = document.getElementById('vmSecondDiskDialog');
   const form = document.getElementById('vmSecondDiskForm');
   const input = document.getElementById('vmSecondDiskValue');
+  const configureInput = document.getElementById('vmSecondDiskConfigureValue');
   const cancelBtn = document.getElementById('vmSecondDiskCancelButton');
-  if (!dialog || !form || !input) return;
+  if (!dialog || !form || !input || !configureInput) return;
 
   input.value = vm.config?.secondDiskSizeGb ?? '';
+  configureInput.checked = vm.config?.secondDiskConfigure !== false;
 
   return new Promise(resolve => {
     const onSubmit = event => {
@@ -1609,6 +1613,7 @@ async function promptSecondDiskSize(vmId) {
       if (!Number.isFinite(sizeGb) || sizeGb < 1) { resolve(false); return; }
       updateVm(vmId, nextVm => {
         nextVm.config.secondDiskSizeGb = sizeGb;
+        nextVm.config.secondDiskConfigure = configureInput.checked;
       });
       renderCanvas();
       cleanup();

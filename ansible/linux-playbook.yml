@@ -91,7 +91,9 @@
         executable: /bin/bash
       register: second_disk_device
       changed_when: false
-      when: second_disk_size_gb is defined
+      when:
+        - second_disk_size_gb is defined
+        - second_disk_configure | default(true) | bool
 
     - name: Partition second data disk
       community.general.parted:
@@ -101,6 +103,7 @@
         fs_type: ext4
       when:
         - second_disk_size_gb is defined
+        - second_disk_configure | default(true) | bool
         - second_disk_device.stdout | default('') != ''
 
     - name: Format second data disk
@@ -109,6 +112,7 @@
         fstype: ext4
       when:
         - second_disk_size_gb is defined
+        - second_disk_configure | default(true) | bool
         - second_disk_device.stdout | default('') != ''
 
     - name: Mount second data disk at /data
@@ -119,6 +123,7 @@
         state: mounted
       when:
         - second_disk_size_gb is defined
+        - second_disk_configure | default(true) | bool
         - second_disk_device.stdout | default('') != ''
 
     - name: Reboot Linux at end of customization

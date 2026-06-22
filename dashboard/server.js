@@ -213,6 +213,13 @@ const blueprintVmSchema = z
         });
       }
     }
+    if (vm.config?.secondDiskConfigure !== undefined && typeof vm.config.secondDiskConfigure !== 'boolean') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['config', 'secondDiskConfigure'],
+        message: 'secondDiskConfigure must be a boolean'
+      });
+    }
   });
 
 const blueprintSchema = z.object({
@@ -1264,6 +1271,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         domainName: String(vm.config?.domainName ?? '').trim() || null,
         installDocker: Boolean(vm.config?.dockerInstall),
         secondDiskSizeGb: vm.config?.secondDiskSizeGb ? Number(vm.config.secondDiskSizeGb) : null,
+        secondDiskConfigure: vm.config?.secondDiskConfigure !== false,
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
         vlanTag

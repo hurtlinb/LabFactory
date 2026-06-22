@@ -80,6 +80,7 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, all
       }
       if (target.secondDiskSizeGb) {
         lines.push(`          second_disk_size_gb: ${Number(target.secondDiskSizeGb)}`);
+        lines.push(`          second_disk_configure: ${Boolean(target.secondDiskConfigure)}`);
       }
       if (String(target.domainRole ?? '').trim()) {
         lines.push(`          domain_role: ${JSON.stringify(target.domainRole)}`);
@@ -135,6 +136,7 @@ const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets })
       }
       if (target.secondDiskSizeGb) {
         lines.push(`          second_disk_size_gb: ${Number(target.secondDiskSizeGb)}`);
+        lines.push(`          second_disk_configure: ${Boolean(target.secondDiskConfigure)}`);
       }
       return lines.join('\n');
     })
@@ -175,14 +177,14 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname || target.domainRole || target.secondDiskSizeGb) &&
+            (target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
         const linuxTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname || target.installDocker || target.secondDiskSizeGb) &&
+            (target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {

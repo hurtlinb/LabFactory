@@ -42,7 +42,9 @@
           }
       register: windows_second_disk_result
       changed_when: "'changed' in (windows_second_disk_result.output | default([]) | join(' '))"
-      when: second_disk_size_gb is defined
+      when:
+        - second_disk_size_gb is defined
+        - second_disk_configure | default(true) | bool
 
     - name: Reboot (applique le nouveau nom d'ordinateur)
       ansible.builtin.raw: |
