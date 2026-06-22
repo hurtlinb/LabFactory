@@ -6,6 +6,20 @@ All notable changes to LabFactory are documented here.
 
 ---
 
+## [1.7.0] — 2026-06-22
+
+### Ajouts
+- Customisation "Second Disk" (drag & drop, Windows et Linux) : un second disque dur peut être ajouté à une VM depuis le blueprint builder, avec une taille en Go demandée à l'utilisateur
+- Case à cocher "Configure the disk" dans la boîte de dialogue : par défaut le disque est automatiquement partitionné, formaté et monté (`/data` sur Linux, nouvelle lettre sur Windows) ; décochée, le disque est attaché brut et laissé à la charge de l'utilisateur de la VM
+
+### Corrections
+- Sur Windows, la tâche d'initialisation du second disque échouait silencieusement (`Missing condition in if statement after 'if ('`) : `ansible.builtin.raw` fait transiter la commande par un PowerShell externe qui interpolait `$disk` (non défini à ce niveau) en chaîne vide avant l'exécution du script imbriqué. Remplacé par `ansible.windows.win_powershell`, déjà utilisé pour ce même type de cas dans `windows-domain-playbook.yml`
+
+### Infrastructure
+- Ajout de la collection Ansible `ansible.posix` (module `mount`) à l'image `labfactory/worker`, nécessaire au montage automatique du second disque sous Linux
+
+---
+
 ## [1.6.1] — 2026-06-19
 
 ### Corrections
