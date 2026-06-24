@@ -237,7 +237,6 @@ button, input, textarea, select { font: inherit; }
 
 .sidebar-health[data-state='ok'] .sidebar-health-icon {
   color: #639922;
-  animation: pulse-health 2.5s ease-in-out infinite;
 }
 .sidebar-health[data-state='ok'] .sidebar-health-icon::before { content: '✓'; }
 
