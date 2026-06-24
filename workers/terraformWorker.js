@@ -6,7 +6,7 @@ import https from 'node:https';
 import { Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { runCommand } from '../lib/runCommand.js';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { ansibleQueueName } from './ansibleWorker.js';
 import {
   assertRequiredTerraformEnvSettings,
@@ -16,12 +16,28 @@ import {
 } from '../lib/terraformSettings.js';
 
 const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
-const LINUX_SSH_WAIT_RETRY_MS = 5000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
 const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
-const WINDOWS_WINRM_WAIT_RETRY_MS = 5000;
 const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 60;
 const WINDOWS_WINRM_STABLE_RECHECK_MS = 30000;
+
+// Guest readiness (cloudbase-init / cloud-init) typically takes minutes, not seconds — poll fast
+// at first, then back off so we don't spawn an ansible-playbook process every 5s for the long tail.
+const READINESS_RETRY_BACKOFF_STEPS = [
+  { afterMs: 0, delayMs: 5000 },
+  { afterMs: 60 * 1000, delayMs: 15000 },
+  { afterMs: 5 * 60 * 1000, delayMs: 30000 }
+];
+
+const computeReadinessRetryDelayMs = elapsedMs => {
+  let delayMs = READINESS_RETRY_BACKOFF_STEPS[0].delayMs;
+  for (const step of READINESS_RETRY_BACKOFF_STEPS) {
+    if (elapsedMs >= step.afterMs) {
+      delayMs = step.delayMs;
+    }
+  }
+  return delayMs;
+};
 const VM_POWER_STATE_WAIT_TIMEOUT_MS = 20 * 60 * 1000;
 const VM_POWER_STATE_WAIT_RETRY_MS = 5000;
 const STOP_STATE_CONFIRMATION_TIMEOUT_MS = 60 * 1000;
@@ -1040,24 +1056,42 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
           }
 
           Write-Output "Cloudbase-Init completed at $flagTime and WinRM is reachable"
+      ignore_errors: true
+      register: cloudbase_init_check
+
+    - name: Record per-host readiness marker
+      ansible.builtin.copy:
+        content: "ready"
+        dest: "{{ marker_dir }}/{{ inventory_hostname }}"
+        mode: '0644'
+      delegate_to: localhost
+      when: cloudbase_init_check is succeeded
 `;
 
-const buildWindowsReadinessInventory = ({ host, user, password }) => `all:
+const buildWindowsReadinessInventory = (targets, password) => {
+  const hosts = targets
+    .map(target => [
+      `        vm_${target.vmid}:`,
+      `          ansible_host: ${JSON.stringify(target.host)}`,
+      `          ansible_user: ${JSON.stringify(target.user)}`,
+      `          ansible_password: ${JSON.stringify(password)}`,
+      '          ansible_connection: winrm',
+      '          ansible_port: 5986',
+      '          ansible_winrm_scheme: https',
+      '          ansible_winrm_transport: basic',
+      '          ansible_winrm_server_cert_validation: ignore',
+      '          ansible_winrm_operation_timeout_sec: 30',
+      '          ansible_winrm_read_timeout_sec: 45'
+    ].join('\n'))
+    .join('\n');
+
+  return `all:
   children:
     windows_readiness_targets:
       hosts:
-        target:
-          ansible_host: ${JSON.stringify(host)}
-          ansible_user: ${JSON.stringify(user)}
-          ansible_password: ${JSON.stringify(password)}
-          ansible_connection: winrm
-          ansible_port: 5986
-          ansible_winrm_scheme: https
-          ansible_winrm_transport: basic
-          ansible_winrm_server_cert_validation: ignore
-          ansible_winrm_operation_timeout_sec: 30
-          ansible_winrm_read_timeout_sec: 45
+${hosts}
 `;
+};
 
 const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => {
   const startedAt = Date.now();
@@ -1110,7 +1144,7 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
       return;
     } catch (error) {
       lastError = error;
-      await sleep(LINUX_SSH_WAIT_RETRY_MS);
+      await sleep(computeReadinessRetryDelayMs(Date.now() - startedAt));
     }
   }
 
@@ -1119,59 +1153,105 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
   );
 };
 
-const waitForWindowsWinrmAndCloudbaseInit = async ({ host, user, password, signal }) => {
+// Checks every still-pending Windows VM in ONE ansible-playbook run per round (Ansible's own
+// per-host forking handles the parallelism), instead of one dedicated ansible-playbook process
+// per VM queued behind a fixed worker pool — a slow/stuck VM no longer blocks others from being
+// checked. Each host needs two consecutive successful rounds at least WINDOWS_WINRM_STABLE_RECHECK_MS
+// apart to be considered ready, mirroring the previous per-VM "stable recheck" behaviour.
+const waitForWindowsBatchReadiness = async ({ targets, password, signal, onHostReady }) => {
   const startedAt = Date.now();
-  const tempToken = `${process.pid}-${Date.now()}-${String(host).replace(/[^a-zA-Z0-9_-]/g, '-')}`;
-  const inventoryPath = path.join(tmpdir(), `labfactory-windows-readiness-${tempToken}.yml`);
-  const playbookPath = path.join(tmpdir(), `labfactory-windows-readiness-${tempToken}.playbook.yml`);
-  let lastError = null;
-  let hasStableSuccess = false;
+  const baseDir = path.join(tmpdir(), `labfactory-windows-readiness-${process.pid}-${Date.now()}`);
+  await mkdir(baseDir, { recursive: true });
 
-  await writeFile(inventoryPath, buildWindowsReadinessInventory({ host, user, password }), 'utf8');
-  await writeFile(playbookPath, windowsCloudbaseReadinessPlaybook, 'utf8');
+  const pending = new Map(targets.map(target => [Number(target.vmid), target]));
+  const firstSuccessAtByVmid = new Map();
+  let lastError = null;
+  let roundIndex = 0;
 
   try {
-    while (Date.now() - startedAt < WINDOWS_WINRM_WAIT_TIMEOUT_MS) {
+    while (pending.size > 0) {
+      if (Date.now() - startedAt >= WINDOWS_WINRM_WAIT_TIMEOUT_MS) {
+        const stillPending = Array.from(pending.values()).map(target => target.name).join(', ');
+        throw new Error(
+          `Timed out waiting for Windows guests to accept stable WinRM and finish Cloudbase-Init: ${stillPending}${lastError ? ` (last error: ${lastError.message})` : ''}`
+        );
+      }
       if (signal?.aborted) {
         throw signal.reason instanceof Error ? signal.reason : new Error('Windows readiness wait aborted');
       }
 
-      try {
-        await runCommand(
-          'timeout',
-          [
-            `${WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS}s`,
-            'ansible-playbook',
-            '--inventory',
-            inventoryPath,
-            playbookPath
-          ],
-          {
-            cwd: terraformDir,
-            env: { ...process.env },
-            signal
-          }
-        );
-        if (hasStableSuccess) {
-          return;
-        }
-        hasStableSuccess = true;
-        await sleep(WINDOWS_WINRM_STABLE_RECHECK_MS);
-      } catch (error) {
-        lastError = error;
-        hasStableSuccess = false;
-        await sleep(WINDOWS_WINRM_WAIT_RETRY_MS);
-      }
-    }
+      const now = Date.now();
+      const dueTargets = Array.from(pending.values()).filter(target => {
+        const firstSuccessAt = firstSuccessAtByVmid.get(Number(target.vmid));
+        return !firstSuccessAt || now - firstSuccessAt >= WINDOWS_WINRM_STABLE_RECHECK_MS;
+      });
 
-    throw new Error(
-      `Timed out waiting for Windows guest ${host} to accept stable WinRM and finish Cloudbase-Init${lastError ? `: ${lastError.message}` : ''}`
-    );
+      if (dueTargets.length > 0) {
+        const roundDir = path.join(baseDir, String(roundIndex));
+        const inventoryPath = path.join(baseDir, `round-${roundIndex}.yml`);
+        const playbookPath = path.join(baseDir, `round-${roundIndex}.playbook.yml`);
+        await mkdir(roundDir, { recursive: true });
+        await writeFile(inventoryPath, buildWindowsReadinessInventory(dueTargets, password), 'utf8');
+        await writeFile(playbookPath, windowsCloudbaseReadinessPlaybook, 'utf8');
+
+        try {
+          await runCommand(
+            'timeout',
+            [
+              `${WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS}s`,
+              'ansible-playbook',
+              '--inventory',
+              inventoryPath,
+              '--extra-vars',
+              JSON.stringify({ marker_dir: roundDir }),
+              playbookPath
+            ],
+            { cwd: terraformDir, env: { ...process.env }, signal }
+          );
+        } catch (error) {
+          // Some hosts in this round may have failed/been unreachable — marker files (read below)
+          // tell us which ones actually succeeded; the rest simply stay pending for the next round.
+          lastError = error;
+        }
+
+        let readyHostKeys;
+        try {
+          readyHostKeys = new Set(await readdir(roundDir));
+        } catch {
+          readyHostKeys = new Set();
+        }
+
+        for (const target of dueTargets) {
+          const vmid = Number(target.vmid);
+          if (readyHostKeys.has(`vm_${vmid}`)) {
+            const firstSuccessAt = firstSuccessAtByVmid.get(vmid);
+            if (firstSuccessAt) {
+              pending.delete(vmid);
+              firstSuccessAtByVmid.delete(vmid);
+              await onHostReady(target);
+            } else {
+              firstSuccessAtByVmid.set(vmid, Date.now());
+            }
+          } else {
+            firstSuccessAtByVmid.delete(vmid);
+          }
+        }
+
+        await Promise.all([
+          rm(roundDir, { recursive: true, force: true }),
+          rm(inventoryPath, { force: true }),
+          rm(playbookPath, { force: true })
+        ]);
+      }
+
+      if (pending.size === 0) {
+        break;
+      }
+      roundIndex += 1;
+      await sleep(computeReadinessRetryDelayMs(Date.now() - startedAt));
+    }
   } finally {
-    await Promise.all([
-      rm(inventoryPath, { force: true }),
-      rm(playbookPath, { force: true })
-    ]);
+    await rm(baseDir, { recursive: true, force: true });
   }
 };
 
@@ -1257,17 +1337,16 @@ const waitForGuestReadiness = async ({
 
   if (windowsReadinessTargets.length > 0) {
     const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    console.log(`Waiting for ${windowsReadinessTargets.length} Windows guest(s) to respond over WinRM during ${action}`);
     readinessTasks.push(
-      runWithConcurrency(windowsReadinessTargets, terraformParallelism, async target => {
-        console.log(`Waiting for Windows guest ${target.name} (${target.host}) to respond over WinRM during ${action}`);
-        await waitForWindowsWinrmAndCloudbaseInit({
-          host: target.host,
-          user: target.user,
-          password: windowsPassword,
-          signal: abortController.signal
-        });
-        await activateVmHaAfterReadiness({ action, merged, target });
-        await readinessReporter.markReady(target.vmid);
+      waitForWindowsBatchReadiness({
+        targets: windowsReadinessTargets,
+        password: windowsPassword,
+        signal: abortController.signal,
+        onHostReady: async target => {
+          await activateVmHaAfterReadiness({ action, merged, target });
+          await readinessReporter.markReady(target.vmid);
+        }
       })
     );
   }
@@ -1275,9 +1354,9 @@ const waitForGuestReadiness = async ({
   if (linuxReadinessTargets.length > 0) {
     const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
     const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    console.log(`Waiting for ${linuxReadinessTargets.length} Linux guest(s) to respond over SSH during ${action}`);
     readinessTasks.push(
-      runWithConcurrency(linuxReadinessTargets, terraformParallelism, async target => {
-        console.log(`Waiting for Linux guest ${target.name} (${target.host}) to respond over SSH during ${action}`);
+      ...linuxReadinessTargets.map(async target => {
         await waitForLinuxSshAndCloudInit({
           host: target.host,
           user: linuxUser,
