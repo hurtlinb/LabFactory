@@ -19,7 +19,10 @@ import {
 const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
 const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
-const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 60;
+// A round now checks every still-pending Windows VM in one ansible-playbook run (not just one
+// host), so this has to cover the slowest host in the batch (e.g. unreachable ones still timing
+// out their WinRM connection attempt) before Ansible can move on to the next task for anyone.
+const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 180;
 const WINDOWS_WINRM_STABLE_RECHECK_MS = 30000;
 
 // Guest readiness (cloudbase-init / cloud-init) typically takes minutes, not seconds — poll fast
