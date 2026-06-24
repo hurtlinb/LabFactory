@@ -1358,6 +1358,9 @@ export function startTerraformWorker(connection) {
     terraformQueueName,
     async job => {
       const abortController = new AbortController();
+      // Many VMs are polled concurrently for guest readiness, each holding an abort listener
+      // on this shared signal — raise Node's default threshold (10) to match expected concurrency.
+      abortController.signal.setMaxListeners(128);
       activeAbortControllers.set(String(job.id), abortController);
       const readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
