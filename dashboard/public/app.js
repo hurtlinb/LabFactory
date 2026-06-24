@@ -1182,28 +1182,18 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
         const resetIpButton = canResetIp && hasStaticIp
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
-              <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <circle cx="78" cy="70" r="34" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" opacity="0.9"/>
-                <path d="M44 70 Q61 60 78 70 Q95 80 112 70" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
-                <path d="M47 53 Q62 46 78 50 Q94 46 109 53" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.28"/>
-                <path d="M47 87 Q62 94 78 90 Q94 94 109 87" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.28"/>
-                <path d="M78 36 Q68 53 68 70 Q68 87 78 104" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
-                <circle cx="112" cy="108" r="22" fill="var(--brand)"/>
-                <path d="M112 96 A12 12 0 1 1 101 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                <polygon points="97,119 97,108 106,114" fill="#fff"/>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="2" y1="12" x2="22" y2="12"/>
+                <path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/>
               </svg>
             </button>`
           : '';
         const resetPasswordButton = canResetPassword
           ? `<button class="icon-btn reset-password-button" type="button" title="Reset Password" aria-label="Reset Password" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
-              <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                <rect x="54" y="67" width="52" height="40" rx="8" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <path d="M64 67 L64 53 Q80 38 96 53 L96 67" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                <circle cx="80" cy="85" r="5" fill="none" stroke="currentColor" stroke-width="2"/>
-                <rect x="77" y="88" width="6" height="9" rx="2" fill="currentColor"/>
-                <circle cx="114" cy="108" r="22" fill="var(--brand)"/>
-                <path d="M114 96 A12 12 0 1 1 103 112" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                <polygon points="99,119 99,108 108,114" fill="#fff"/>
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <rect x="5" y="11" width="14" height="10" rx="2"/>
+                <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
               </svg>
             </button>`
           : '';
@@ -1325,23 +1315,9 @@ function renderDeploymentVmDetails(payload) {
           const isActiveWorkstation = activeWorkstationNumbers.has(workstationNumber);
           const actionMarkup = canRedeployWorkstations
             ? `<button class="icon-btn workstation-redeploy-button" type="button" title="Redeploy VMs" aria-label="Redeploy VMs" data-deployment-id="${escapeHtmlAttr(deployment.id || '')}" data-workstation-number="${escapeHtmlAttr(workstationNumber)}">
-                <svg viewBox="0 0 160 160" width="20" height="20" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-                  <rect x="33" y="22" width="94" height="96" rx="6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <rect x="41" y="32" width="78" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="52" cy="40" r="3" fill="currentColor" opacity="0.7"/>
-                  <line x1="62" y1="37" x2="112" y2="37" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
-                  <line x1="62" y1="43" x2="100" y2="43" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
-                  <rect x="41" y="54" width="78" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="52" cy="62" r="3" fill="currentColor" opacity="0.7"/>
-                  <line x1="62" y1="59" x2="112" y2="59" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
-                  <line x1="62" y1="65" x2="100" y2="65" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
-                  <rect x="41" y="76" width="78" height="16" rx="3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                  <circle cx="52" cy="84" r="3" fill="currentColor" opacity="0.7"/>
-                  <line x1="62" y1="81" x2="112" y2="81" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>
-                  <line x1="62" y1="87" x2="100" y2="87" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.2"/>
-                  <circle cx="97" cy="118" r="22" fill="var(--brand)"/>
-                  <path d="M97 106 A12 12 0 1 1 86 122" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                  <polygon points="82,129 82,118 91,124" fill="#fff"/>
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-3-6.7"/>
+                  <polyline points="21 3 21 9 15 9"/>
                 </svg>
               </button>`
             : isActiveWorkstation
@@ -1448,7 +1424,7 @@ function resolveLifecycleActions(status) {
   if (status === 'destroyed') {
     return {
       busy: false,
-      items: [{ action: 'deploy', icon: '↑', label: 'Deploy lab' }]
+      items: [{ action: 'deploy', icon: '⬆', label: 'Deploy lab' }]
     };
   }
   if (!status || status === 'idle') {
