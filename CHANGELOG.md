@@ -14,8 +14,10 @@ All notable changes to LabFactory are documented here.
 
 ### Performance
 - Ansible tournait avec le nombre de forks par défaut (5), limitant la personnalisation des VM (timezone, hostname, jonction domaine, second disque) à 5 hôtes à la fois sur les labs de grande taille. Ajout de `ansible/ansible.cfg` (`forks = 100`)
-- `TERRAFORM_PARALLELISM` n'était défini dans aucun environnement et retombait sur la valeur par défaut (10), limitant à la fois `terraform apply` et l'attente de disponibilité des VM (WinRM/Cloudbase-Init, SSH/cloud-init). Relevé à 64 dans la configuration des environnements
-- Ressources du pod `ansible-worker` augmentées (CPU/mémoire) pour supporter le parallélisme plus élevé sans throttling ni OOM
+- Ressources du pod `ansible-worker` augmentées (CPU/mémoire) pour supporter ce parallélisme plus élevé sans throttling ni OOM
+
+### Notes
+- `TERRAFORM_PARALLELISM` a été testé à 64 puis 20 pour accélérer le clonage, mais les deux dépassaient ce que le verrou cluster (`cfs-lock`) de notre pool de stockage Ceph peut sérialiser (`clone failed: cfs-lock 'storage-ceph-pool' error: got lock request timeout`). Revenu à la valeur par défaut du code (10), qui reste la seule valeur confirmée stable sur cette infrastructure
 
 ---
 
