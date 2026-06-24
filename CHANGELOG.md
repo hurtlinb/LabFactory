@@ -1,11 +1,3 @@
-# Changelog
-
-All notable changes to LabFactory are documented here.
-
-## [Unreleased]
-
----
-
 ## [1.7.0] — 2026-06-22
 
 ### Ajouts

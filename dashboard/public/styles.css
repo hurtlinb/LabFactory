@@ -222,20 +222,30 @@ button, input, textarea, select { font: inherit; }
 }
 
 .sidebar-health-icon {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  flex: 0 0 7px;
-  background: var(--line-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
 }
+.sidebar-health-icon::before { content: '–'; }
 
 .sidebar-health[data-state='ok'] .sidebar-health-icon {
-  background: #639922;
+  color: #639922;
   animation: pulse-health 2.5s ease-in-out infinite;
 }
+.sidebar-health[data-state='ok'] .sidebar-health-icon::before { content: '✓'; }
 
-.sidebar-health[data-state='error'] .sidebar-health-icon  { background: #c0392b; }
-.sidebar-health[data-state='warning'] .sidebar-health-icon { background: #e6a817; }
+.sidebar-health[data-state='error'] .sidebar-health-icon { color: #c0392b; }
+.sidebar-health[data-state='error'] .sidebar-health-icon::before { content: '✗'; }
+
+.sidebar-health[data-state='warning'] .sidebar-health-icon { color: #e6a817; }
+.sidebar-health[data-state='warning'] .sidebar-health-icon::before { content: '!'; }
 
 /* ── User session ─────────────────────────────────────────────── */
 .user-session {
@@ -1297,14 +1307,20 @@ input:focus, textarea:focus, select:focus {
 .vm-state-name-cell strong, .vm-state-name-cell span { display: block; }
 
 .vm-state-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--line-strong);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
 }
+.vm-state-dot::before { content: '–'; }
 
-.vm-state-dot[data-state='ready'] { background: var(--accent); }
+.vm-state-dot[data-state='ready'] { color: var(--accent); }
+.vm-state-dot[data-state='ready']::before { content: '✓'; }
 
 .vm-state-dot[data-state='waiting for cloudbase-init'],
 .vm-state-dot[data-state='waiting for cloud-init'],
@@ -1312,11 +1328,18 @@ input:focus, textarea:focus, select:focus {
 .vm-state-dot[data-state='cloning'],
 .vm-state-dot[data-state='customizing'],
 .vm-state-dot[data-state='starting'],
-.vm-state-dot[data-state='destroying'] { background: var(--brand); }
+.vm-state-dot[data-state='destroying'] { color: var(--brand); }
+.vm-state-dot[data-state='waiting for cloudbase-init']::before,
+.vm-state-dot[data-state='waiting for cloud-init']::before,
+.vm-state-dot[data-state='redeploy queued']::before,
+.vm-state-dot[data-state='cloning']::before,
+.vm-state-dot[data-state='customizing']::before,
+.vm-state-dot[data-state='starting']::before,
+.vm-state-dot[data-state='destroying']::before { content: '↻'; }
 
 .vm-state-dot[data-state='stopped'],
 .vm-state-dot[data-state='destroyed'],
-.vm-state-dot[data-state='missing'] { background: var(--muted); opacity: 0.5; }
+.vm-state-dot[data-state='missing'] { color: var(--muted); opacity: 0.5; }
 
 /* ── Status pills (deployment status) ────────────────────────── */
 .status-pill-running   { background: var(--accent-soft);  color: var(--accent);  border-color: var(--accent-line); }
@@ -1327,9 +1350,23 @@ input:focus, textarea:focus, select:focus {
 .status-pill-busy      { background: var(--brand-soft);   color: var(--brand);   border-color: rgba(83,74,183,0.3); }
 
 /* ── Status dots ──────────────────────────────────────────────── */
-.status-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; background: var(--line-strong); }
-.status-dot[data-state='running'] { background: var(--accent); }
-.status-dot[data-state='paused']  { background: var(--warning); }
+.status-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 12px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--muted);
+}
+.status-dot::before { content: '–'; }
+.status-dot[data-state='running'] { color: var(--accent); }
+.status-dot[data-state='running']::before { content: '✓'; }
+.status-dot[data-state='paused']  { color: var(--warning); }
+.status-dot[data-state='paused']::before { content: '‖'; }
 
 /* ── Loading spinner ──────────────────────────────────────────── */
 .loading-spinner {
