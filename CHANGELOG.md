@@ -1,3 +1,24 @@
+# Changelog
+
+All notable changes to LabFactory are documented here.
+
+## [Unreleased]
+
+---
+
+## [1.7.1] — 2026-06-24
+
+### Améliorations
+- Icônes harmonisées : Reset IP, Reset Password et Redeploy passent du style "badge coloré incrusté" (3ᵉ langage visuel isolé) au style trait ("feather") utilisé par la navigation et les customisations ; l'action "Deploy" utilise désormais un seul glyphe (`⬆`) partout au lieu de deux différents
+- Indicateurs d'état (sidebar santé système, état des VM, workers) : les pastilles uniquement colorées sont remplacées par des icônes de forme distincte (`✓ ✗ ! ↻ –`), pour rester utilisables par les personnes daltoniennes
+
+### Performance
+- Ansible tournait avec le nombre de forks par défaut (5), limitant la personnalisation des VM (timezone, hostname, jonction domaine, second disque) à 5 hôtes à la fois sur les labs de grande taille. Ajout de `ansible/ansible.cfg` (`forks = 100`)
+- `TERRAFORM_PARALLELISM` n'était défini dans aucun environnement et retombait sur la valeur par défaut (10), limitant à la fois `terraform apply` et l'attente de disponibilité des VM (WinRM/Cloudbase-Init, SSH/cloud-init). Relevé à 64 dans la configuration des environnements
+- Ressources du pod `ansible-worker` augmentées (CPU/mémoire) pour supporter le parallélisme plus élevé sans throttling ni OOM
+
+---
+
 ## [1.7.0] — 2026-06-22
 
 ### Ajouts
