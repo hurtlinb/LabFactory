@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import { setMaxListeners } from 'node:events';
 import http from 'node:http';
 import https from 'node:https';
 import { Queue, Worker } from 'bullmq';
@@ -1439,7 +1440,7 @@ export function startTerraformWorker(connection) {
       const abortController = new AbortController();
       // Many VMs are polled concurrently for guest readiness, each holding an abort listener
       // on this shared signal — raise Node's default threshold (10) to match expected concurrency.
-      abortController.signal.setMaxListeners(128);
+      setMaxListeners(128, abortController.signal);
       activeAbortControllers.set(String(job.id), abortController);
       const readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
