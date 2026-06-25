@@ -44,6 +44,7 @@ const computeReconnectRetryDelayMs = elapsedMs => {
 const windowsReconnectCheckPlaybook = `- name: Wait for Windows guests to reconnect after reboot
   hosts: windows_reconnect_targets
   gather_facts: false
+  strategy: free
   tasks:
     - name: Ping WinRM
       ansible.windows.win_ping:

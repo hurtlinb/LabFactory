@@ -1035,6 +1035,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-Init
   hosts: windows_readiness_targets
   gather_facts: false
+  strategy: free
   tasks:
     - name: Check Cloudbase-Init completion for current boot
       ansible.windows.win_powershell:
