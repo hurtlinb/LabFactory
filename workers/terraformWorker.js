@@ -23,7 +23,6 @@ const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 // host), so this has to cover the slowest host in the batch (e.g. unreachable ones still timing
 // out their WinRM connection attempt) before Ansible can move on to the next task for anyone.
 const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 180;
-const WINDOWS_WINRM_STABLE_RECHECK_MS = 30000;
 
 // Guest readiness (cloudbase-init / cloud-init) typically takes minutes, not seconds — poll fast
 // at first, then back off so we don't spawn an ansible-playbook process every 5s for the long tail.
@@ -1084,8 +1083,8 @@ const buildWindowsReadinessInventory = (targets, password) => {
       '          ansible_winrm_scheme: https',
       '          ansible_winrm_transport: basic',
       '          ansible_winrm_server_cert_validation: ignore',
-      '          ansible_winrm_operation_timeout_sec: 3',
-      '          ansible_winrm_read_timeout_sec: 5'
+      '          ansible_winrm_operation_timeout_sec: 8',
+      '          ansible_winrm_read_timeout_sec: 12'
     ].join('\n'))
     .join('\n');
 
@@ -1160,15 +1159,13 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
 // Checks every still-pending Windows VM in ONE ansible-playbook run per round (Ansible's own
 // per-host forking handles the parallelism), instead of one dedicated ansible-playbook process
 // per VM queued behind a fixed worker pool — a slow/stuck VM no longer blocks others from being
-// checked. Each host needs two consecutive successful rounds at least WINDOWS_WINRM_STABLE_RECHECK_MS
-// apart to be considered ready, mirroring the previous per-VM "stable recheck" behaviour.
+// checked. A single successful round is enough to consider a host ready.
 const waitForWindowsBatchReadiness = async ({ targets, password, signal, onHostReady }) => {
   const startedAt = Date.now();
   const baseDir = path.join(tmpdir(), `labfactory-windows-readiness-${process.pid}-${Date.now()}`);
   await mkdir(baseDir, { recursive: true });
 
   const pending = new Map(targets.map(target => [Number(target.vmid), target]));
-  const firstSuccessAtByVmid = new Map();
   let lastError = null;
   let roundIndex = 0;
 
@@ -1184,11 +1181,7 @@ const waitForWindowsBatchReadiness = async ({ targets, password, signal, onHostR
         throw signal.reason instanceof Error ? signal.reason : new Error('Windows readiness wait aborted');
       }
 
-      const now = Date.now();
-      const dueTargets = Array.from(pending.values()).filter(target => {
-        const firstSuccessAt = firstSuccessAtByVmid.get(Number(target.vmid));
-        return !firstSuccessAt || now - firstSuccessAt >= WINDOWS_WINRM_STABLE_RECHECK_MS;
-      });
+      const dueTargets = Array.from(pending.values());
 
       if (dueTargets.length > 0) {
         const roundDir = path.join(baseDir, String(roundIndex));
@@ -1228,16 +1221,8 @@ const waitForWindowsBatchReadiness = async ({ targets, password, signal, onHostR
         for (const target of dueTargets) {
           const vmid = Number(target.vmid);
           if (readyHostKeys.has(`vm_${vmid}`)) {
-            const firstSuccessAt = firstSuccessAtByVmid.get(vmid);
-            if (firstSuccessAt) {
-              pending.delete(vmid);
-              firstSuccessAtByVmid.delete(vmid);
-              await onHostReady(target);
-            } else {
-              firstSuccessAtByVmid.set(vmid, Date.now());
-            }
-          } else {
-            firstSuccessAtByVmid.delete(vmid);
+            pending.delete(vmid);
+            await onHostReady(target);
           }
         }
 

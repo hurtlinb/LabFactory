@@ -71,8 +71,8 @@ const buildWindowsReconnectInventory = (targets, password) => {
       '          ansible_winrm_scheme: https',
       '          ansible_winrm_transport: basic',
       '          ansible_winrm_server_cert_validation: ignore',
-      '          ansible_winrm_operation_timeout_sec: 3',
-      '          ansible_winrm_read_timeout_sec: 5'
+      '          ansible_winrm_operation_timeout_sec: 8',
+      '          ansible_winrm_read_timeout_sec: 12'
     ].join('\n'))
     .join('\n');
 
