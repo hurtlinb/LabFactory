@@ -1787,6 +1787,7 @@ export function startTerraformWorker(connection) {
               )
               .map(vm => ({
                 id: vm.id,
+                vmid: Number(vm.vmid),
                 name: vm.name,
                 hostname: String(vm.hostname ?? '').trim() || null,
                 language: String(vm.language ?? '').trim().toLowerCase() || 'en',

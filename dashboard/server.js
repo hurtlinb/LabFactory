@@ -1342,7 +1342,10 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted 
       return isWindowsOsType(vm.osType) ? 'waiting for cloudbase-init' : 'waiting for cloud-init';
     }
     if (deploymentStatus === 'customizing') {
-      return guestReady ? 'ready' : 'customizing';
+      if (vm.isTrackedGuestReadiness === false) {
+        return 'ready';
+      }
+      return guestReady ? 'ready' : 'waiting for reboot';
     }
     if (deploymentStatus === 'starting') {
       return 'starting';
@@ -1368,6 +1371,13 @@ const buildDeploymentVmIpAddress = vm => {
 
 const shouldUseGuestReadinessProgress = deploymentStatus =>
   ['queued', 'deploying', 'starting'].includes(deploymentStatus);
+
+// Broader than shouldUseGuestReadinessProgress: also covers 'customizing', which has its own
+// per-VM progress source (the Ansible reconnect-after-reboot job) and its own status label in
+// inferDeploymentVmStatus — kept separate from shouldUseGuestReadinessProgress so that function's
+// "waiting for cloudbase-init/cloud-init" branch doesn't swallow the customizing case.
+const usesPerVmProgressTracking = deploymentStatus =>
+  shouldUseGuestReadinessProgress(deploymentStatus) || deploymentStatus === 'customizing';
 
 const resolveReadinessAction = deployment => {
   const action = String(deployment?.lastAction ?? '').trim();
@@ -1443,6 +1453,40 @@ const fetchDeploymentReadinessProgress = async deployment => {
   }
 };
 
+// Same shape as fetchDeploymentReadinessProgress (readyVmids/startedVmids/targetVmids) so callers
+// can use either interchangeably — but sourced from the Ansible job's reconnect-after-reboot
+// progress instead of the Terraform job's guest-readiness progress. ansibleWorker.js already sets
+// lastJobId to its own job id once it claims the 'customizing' status, so this is always the right
+// job to query while a deployment is in that state.
+const fetchAnsibleCustomizationProgress = async deployment => {
+  if (!deployment.lastJobId) {
+    return emptyReadinessProgress();
+  }
+
+  try {
+    const job = await queues.ansible.getJob(String(deployment.lastJobId));
+    const jobState = job ? await job.getState().catch(() => null) : null;
+    const hasActiveJob = Boolean(job) && !['completed', 'failed'].includes(String(jobState ?? ''));
+
+    const progress = job?.progress;
+    const targetVmids = Array.isArray(progress?.targetVmids) ? parseVmidsToSet(progress.targetVmids) : null;
+    const reconnectedVmids = parseVmidsToSet(progress?.reconnectedVmids);
+    const hasProgress = progress?.type === 'customization-reconnect' && targetVmids instanceof Set && targetVmids.size > 0;
+    return {
+      jobState,
+      hasActiveJob,
+      hasProgress,
+      isComplete: hasProgress && [...targetVmids].every(vmid => reconnectedVmids.has(vmid)),
+      readyVmids: reconnectedVmids,
+      startedVmids: reconnectedVmids,
+      targetVmids
+    };
+  } catch (error) {
+    console.warn(`Unable to fetch Ansible customization progress for deployment ${deployment.id}`, error);
+    return emptyReadinessProgress();
+  }
+};
+
 const resolveDeploymentDisplayStatus = (status, readinessProgress) =>
   readinessProgress?.jobState === 'waiting' ? `${status} - queued` : status;
 
@@ -1479,18 +1523,18 @@ const buildDeploymentVmRuntimeStates = async ({
     const isKnownReady = readyVmids.has(Number(vm.vmid));
     const isKnownStarted = isKnownReady || startedVmids.has(Number(vm.vmid));
     const isTrackedGuestReadiness =
-      !shouldUseGuestReadinessProgress(deployment.status)
+      !usesPerVmProgressTracking(deployment.status)
       || !(operationTargetVmids instanceof Set)
       || operationTargetVmids.has(Number(vm.vmid));
     const isFinishedDeploymentReady =
-      ['deployed', 'running', 'mixed', 'customizing'].includes(deployment.status) &&
+      ['deployed', 'running', 'mixed'].includes(deployment.status) &&
       resource?.status === 'running';
     const guestStarted =
       isFinishedDeploymentReady ||
       (
         resource?.status === 'running' &&
         (
-          !shouldUseGuestReadinessProgress(deployment.status)
+          !usesPerVmProgressTracking(deployment.status)
           || !isTrackedGuestReadiness
           || isKnownStarted
         )
@@ -1984,6 +2028,10 @@ app.get(
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
       const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
+      const customizationProgress = deployment.status === 'customizing'
+        ? await fetchAnsibleCustomizationProgress(deployment)
+        : null;
+      const vmProgressSource = customizationProgress ?? readinessProgress;
       const derivedDeploymentStatus = deriveDeploymentStatusFromResources(
         deployment.status,
         vmPlan.vms.map(vm => vm.vmid),
@@ -2005,9 +2053,9 @@ app.get(
           deployment: runtimeDeployment,
           vmPlan,
           resourceByVmid: resourceByVmid ?? new Map(),
-          readyVmids: readinessProgress.readyVmids,
-          startedVmids: readinessProgress.startedVmids,
-          operationTargetVmids: readinessProgress.targetVmids
+          readyVmids: vmProgressSource.readyVmids,
+          startedVmids: vmProgressSource.startedVmids,
+          operationTargetVmids: vmProgressSource.targetVmids
         }))
       });
     }
@@ -2130,6 +2178,10 @@ app.get(
     }
 
     const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
+    const customizationProgress = deployment.status === 'customizing'
+      ? await fetchAnsibleCustomizationProgress(deployment)
+      : null;
+    const vmProgressSource = customizationProgress ?? readinessProgress;
     const derivedDeploymentStatus = deriveDeploymentStatusFromResources(
       deployment.status,
       vmPlan.vms.map(vm => vm.vmid),
@@ -2149,11 +2201,11 @@ app.get(
       deployment: runtimeDeployment,
       vmPlan,
       resourceByVmid: resourceByVmid ?? new Map(),
-      readyVmids: readinessProgress.readyVmids,
-      startedVmids: readinessProgress.startedVmids,
-      operationTargetVmids: readinessProgress.targetVmids
+      readyVmids: vmProgressSource.readyVmids,
+      startedVmids: vmProgressSource.startedVmids,
+      operationTargetVmids: vmProgressSource.targetVmids
     });
-    const activeWorkstationNumbers = deriveTargetWorkstationNumbers(vmPlan, readinessProgress.targetVmids);
+    const activeWorkstationNumbers = deriveTargetWorkstationNumbers(vmPlan, vmProgressSource.targetVmids);
 
     res.json({
       deployment: {

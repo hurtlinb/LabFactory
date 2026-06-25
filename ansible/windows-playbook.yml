@@ -47,13 +47,9 @@
         - second_disk_configure | default(true) | bool
 
     - name: Reboot (applique le nouveau nom d'ordinateur)
+      # Fire-and-forget: la reconnexion est suivie côté Node (waitForWindowsReconnect dans
+      # ansibleWorker.js), VM par VM, pour ne pas bloquer tout le lot sur la plus lente.
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
       changed_when: true
       failed_when: false
-
-    - name: Attendre le retour après redémarrage
-      ansible.builtin.wait_for_connection:
-        timeout: 1800
-        sleep: 10
-        delay: 60
