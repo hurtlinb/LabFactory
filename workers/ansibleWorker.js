@@ -22,10 +22,7 @@ const dbPool = new Pool({
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const WINDOWS_RECONNECT_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
-// Covers a whole batch per round (not a single host) — see the same lesson learned today in
-// terraformWorker.js's readiness check: too short here means the slowest/unreachable host in the
-// round kills the ansible-playbook process before the marker-writing task ever runs for anyone.
-const WINDOWS_RECONNECT_ATTEMPT_TIMEOUT_SECONDS = 180;
+const WINDOWS_RECONNECT_ATTEMPT_TIMEOUT_SECONDS = 45;
 const RECONNECT_RETRY_BACKOFF_STEPS = [
   { afterMs: 0, delayMs: 5000 },
   { afterMs: 60 * 1000, delayMs: 15000 },
@@ -44,132 +41,67 @@ const computeReconnectRetryDelayMs = elapsedMs => {
 const windowsReconnectCheckPlaybook = `- name: Wait for Windows guests to reconnect after reboot
   hosts: windows_reconnect_targets
   gather_facts: false
-  strategy: free
   tasks:
     - name: Ping WinRM
       ansible.windows.win_ping:
-      ignore_errors: true
-      register: win_ping_result
-
-    - name: Record per-host reconnect marker
-      ansible.builtin.copy:
-        content: "ready"
-        dest: "{{ marker_dir }}/{{ inventory_hostname }}"
-        mode: '0644'
-      delegate_to: localhost
-      when: win_ping_result is succeeded
 `;
 
-const buildWindowsReconnectInventory = (targets, password) => {
-  const hosts = targets
-    .map(target => [
-      `        vm_${target.vmid}:`,
-      `          ansible_host: ${JSON.stringify(target.ipAddress)}`,
-      `          ansible_user: ${JSON.stringify(String(target.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(target.language))}`,
-      `          ansible_password: ${JSON.stringify(password)}`,
-      '          ansible_connection: winrm',
-      '          ansible_port: 5986',
-      '          ansible_winrm_scheme: https',
-      '          ansible_winrm_transport: basic',
-      '          ansible_winrm_server_cert_validation: ignore',
-      '          ansible_winrm_operation_timeout_sec: 8',
-      '          ansible_winrm_read_timeout_sec: 12'
-    ].join('\n'))
-    .join('\n');
-
-  return `all:
+const buildWindowsReconnectInventory = (target, password) => `all:
   children:
     windows_reconnect_targets:
       hosts:
-${hosts}
+        vm_${target.vmid}:
+          ansible_host: ${JSON.stringify(target.ipAddress)}
+          ansible_user: ${JSON.stringify(String(target.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(target.language))}
+          ansible_password: ${JSON.stringify(password)}
+          ansible_connection: winrm
+          ansible_port: 5986
+          ansible_winrm_scheme: https
+          ansible_winrm_transport: basic
+          ansible_winrm_server_cert_validation: ignore
+          ansible_winrm_operation_timeout_sec: 8
+          ansible_winrm_read_timeout_sec: 12
 `;
-};
 
-// Round-based reconnect check: every still-pending VM is pinged in ONE ansible-playbook run per
-// round (Ansible's own forking handles the parallelism), so a slow/unreachable VM never blocks
-// others from being checked or reported — same fix shape as waitForWindowsBatchReadiness in
-// terraformWorker.js, kept separate/duplicated rather than shared given how recently that one was
-// stabilized. Unlike that one, a single successful ping is enough (no stability recheck needed).
-const waitForWindowsReconnect = async ({ targets, password, signal, onHostReady }) => {
-  if (!targets.length) {
-    return;
-  }
-
+// Each Windows VM gets its own independent ansible-playbook invocation, retried on its own
+// schedule — no shared process, round, or timeout window with any other VM. A slow or hanging
+// guest can therefore never delay or wipe out progress already made on another one.
+const waitForWindowsHostReconnect = async ({ target, password, signal }) => {
   const startedAt = Date.now();
-  const baseDir = path.join(tmpdir(), `labfactory-windows-reconnect-${process.pid}-${Date.now()}`);
-  await fs.mkdir(baseDir, { recursive: true });
-
-  const pending = new Map(targets.map(target => [Number(target.vmid), target]));
   let lastError = null;
-  let roundIndex = 0;
 
-  try {
-    while (pending.size > 0) {
-      if (Date.now() - startedAt >= WINDOWS_RECONNECT_WAIT_TIMEOUT_MS) {
-        const stillPending = Array.from(pending.values()).map(target => target.name).join(', ');
-        throw new Error(
-          `Timed out waiting for Windows guests to reconnect after reboot: ${stillPending}${lastError ? ` (last error: ${lastError.message})` : ''}`
-        );
-      }
-      if (signal?.aborted) {
-        throw signal.reason instanceof Error ? signal.reason : new Error('Windows reconnect wait aborted');
-      }
+  while (Date.now() - startedAt < WINDOWS_RECONNECT_WAIT_TIMEOUT_MS) {
+    if (signal?.aborted) {
+      throw signal.reason instanceof Error ? signal.reason : new Error('Windows reconnect wait aborted');
+    }
 
-      const roundDir = path.join(baseDir, String(roundIndex));
-      const inventoryPath = path.join(baseDir, `round-${roundIndex}.yml`);
-      const playbookPath = path.join(baseDir, `round-${roundIndex}.playbook.yml`);
-      await fs.mkdir(roundDir, { recursive: true });
-      await fs.writeFile(inventoryPath, buildWindowsReconnectInventory(Array.from(pending.values()), password), 'utf8');
+    const attemptDir = path.join(tmpdir(), `labfactory-windows-reconnect-${target.vmid}-${process.pid}-${Date.now()}`);
+    await fs.mkdir(attemptDir, { recursive: true });
+    const inventoryPath = path.join(attemptDir, 'inventory.yml');
+    const playbookPath = path.join(attemptDir, 'playbook.yml');
+
+    try {
+      await fs.writeFile(inventoryPath, buildWindowsReconnectInventory(target, password), 'utf8');
       await fs.writeFile(playbookPath, windowsReconnectCheckPlaybook, 'utf8');
 
-      try {
-        await runCommand(
-          'timeout',
-          [
-            `${WINDOWS_RECONNECT_ATTEMPT_TIMEOUT_SECONDS}s`,
-            'ansible-playbook',
-            '--inventory',
-            inventoryPath,
-            '--extra-vars',
-            JSON.stringify({ marker_dir: roundDir }),
-            playbookPath
-          ],
-          { cwd: ansibleDir, env: { ...process.env }, signal }
-        );
-      } catch (error) {
-        lastError = error;
-      }
-
-      let readyHostKeys;
-      try {
-        readyHostKeys = new Set(await fs.readdir(roundDir));
-      } catch {
-        readyHostKeys = new Set();
-      }
-
-      for (const vmid of [...pending.keys()]) {
-        if (readyHostKeys.has(`vm_${vmid}`)) {
-          const target = pending.get(vmid);
-          pending.delete(vmid);
-          await onHostReady(target);
-        }
-      }
-
-      await Promise.all([
-        fs.rm(roundDir, { recursive: true, force: true }),
-        fs.rm(inventoryPath, { force: true }),
-        fs.rm(playbookPath, { force: true })
-      ]);
-
-      if (pending.size === 0) {
-        break;
-      }
-      roundIndex += 1;
-      await sleep(computeReconnectRetryDelayMs(Date.now() - startedAt));
+      await runCommand(
+        'timeout',
+        [`${WINDOWS_RECONNECT_ATTEMPT_TIMEOUT_SECONDS}s`, 'ansible-playbook', '--inventory', inventoryPath, playbookPath],
+        { cwd: ansibleDir, env: { ...process.env }, signal }
+      );
+      return;
+    } catch (error) {
+      lastError = error;
+    } finally {
+      await fs.rm(attemptDir, { recursive: true, force: true });
     }
-  } finally {
-    await fs.rm(baseDir, { recursive: true, force: true });
+
+    await sleep(computeReconnectRetryDelayMs(Date.now() - startedAt));
   }
+
+  throw new Error(
+    `Timed out waiting for Windows guest ${target.name} to reconnect after reboot${lastError ? `: ${lastError.message}` : ''}`
+  );
 };
 
 const createCustomizationReconnectReporter = (job, targetVmids) => {
@@ -456,12 +388,16 @@ export function startAnsibleWorker(connection) {
               job,
               windowsTimezoneTargets.map(target => target.vmid)
             );
-            await waitForWindowsReconnect({
-              targets: windowsTimezoneTargets,
-              password: extraVars.windows_admin_password,
-              signal: abortController.signal,
-              onHostReady: target => reconnectReporter.markReconnected(target.vmid)
-            });
+            await Promise.all(
+              windowsTimezoneTargets.map(async target => {
+                await waitForWindowsHostReconnect({
+                  target,
+                  password: extraVars.windows_admin_password,
+                  signal: abortController.signal
+                });
+                await reconnectReporter.markReconnected(target.vmid);
+              })
+            );
 
             const hasDomainTargets = windowsTimezoneTargets.some(t => t.domainRole);
             if (hasDomainTargets) {
