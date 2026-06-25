@@ -1105,11 +1105,13 @@ function renderDashboard() {
         const badgeClass =
           ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
           ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
-          d.status === 'stopped' ? 'dash-badge-stopped' : 'dash-badge-destroyed';
+          d.status === 'stopped' ? 'dash-badge-stopped' :
+          d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
         const badgeText =
           ['running', 'deployed', 'mixed'].includes(d.status) ? 'Active' :
           ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
-          d.status === 'stopped' ? 'Stopped' : escapeHtml(d.status || 'idle');
+          d.status === 'stopped' ? 'Stopped' :
+          d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
         return `
           <div class="dash-row">
             <div class="dash-row-icon">
@@ -1138,11 +1140,13 @@ function renderDashboard() {
               const badgeClass =
                 ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
                 ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
-                d.status === 'stopped' ? 'dash-badge-stopped' : 'dash-badge-destroyed';
+                d.status === 'stopped' ? 'dash-badge-stopped' :
+                d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
               const badgeText =
                 ['running', 'deployed', 'mixed'].includes(d.status) ? 'Active' :
                 ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
-                d.status === 'stopped' ? 'Stopped' : escapeHtml(d.status || 'idle');
+                d.status === 'stopped' ? 'Stopped' :
+                d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
               return `
                 <div class="dash-classroom-lab">
                   <div class="dash-row-info">

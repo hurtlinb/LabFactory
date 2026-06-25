@@ -18,7 +18,7 @@ import {
 
 const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
-const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
+const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 120 * 60 * 1000;
 const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 45;
 
 // Guest readiness (cloudbase-init / cloud-init) typically takes minutes, not seconds — poll fast

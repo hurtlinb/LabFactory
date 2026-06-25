@@ -1347,6 +1347,12 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted 
       }
       return guestReady ? 'ready' : 'waiting for reboot';
     }
+    if (deploymentStatus === 'failed') {
+      if (vm.isTrackedGuestReadiness === false) {
+        return 'ready';
+      }
+      return guestReady ? 'ready' : 'failed';
+    }
     if (deploymentStatus === 'starting') {
       return 'starting';
     }
@@ -1372,12 +1378,13 @@ const buildDeploymentVmIpAddress = vm => {
 const shouldUseGuestReadinessProgress = deploymentStatus =>
   ['queued', 'deploying', 'starting'].includes(deploymentStatus);
 
-// Broader than shouldUseGuestReadinessProgress: also covers 'customizing', which has its own
-// per-VM progress source (the Ansible reconnect-after-reboot job) and its own status label in
-// inferDeploymentVmStatus — kept separate from shouldUseGuestReadinessProgress so that function's
-// "waiting for cloudbase-init/cloud-init" branch doesn't swallow the customizing case.
+// Broader than shouldUseGuestReadinessProgress: also covers 'customizing' and 'failed', which have
+// their own per-VM progress source (the Ansible reconnect job, or the last readiness/reconnect
+// progress recorded before the job failed) and their own status label in inferDeploymentVmStatus —
+// kept separate from shouldUseGuestReadinessProgress so that function's "waiting for
+// cloudbase-init/cloud-init" branch doesn't swallow those cases.
 const usesPerVmProgressTracking = deploymentStatus =>
-  shouldUseGuestReadinessProgress(deploymentStatus) || deploymentStatus === 'customizing';
+  shouldUseGuestReadinessProgress(deploymentStatus) || ['customizing', 'failed'].includes(deploymentStatus);
 
 const resolveReadinessAction = deployment => {
   const action = String(deployment?.lastAction ?? '').trim();
@@ -1659,6 +1666,10 @@ const deriveDeploymentStatusFromResources = (
   { reconcileTransient = false } = {}
 ) => {
   if (!(resourceByVmid instanceof Map)) {
+    return currentStatus;
+  }
+
+  if (currentStatus === 'failed') {
     return currentStatus;
   }
 
