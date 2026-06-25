@@ -6,7 +6,7 @@ All notable changes to LabFactory are documented here.
 
 ---
 
-## [1.7.3] — 2026-06-24
+## [1.7.3] — 2026-06-25
 
 ### Ajouts
 - Indicateur d'état Redis dans la sidebar, au même titre que Postgres/Proxmox/Terraform/Ansible
@@ -14,6 +14,7 @@ All notable changes to LabFactory are documented here.
 
 ### Corrections
 - Le timeout par round du check de disponibilité Windows (60s) était calibré pour une seule VM ; insuffisant maintenant qu'un round couvre tout un lot. En présence de VM injoignables dans le lot, Ansible ne pouvait jamais atteindre la tâche d'écriture du marqueur pour aucune VM, donc rien n'était jamais confirmé prêt — même quand les logs montraient des succès réels. Porté à 180s
+- **Critique** — Constaté sur un lab avec beaucoup de VM Win11 (boot/sysprep lent) : même avec le fix ci-dessus, chaque round se faisait quand même tuer par le timeout (mesuré à 3min30 = 180s + 30s de backoff, en boucle, pendant 20+ minutes). Cause : les timeouts WinRM par VM (`operation_timeout_sec: 30` / `read_timeout_sec: 45`) venaient de l'ancien modèle "1 VM à la fois" — une seule VM dont la connexion WinRM traîne (port ouvert mais service pas encore pleinement opérationnel pendant sysprep) suffit à empêcher Ansible d'atteindre la tâche de marquage pour **tout le round**, et notre code réinitialisait alors la progression de confirmation de chaque VM à chaque round raté. Réduits à 3s/5s : une VM pas encore prête échoue vite et n'affecte plus les autres
 
 ---
 
