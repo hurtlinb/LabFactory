@@ -98,6 +98,8 @@ const settingsStatus = document.getElementById('settingsStatus');
 const dangerZoneStatus = document.getElementById('dangerZoneStatus');
 const postgresStatusIndicator = document.getElementById('postgresStatusIndicator');
 const postgresStatusLabel = document.getElementById('postgresStatusLabel');
+const redisStatusIndicator = document.getElementById('redisStatusIndicator');
+const redisStatusLabel = document.getElementById('redisStatusLabel');
 const proxmoxStatusIndicator = document.getElementById('proxmoxStatusIndicator');
 const proxmoxStatusLabel = document.getElementById('proxmoxStatusLabel');
 const terraformWorkerStatusIndicator = document.getElementById('terraformWorkerStatusIndicator');
@@ -2103,6 +2105,13 @@ async function loadConnectionStatuses() {
       payload?.postgres?.ok ? 'Connected to PostgreSQL' : String(payload?.postgres?.error || 'Unable to connect to PostgreSQL')
     );
     applyHealthIndicator(
+      redisStatusIndicator,
+      redisStatusLabel,
+      'Redis',
+      payload?.redis?.ok ? 'ok' : 'error',
+      payload?.redis?.ok ? 'Connected to Redis' : String(payload?.redis?.error || 'Unable to connect to Redis')
+    );
+    applyHealthIndicator(
       proxmoxStatusIndicator,
       proxmoxStatusLabel,
       'Proxmox',
@@ -2129,6 +2138,7 @@ async function loadConnectionStatuses() {
   } catch (error) {
     const message = error.message || 'Unable to load connection statuses';
     applyHealthIndicator(postgresStatusIndicator, postgresStatusLabel, 'Postgres', 'error', message);
+    applyHealthIndicator(redisStatusIndicator, redisStatusLabel, 'Redis', 'error', message);
     applyHealthIndicator(proxmoxStatusIndicator, proxmoxStatusLabel, 'Proxmox', 'error', message);
     applyHealthIndicator(terraformWorkerStatusIndicator, terraformWorkerStatusLabel, 'Terraform Worker', 'error', message);
     applyHealthIndicator(ansibleWorkerStatusIndicator, ansibleWorkerStatusLabel, 'Ansible Worker', 'error', message);

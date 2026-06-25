@@ -1783,6 +1783,7 @@ app.get(
   wrapAsync(async (_req, res) => {
     let postgres = { ok: true };
     let proxmox = { ok: true };
+    let redis = { ok: true };
 
     try {
       await dbPool.query('SELECT 1');
@@ -1802,6 +1803,15 @@ app.get(
       };
     }
 
+    try {
+      await redisClient.ping();
+    } catch (error) {
+      redis = {
+        ok: false,
+        error: error?.message ?? 'Unable to connect to Redis'
+      };
+    }
+
     const workers = Object.fromEntries(
       await Promise.all(
         Object.keys(queueNames).map(async workerName => {
@@ -1815,7 +1825,7 @@ app.get(
       )
     );
 
-    res.json({ postgres, proxmox, workers });
+    res.json({ postgres, proxmox, redis, workers });
   })
 );
 
