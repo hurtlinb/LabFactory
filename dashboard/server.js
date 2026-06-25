@@ -950,7 +950,7 @@ const mapDeployment = row => ({
 });
 
 const deploymentBusyStatuses = new Set(['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying']);
-const workstationRedeployableStatuses = new Set(['running']);
+const workstationRedeployableStatuses = new Set(['running', 'failed']);
 
 const parseVmidsToSet = value =>
   new Set(
@@ -2557,7 +2557,7 @@ app.post(
       resourceByVmid
     );
     if (!workstationRedeployableStatuses.has(effectiveDeploymentStatus)) {
-      res.status(409).json({ error: 'workstation redeploy is only available when the lab is running' });
+      res.status(409).json({ error: 'workstation redeploy is only available when the lab is running or failed' });
       return;
     }
 

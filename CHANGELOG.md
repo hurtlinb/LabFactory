@@ -10,6 +10,7 @@ All notable changes to LabFactory are documented here.
 
 ### Ajouts
 - Indicateur d'état Redis dans la sidebar, au même titre que Postgres/Proxmox/Terraform/Ansible
+- Le redéploiement d'une workstation spécifique (déjà possible quand le lab est `running`) fonctionne désormais aussi quand le déploiement est en `failed` — plus besoin de détruire et refaire tout le lab pour corriger une seule VM en panne
 - L'attente de reconnexion post-redémarrage (phase de personnalisation Windows) est désormais suivie VM par VM au lieu d'attendre une seule exécution Ansible globale — une VM lente à reconnecter ne bloque plus la détection des autres ni l'avancement du déploiement. Nouvel état `waiting for reboot` visible dans le détail du déploiement, avec progression individuelle par VM
 
 ### Corrections
