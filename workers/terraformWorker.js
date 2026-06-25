@@ -1656,6 +1656,18 @@ export function startTerraformWorker(connection) {
             console.warn(`Post-destroy volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
           });
         } else {
+          if (replaceVmids.length > 0) {
+            const replaceVmDefinitions = (Array.isArray(merged.vm_definitions) ? merged.vm_definitions : [])
+              .filter(vm => replaceVmids.includes(Number(vm.vmid)));
+            // A replace recreates the same VMID — if a prior destroy/replace left orphaned Ceph
+            // volumes behind for it (e.g. an interrupted earlier attempt), Terraform's create step
+            // collides with them ("rbd: ... already exists") since it only knows about the
+            // resource in its own state, not stray volumes Proxmox never finished cleaning up.
+            await cleanupDestroyedVmVolumes(merged, replaceVmDefinitions).catch(error => {
+              console.warn(`Pre-replace volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
+            });
+          }
+
           const planAndApply = async () => {
             const output = await runCommand(
               'terraform',
