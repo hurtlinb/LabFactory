@@ -8,12 +8,15 @@
     - name: Display lab context
       ansible.builtin.debug:
         msg: "Customizing {{ lab_instance_id | default('lab-demo') }} deployment {{ deployment_id | default('') }} on {{ inventory_hostname }} (run {{ run_id | default('demo-run') }})"
+      ignore_unreachable: true
 
     - name: Set Windows hostname
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "if ((Get-CimInstance Win32_ComputerSystem).Name -ne '{{ target_hostname }}') { Rename-Computer -NewName '{{ target_hostname }}' -Force -PassThru | Out-Null; Write-Output 'changed' }"
       register: windows_hostname_result
       changed_when: "'changed' in (windows_hostname_result.stdout | default(''))"
+      ignore_errors: true
+      ignore_unreachable: true
       when:
         - target_hostname is defined
         - target_hostname is not none
@@ -24,6 +27,8 @@
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "if ((Get-TimeZone).Id -ne '{{ target_timezone }}') { Set-TimeZone -Id '{{ target_timezone }}'; Write-Output 'changed' }"
       changed_when: "'changed' in (stdout | default(''))"
+      ignore_errors: true
+      ignore_unreachable: true
       when:
         - target_timezone is defined
         - target_timezone is not none
@@ -42,6 +47,8 @@
           }
       register: windows_second_disk_result
       changed_when: "'changed' in (windows_second_disk_result.output | default([]) | join(' '))"
+      ignore_errors: true
+      ignore_unreachable: true
       when:
         - second_disk_size_gb is defined
         - second_disk_configure | default(true) | bool
@@ -53,3 +60,4 @@
         powershell -NoProfile -NonInteractive -Command "Restart-Computer -Force"
       changed_when: true
       failed_when: false
+      ignore_unreachable: true
