@@ -53,6 +53,7 @@ const MAX_TERRAFORM_PARALLELISM = 64;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const terraformDir = path.resolve(__dirname, '../terraform');
+const ansibleDir = path.resolve(__dirname, '../ansible');
 const terraformVarsPath = path.resolve(__dirname, '../config/terraform-settings.json');
 const sanitizedVarsPath = path.resolve(terraformDir, '.terraform-vars.json');
 const dbPool = new Pool({
@@ -1203,7 +1204,7 @@ const waitForWindowsBatchReadiness = async ({ targets, password, signal, onHostR
               JSON.stringify({ marker_dir: roundDir }),
               playbookPath
             ],
-            { cwd: terraformDir, env: { ...process.env }, signal }
+            { cwd: ansibleDir, env: { ...process.env }, signal }
           );
         } catch (error) {
           // Some hosts in this round may have failed/been unreachable — marker files (read below)
