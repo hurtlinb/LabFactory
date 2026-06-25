@@ -6,6 +6,24 @@ All notable changes to LabFactory are documented here.
 
 ---
 
+## [1.7.3] — 2026-06-24
+
+### Ajouts
+- Indicateur d'état Redis dans la sidebar, au même titre que Postgres/Proxmox/Terraform/Ansible
+- L'attente de reconnexion post-redémarrage (phase de personnalisation Windows) est désormais suivie VM par VM au lieu d'attendre une seule exécution Ansible globale — une VM lente à reconnecter ne bloque plus la détection des autres ni l'avancement du déploiement. Nouvel état `waiting for reboot` visible dans le détail du déploiement, avec progression individuelle par VM
+
+### Corrections
+- Le timeout par round du check de disponibilité Windows (60s) était calibré pour une seule VM ; insuffisant maintenant qu'un round couvre tout un lot. En présence de VM injoignables dans le lot, Ansible ne pouvait jamais atteindre la tâche d'écriture du marqueur pour aucune VM, donc rien n'était jamais confirmé prêt — même quand les logs montraient des succès réels. Porté à 180s
+
+---
+
+## [1.7.2] — 2026-06-24
+
+### Corrections
+- **Critique** — Tous les jobs Terraform échouaient instantanément (`abortController.signal.setMaxListeners is not a function`). `AbortSignal` est un `EventTarget` standard et n'a pas de méthode `.setMaxListeners()` comme `EventEmitter`. Remplacé par la fonction utilitaire `events.setMaxListeners(n, target)`, qui fonctionne pour les deux
+
+---
+
 ## [1.7.1] — 2026-06-24
 
 ### Améliorations
