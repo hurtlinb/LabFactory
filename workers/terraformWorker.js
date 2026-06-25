@@ -20,6 +20,8 @@ const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
 const WINDOWS_WINRM_WAIT_TIMEOUT_MS = 120 * 60 * 1000;
 const WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS = 45;
+const CFS_LOCK_RETRY_ATTEMPTS = 4;
+const CFS_LOCK_RETRY_DELAY_MS = 20000;
 
 // Guest readiness (cloudbase-init / cloud-init) typically takes minutes, not seconds — poll fast
 // at first, then back off so we don't spawn an ansible-playbook process every 5s for the long tail.
@@ -210,6 +212,26 @@ const buildTerraformReplaceArgs = vmids =>
 
 const buildTerraformTargetArgs = vmids =>
   normalizeVmids(vmids).map(vmid => `-target=proxmox_vm_qemu.lab_vm["${vmid}"]`);
+
+const stripAnsiCodes = text => String(text ?? '').replace(/\x1B\[[0-9;]*m/g, '');
+
+// Ceph's per-storage cfs-lock can time out under the burst of concurrent clones a large lab
+// produces, even at a conservative -parallelism. Terraform doesn't retry a failed resource within
+// one apply, so we parse its CLI error blocks (delimited by ╷/╵) for cfs-lock failures specifically
+// and pull out which VMIDs they hit, to retry just those rather than failing the whole deployment.
+const extractCfsLockFailedVmids = output => {
+  const text = stripAnsiCodes(output);
+  const blocks = text.split('╷').slice(1).map(block => block.split('╵')[0]);
+  const vmids = new Set();
+  for (const block of blocks) {
+    if (!/cfs-lock/i.test(block)) continue;
+    const match = block.match(/proxmox_vm_qemu\.lab_vm\["(\d+)"\]/);
+    if (match) {
+      vmids.add(Number(match[1]));
+    }
+  }
+  return normalizeVmids([...vmids]);
+};
 
 const fetchVmConfig = async (envSettings, node, vmid) => {
   const apiUrl = new URL(
@@ -1669,17 +1691,45 @@ export function startTerraformWorker(connection) {
           }
 
           const planAndApply = async () => {
-            const output = await runCommand(
+            let output = await runCommand(
               'terraform',
               ['plan', '-out=tfplan', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`, ...replaceArgs, ...targetArgs],
               { cwd: terraformDir, env, signal: abortController.signal }
             );
-            await runCommand(
-              'terraform',
-              ['apply', '-auto-approve', `-parallelism=${terraformParallelism}`, 'tfplan'],
-              { cwd: terraformDir, env, signal: abortController.signal }
-            );
-            return output;
+
+            for (let attempt = 0; ; attempt += 1) {
+              try {
+                await runCommand(
+                  'terraform',
+                  ['apply', '-auto-approve', `-parallelism=${terraformParallelism}`, 'tfplan'],
+                  { cwd: terraformDir, env, signal: abortController.signal }
+                );
+                return output;
+              } catch (error) {
+                const failedVmids = extractCfsLockFailedVmids(`${error.stdout ?? ''}\n${error.stderr ?? ''}`);
+                if (!failedVmids.length || attempt >= CFS_LOCK_RETRY_ATTEMPTS) {
+                  throw error;
+                }
+                console.warn(
+                  `Terraform apply hit a Ceph cfs-lock timeout for VMID(s) ${failedVmids.join(', ')} — retrying ` +
+                    `(attempt ${attempt + 1}/${CFS_LOCK_RETRY_ATTEMPTS}) after a ${CFS_LOCK_RETRY_DELAY_MS / 1000}s backoff`
+                );
+                await sleep(CFS_LOCK_RETRY_DELAY_MS);
+                output = await runCommand(
+                  'terraform',
+                  [
+                    'plan',
+                    '-out=tfplan',
+                    '-input=false',
+                    `-parallelism=${terraformParallelism}`,
+                    `-var-file=${preparedVarFile}`,
+                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => replaceVmids.includes(vmid))),
+                    ...buildTerraformTargetArgs(failedVmids)
+                  ],
+                  { cwd: terraformDir, env, signal: abortController.signal }
+                );
+              }
+            }
           };
 
           try {

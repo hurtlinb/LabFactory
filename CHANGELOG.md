@@ -6,6 +6,13 @@ All notable changes to LabFactory are documented here.
 
 ---
 
+## [1.7.4] — 2026-06-25
+
+### Corrections
+- **Critique** — Sur un gros lab (66 VM en prod), le verrou Ceph `cfs-lock 'storage-ceph-pool'` expirait pour une vingtaine de VM en plein `terraform apply`, même avec le parallélisme déjà au minimum sûr (10) — Terraform ne réessaie jamais une ressource individuelle qui échoue au sein d'un même apply, donc tout le déploiement échouait à cause de ce sous-ensemble. Ajout d'un retry automatique ciblé : les erreurs `cfs-lock` sont détectées dans la sortie de Terraform, les VMID concernées sont extraites, et un nouveau `plan`+`apply` limité à ces seules VM est relancé après un backoff de 20s (jusqu'à 4 tentatives) — sans toucher aux VM déjà créées avec succès
+
+---
+
 ## [1.7.3] — 2026-06-25
 
 ### Ajouts
