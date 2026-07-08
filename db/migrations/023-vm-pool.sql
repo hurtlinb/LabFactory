@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS vm_pool_instances (
   proxmox_vmid INTEGER NOT NULL UNIQUE,
   name TEXT NOT NULL,
   node TEXT,
-  pool_name TEXT NOT NULL DEFAULT 'vm-pool',
+  pool_name TEXT NOT NULL DEFAULT 'pool',
   pool_ip_address TEXT,
   status TEXT NOT NULL DEFAULT 'preparing',
   reserved_by_deployment_id UUID REFERENCES lab_deployments(id) ON DELETE SET NULL,

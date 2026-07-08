@@ -70,7 +70,7 @@ The UI exposes OS selection with logos and uses the selected OS in the model car
 ### Prepared Windows VM Pool
 Windows VM models can define a `Pool ready target` from the VM Models page.
 
-When the target is greater than `0`, the `pool-manager` service keeps fresh Windows clones ready in the Proxmox resource pool configured by `VM_POOL_PROXMOX_POOL` (`vm-pool` by default). A prepared VM is considered ready only after WinRM responds and Cloudbase-Init has written its `done.flag`.
+When the target is greater than `0`, the `pool-manager` service keeps fresh Windows clones ready in the Proxmox resource pool configured by `VM_POOL_PROXMOX_POOL` (`pool` in production, `pool-dev` in development). A prepared VM is considered ready only after WinRM responds and Cloudbase-Init has written its `done.flag`.
 
 Important behavior:
 - only Windows models are currently pooled

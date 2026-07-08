@@ -106,6 +106,8 @@ const terraformWorkerStatusIndicator = document.getElementById('terraformWorkerS
 const terraformWorkerStatusLabel = document.getElementById('terraformWorkerStatusLabel');
 const ansibleWorkerStatusIndicator = document.getElementById('ansibleWorkerStatusIndicator');
 const ansibleWorkerStatusLabel = document.getElementById('ansibleWorkerStatusLabel');
+const poolManagerStatusIndicator = document.getElementById('poolManagerStatusIndicator');
+const poolManagerStatusLabel = document.getElementById('poolManagerStatusLabel');
 const appVersion = document.getElementById('appVersion');
 const changelogBtn = document.getElementById('changelogBtn');
 const changelogDialog = document.getElementById('changelogDialog');
@@ -2140,6 +2142,7 @@ async function loadConnectionStatuses() {
 
     const terraformWorkerStatus = payload?.workers?.terraform ?? 'unknown';
     const ansibleWorkerStatus = payload?.workers?.ansible ?? 'unknown';
+    const poolManagerStatus = payload?.workers?.['pool-manager'] ?? 'unknown';
     applyHealthIndicator(
       terraformWorkerStatusIndicator,
       terraformWorkerStatusLabel,
@@ -2154,6 +2157,13 @@ async function loadConnectionStatuses() {
       ansibleWorkerStatus === 'running' ? 'ok' : ansibleWorkerStatus === 'paused' ? 'warning' : 'error',
       `Ansible worker: ${ansibleWorkerStatus}`
     );
+    applyHealthIndicator(
+      poolManagerStatusIndicator,
+      poolManagerStatusLabel,
+      'Pool Manager',
+      poolManagerStatus === 'running' ? 'ok' : poolManagerStatus === 'paused' ? 'warning' : 'error',
+      `Pool manager: ${poolManagerStatus}`
+    );
   } catch (error) {
     const message = error.message || 'Unable to load connection statuses';
     applyHealthIndicator(postgresStatusIndicator, postgresStatusLabel, 'Postgres', 'error', message);
@@ -2161,6 +2171,7 @@ async function loadConnectionStatuses() {
     applyHealthIndicator(proxmoxStatusIndicator, proxmoxStatusLabel, 'Proxmox', 'error', message);
     applyHealthIndicator(terraformWorkerStatusIndicator, terraformWorkerStatusLabel, 'Terraform Worker', 'error', message);
     applyHealthIndicator(ansibleWorkerStatusIndicator, ansibleWorkerStatusLabel, 'Ansible Worker', 'error', message);
+    applyHealthIndicator(poolManagerStatusIndicator, poolManagerStatusLabel, 'Pool Manager', 'error', message);
   }
 }
 
