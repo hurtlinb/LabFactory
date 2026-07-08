@@ -10,6 +10,7 @@ All notable changes to LabFactory are documented here.
 
 ### Corrections
 - **Critique** — Sur un gros lab (66 VM en prod), le verrou Ceph `cfs-lock 'storage-ceph-pool'` expirait pour une vingtaine de VM en plein `terraform apply`, même avec le parallélisme déjà au minimum sûr (10) — Terraform ne réessaie jamais une ressource individuelle qui échoue au sein d'un même apply, donc tout le déploiement échouait à cause de ce sous-ensemble. Ajout d'un retry automatique ciblé : les erreurs `cfs-lock` sont détectées dans la sortie de Terraform, les VMID concernées sont extraites, et un nouveau `plan`+`apply` limité à ces seules VM est relancé après un backoff de 20s (jusqu'à 4 tentatives) — sans toucher aux VM déjà créées avec succès
+- La release prod précédente (1.7.3) s'est construite et déployée avec une version vide (`GITHUB_REF_NAME` n'a pas donné de valeur utilisable) — images poussées sous les tags littéraux `dashboard-`/`worker-`, et `BUILD_TAG` vide en prod, faisant disparaître le numéro de version dans l'UI (sans impact fonctionnel, les pods tournaient correctement). Le workflow `build-release.yml` échoue désormais explicitement si la version résolue est vide, plutôt que de continuer silencieusement
 
 ---
 

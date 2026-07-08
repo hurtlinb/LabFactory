@@ -15,6 +15,28 @@ import {
   readTerraformEnvSettings,
   sanitizeSettingsInput
 } from '../lib/terraformSettings.js';
+import {
+  applyDeploymentVmAllocations,
+  fetchDeploymentVmAllocations,
+  upsertDeploymentVmAllocation
+} from '../lib/deploymentVmAllocations.js';
+import {
+  buildUpdatedNet0Config,
+  deleteQemuVm as apiDeleteQemuVm,
+  execQemuGuestAgentCommand,
+  fetchVmConfig as apiFetchVmConfig,
+  formatProxmoxError as formatSharedProxmoxError,
+  removeVmFromPool,
+  resolveProxmoxTaskNode,
+  resolveVmNodeByVmid as apiResolveVmNodeByVmid,
+  updateQemuVmConfig as apiUpdateQemuVmConfig,
+  waitForProxmoxTask as apiWaitForProxmoxTask
+} from '../lib/proxmoxApi.js';
+import {
+  buildWindowsApplyLabIdentityCommand,
+  getVmPoolConfig,
+  parseVlanMaskBits as parseSharedVlanMaskBits
+} from '../lib/vmPoolConfig.js';
 
 const LINUX_SSH_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS = 45;
@@ -910,6 +932,19 @@ const createVmHaResource = async (envSettings, vmid, state) => {
   });
 };
 
+const deleteVmHaResource = async (envSettings, vmid) => {
+  const sid = `vm:${Number(vmid)}`;
+  const apiUrl = new URL(
+    `cluster/ha/resources/${encodeURIComponent(sid)}`,
+    `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`
+  );
+  await requestJson({
+    url: apiUrl,
+    method: 'DELETE',
+    ...proxmoxRequestOptions(envSettings)
+  });
+};
+
 const ensureVmHaState = async (envSettings, vmid, state) => {
   const normalizedState = normalizeVmHaState(state);
   if (!normalizedState) {
@@ -1316,9 +1351,404 @@ const waitForGuestReadiness = async ({
   await Promise.all(readinessTasks);
 };
 
-const createDeploymentReadinessReporter = job => {
+const isVmPoolEligible = vm =>
+  isWindowsOsType(vm.osType) &&
+  Number(vm.poolTargetReadyCount ?? 0) > 0 &&
+  String(vm.templateId ?? '').trim();
+
+const applyAllocationsToBlueprint = async (deploymentId, blueprint) => {
+  if (!deploymentId || !Array.isArray(blueprint?.vms)) {
+    return blueprint;
+  }
+  const allocations = await fetchDeploymentVmAllocations(dbPool, deploymentId);
+  return applyDeploymentVmAllocations(blueprint, allocations);
+};
+
+const reserveReadyPoolInstance = async ({ client, vm, deploymentId, runId }) => {
+  const result = await client.query(
+    `SELECT *
+       FROM vm_pool_instances
+      WHERE template_id = $1
+        AND status = 'ready'
+      ORDER BY created_at ASC
+      FOR UPDATE SKIP LOCKED
+      LIMIT 1`,
+    [vm.templateId]
+  );
+  const instance = result.rows[0];
+  if (!instance) {
+    return null;
+  }
+
+  await client.query(
+    `UPDATE vm_pool_instances
+        SET status = 'reserved',
+            reserved_by_deployment_id = $2,
+            reserved_for_vm_id = $3,
+            reserved_run_id = $4,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [instance.id, deploymentId, vm.id, runId]
+  );
+
+  return instance;
+};
+
+const prepareDeploymentVmAllocations = async ({ job, blueprintVms, replaceVmids }) => {
+  const deploymentId = job.data?.deploymentId;
+  if (!deploymentId || !Array.isArray(blueprintVms)) {
+    return { vms: blueprintVms, replacedPoolVmids: [], replaceableTerraformVmids: [] };
+  }
+
+  const replaceSet = new Set(normalizeVmids(replaceVmids));
+  const client = await dbPool.connect();
+  const replacedPoolVmids = [];
+  const replaceableTerraformVmids = [];
+
+  try {
+    await client.query('BEGIN');
+
+    if (replaceSet.size > 0) {
+      const existingForReplace = await client.query(
+        `SELECT *
+           FROM deployment_vm_allocations
+          WHERE deployment_id = $1
+            AND planned_vmid = ANY($2::int[])
+            AND status = 'active'
+          FOR UPDATE`,
+        [deploymentId, Array.from(replaceSet)]
+      );
+      for (const row of existingForReplace.rows) {
+        if (row.source === 'pool') {
+          replacedPoolVmids.push({
+            vmid: Number(row.actual_vmid),
+            poolInstanceId: row.pool_instance_id
+          });
+        } else if (row.source === 'terraform') {
+          replaceableTerraformVmids.push(Number(row.planned_vmid));
+        }
+      }
+      await client.query(
+        `UPDATE deployment_vm_allocations
+            SET status = 'replaced',
+                updated_at = NOW()
+          WHERE deployment_id = $1
+            AND planned_vmid = ANY($2::int[])
+            AND status = 'active'`,
+        [deploymentId, Array.from(replaceSet)]
+      );
+    }
+
+    const existingResult = await client.query(
+      `SELECT *
+         FROM deployment_vm_allocations
+        WHERE deployment_id = $1
+          AND status = 'active'
+        FOR UPDATE`,
+      [deploymentId]
+    );
+    const existingByLogicalId = new Map(existingResult.rows.map(row => [row.logical_vm_id, row]));
+    const allocatedVms = [];
+
+    for (const vm of blueprintVms) {
+      const plannedVmid = Number(vm.plannedVmid ?? vm.vmid);
+      const existing = existingByLogicalId.get(vm.id);
+      if (existing) {
+        allocatedVms.push({
+          ...vm,
+          plannedVmid: Number(existing.planned_vmid),
+          actualVmid: Number(existing.actual_vmid),
+          vmid: Number(existing.actual_vmid),
+          provisioningSource: existing.source,
+          allocationSource: existing.source,
+          poolInstanceId: existing.pool_instance_id ?? null
+        });
+        continue;
+      }
+
+      let allocation = {
+        deploymentId,
+        logicalVmId: vm.id,
+        plannedVmid,
+        actualVmid: plannedVmid,
+        templateId: vm.templateId,
+        source: 'terraform',
+        poolInstanceId: null,
+        runId: job.data.runId,
+        name: vm.name,
+        ipAddress: buildStaticVmIpAddress(vm),
+        node: null
+      };
+
+      if (isVmPoolEligible(vm)) {
+        const instance = await reserveReadyPoolInstance({
+          client,
+          vm,
+          deploymentId,
+          runId: job.data.runId
+        });
+        if (instance) {
+          allocation = {
+            ...allocation,
+            actualVmid: Number(instance.proxmox_vmid),
+            source: 'pool',
+            poolInstanceId: instance.id,
+            node: instance.node ?? null
+          };
+        }
+      }
+
+      await upsertDeploymentVmAllocation(client, allocation);
+      allocatedVms.push({
+        ...vm,
+        plannedVmid: allocation.plannedVmid,
+        actualVmid: allocation.actualVmid,
+        vmid: allocation.actualVmid,
+        provisioningSource: allocation.source,
+        allocationSource: allocation.source,
+        poolInstanceId: allocation.poolInstanceId
+      });
+    }
+
+    await client.query('COMMIT');
+    return { vms: allocatedVms, replacedPoolVmids, replaceableTerraformVmids };
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+const markPoolInstanceFailed = async ({ poolInstanceId, error }) => {
+  if (!poolInstanceId) {
+    return;
+  }
+  await dbPool.query(
+    `UPDATE vm_pool_instances
+        SET status = 'failed',
+            last_error = $2,
+            updated_at = NOW()
+      WHERE id = $1`,
+    [poolInstanceId, String(error?.message ?? error ?? '').slice(0, 2000)]
+  );
+};
+
+const markPoolInstanceConsumed = async poolInstanceId => {
+  if (!poolInstanceId) {
+    return;
+  }
+  await dbPool.query(
+    `UPDATE vm_pool_instances
+        SET status = 'consumed',
+            consumed_at = COALESCE(consumed_at, NOW()),
+            updated_at = NOW()
+      WHERE id = $1`,
+    [poolInstanceId]
+  );
+};
+
+const markReservedPoolInstancesFailedForRun = async ({ deploymentId, runId, error }) => {
+  if (!deploymentId || !runId) {
+    return;
+  }
+  await dbPool.query(
+    `UPDATE vm_pool_instances
+        SET status = 'failed',
+            last_error = $3,
+            updated_at = NOW()
+      WHERE reserved_by_deployment_id = $1
+        AND reserved_run_id = $2
+        AND status = 'reserved'`,
+    [deploymentId, runId, String(error?.message ?? error ?? '').slice(0, 2000)]
+  );
+};
+
+const updateDeploymentVmAllocationRuntime = async ({ deploymentId, logicalVmId, node, ipAddress, name }) => {
+  if (!deploymentId || !logicalVmId) {
+    return;
+  }
+  await dbPool.query(
+    `UPDATE deployment_vm_allocations
+        SET node = $3,
+            ip_address = $4,
+            name = $5,
+            updated_at = NOW()
+      WHERE deployment_id = $1
+        AND logical_vm_id = $2`,
+    [deploymentId, logicalVmId, node ?? null, ipAddress ?? null, name ?? null]
+  );
+};
+
+const extractGatewayFromIpConfig = ipconfig0 => {
+  const match = String(ipconfig0 ?? '').match(/(?:^|,)gw=([^,]+)/);
+  return match?.[1] ?? null;
+};
+
+const configurePooledVmsForDeployment = async ({ job, merged, vms }) => {
+  const pooledVms = (Array.isArray(vms) ? vms : []).filter(vm => vm.provisioningSource === 'pool');
+  if (!pooledVms.length) {
+    return;
+  }
+
+  const poolConfig = getVmPoolConfig();
+  const password = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+  if (!password) {
+    throw new Error('The blueprint windowsAdminPassword is required to consume prepared Windows pool VMs');
+  }
+  const prefixLength = parseSharedVlanMaskBits(merged.network_vlan_mask) ?? 24;
+  const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
+
+  for (const vm of pooledVms) {
+    const vmid = Number(vm.vmid);
+    const targetIp = buildStaticVmIpAddress(vm);
+    const ipconfig0 = buildCloudInitIpConfig({
+      subnetBase: vm.subnetBase,
+      mask: merged.network_vlan_mask,
+      ipLastOctet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
+      gatewayIp: networkGateway
+    });
+    const gateway = extractGatewayFromIpConfig(ipconfig0);
+    if (!targetIp || !gateway) {
+      throw new Error(`Unable to determine static IP/gateway for pooled VM ${vm.name}`);
+    }
+
+    try {
+      const node = await apiResolveVmNodeByVmid(merged, vmid);
+      if (!node) {
+        throw new Error(`Unable to resolve Proxmox node for pooled VMID ${vmid}`);
+      }
+
+      await removeVmFromPool(merged, poolConfig.poolName, vmid).catch(error => {
+        console.warn(`Unable to remove VMID ${vmid} from pool ${poolConfig.poolName}: ${formatSharedProxmoxError(error)}`);
+      });
+
+      const currentConfig = await apiFetchVmConfig(merged, node, vmid);
+      const net0 = buildUpdatedNet0Config({
+        existingNet0: currentConfig.net0,
+        bridge: merged.network_bridge,
+        firewall: Boolean(merged.network_firewall),
+        vlanTag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
+      });
+      await apiUpdateQemuVmConfig(merged, node, vmid, {
+        name: vm.name,
+        tags: mergeVmTags(vm.tags, job.data.deploymentNumber == null ? null : String(job.data.deploymentNumber)),
+        ipconfig0,
+        net0
+      });
+
+      await execQemuGuestAgentCommand(
+        merged,
+        node,
+        vmid,
+        buildWindowsApplyLabIdentityCommand({
+          ipAddress: targetIp,
+          prefixLength,
+          gateway,
+          dnsServers: poolConfig.dnsServers,
+          username: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language),
+          password
+        }),
+        { timeoutMs: 90_000 }
+      );
+
+      await markPoolInstanceConsumed(vm.poolInstanceId);
+      await updateDeploymentVmAllocationRuntime({
+        deploymentId: job.data.deploymentId,
+        logicalVmId: vm.id,
+        node,
+        ipAddress: targetIp,
+        name: vm.name
+      });
+      console.log(`Consumed pooled VMID ${vmid} for deployment ${job.data.deploymentId}`);
+    } catch (error) {
+      await markPoolInstanceFailed({ poolInstanceId: vm.poolInstanceId, error }).catch(() => undefined);
+      throw error;
+    }
+  }
+};
+
+const deletePoolVm = async ({ merged, vmid }) => {
+  const node = await apiResolveVmNodeByVmid(merged, vmid, { allowMissing: true });
+  if (!node) {
+    return false;
+  }
+  try {
+    await requestVmPowerState(merged, node, vmid, 'shutdown').catch(async error => {
+      console.warn(`Graceful shutdown failed for pooled VMID ${vmid}: ${formatSharedProxmoxError(error)}; forcing stop`);
+      await invokeVmPowerAction(merged, node, vmid, 'stop');
+    });
+    await waitForVmPowerState({
+      envSettings: merged,
+      vmids: [vmid],
+      desiredState: 'stopped',
+      timeoutMs: 120_000,
+      returnOnTimeout: true
+    });
+    await deleteVmHaResource(merged, vmid).catch(error => {
+      if (!isProxmoxHaResourceMissing(error)) {
+        throw error;
+      }
+    });
+    const task = await apiDeleteQemuVm(merged, node, vmid);
+    await apiWaitForProxmoxTask(merged, resolveProxmoxTaskNode(task, node), task);
+    return true;
+  } catch (error) {
+    if (isProxmoxVmMissingMessage(formatSharedProxmoxError(error))) {
+      return false;
+    }
+    throw error;
+  }
+};
+
+const deleteReplacedPoolVms = async ({ merged, replacedPoolVmids }) => {
+  for (const target of replacedPoolVmids) {
+    await deletePoolVm({ merged, vmid: target.vmid });
+    if (target.poolInstanceId) {
+      await dbPool.query(
+        `UPDATE vm_pool_instances
+            SET status = 'consumed',
+                consumed_at = COALESCE(consumed_at, NOW()),
+                updated_at = NOW()
+          WHERE id = $1`,
+        [target.poolInstanceId]
+      );
+    }
+  }
+};
+
+const deletePoolAllocationsForDeployment = async ({ merged, deploymentId }) => {
+  if (!deploymentId) {
+    return;
+  }
+  const result = await dbPool.query(
+    `SELECT *
+       FROM deployment_vm_allocations
+      WHERE deployment_id = $1
+        AND source = 'pool'
+        AND status = 'active'`,
+    [deploymentId]
+  );
+
+  for (const row of result.rows) {
+    await deletePoolVm({ merged, vmid: Number(row.actual_vmid) });
+  }
+
+  await dbPool.query(
+    `UPDATE deployment_vm_allocations
+        SET status = 'deleted',
+            updated_at = NOW()
+      WHERE deployment_id = $1
+        AND status = 'active'`,
+    [deploymentId]
+  );
+};
+
+const createDeploymentReadinessReporter = (job, vmidsOverride = null) => {
   const targetVmids = normalizeVmids(
-    Array.isArray(job.data?.replaceVmids) && job.data.replaceVmids.length > 0
+    Array.isArray(vmidsOverride)
+      ? vmidsOverride
+      : Array.isArray(job.data?.replaceVmids) && job.data.replaceVmids.length > 0
       ? job.data.replaceVmids
       : Array.isArray(job.data?.blueprint?.vms)
         ? job.data.blueprint.vms.map(vm => vm.vmid)
@@ -1385,7 +1815,7 @@ export function startTerraformWorker(connection) {
       // on this shared signal — raise Node's default threshold (10) to match expected concurrency.
       setMaxListeners(128, abortController.signal);
       activeAbortControllers.set(String(job.id), abortController);
-      const readinessReporter = createDeploymentReadinessReporter(job);
+      let readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
         ...process.env,
         TF_IN_AUTOMATION: '1',
@@ -1405,8 +1835,11 @@ export function startTerraformWorker(connection) {
         console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
         const terraformParallelism = resolveTerraformParallelism();
         const replaceVmids = normalizeVmids(job.data?.replaceVmids);
-        const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(replaceVmids) : [];
-        const targetArgs = action === 'deploy' && replaceVmids.length > 0 ? buildTerraformTargetArgs(replaceVmids) : [];
+        let terraformReplaceVmids = replaceVmids;
+        let replaceableTerraformVmids = replaceVmids;
+        let terraformVmidsToReplace = [];
+        let replaceArgs = [];
+        let targetArgs = [];
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -1429,10 +1862,6 @@ export function startTerraformWorker(connection) {
             status: 'stale-job-skipped'
           };
         }
-        if (action === 'deploy') {
-          await readinessReporter.publish();
-        }
-
       let preparedVarFile;
       let merged;
       try {
@@ -1453,10 +1882,39 @@ export function startTerraformWorker(connection) {
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
-          if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
+          let replacedPoolVmids = [];
+          if (job.data?.deploymentId && job.data?.blueprint) {
+            if (action === 'deploy') {
+              const allocationResult = await prepareDeploymentVmAllocations({
+                job,
+                blueprintVms: Array.isArray(job.data.blueprint.vms) ? job.data.blueprint.vms : [],
+                replaceVmids
+              });
+              replacedPoolVmids = allocationResult.replacedPoolVmids;
+              replaceableTerraformVmids = replaceVmids.length > 0
+                ? allocationResult.replaceableTerraformVmids
+                : replaceVmids;
+              job.data.blueprint = {
+                ...job.data.blueprint,
+                vms: allocationResult.vms
+              };
+            } else {
+              job.data.blueprint = await applyAllocationsToBlueprint(job.data.deploymentId, job.data.blueprint);
+            }
+          }
+
+          const allBlueprintVms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
+          const terraformBlueprintVms = allBlueprintVms.filter(vm => vm.provisioningSource !== 'pool');
+          terraformReplaceVmids = replaceVmids.filter(vmid =>
+            terraformBlueprintVms.some(vm => Number(vm.plannedVmid ?? vm.vmid) === Number(vmid))
+          );
+          terraformVmidsToReplace = terraformReplaceVmids.filter(vmid => replaceableTerraformVmids.includes(vmid));
+          replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(terraformVmidsToReplace) : [];
+          targetArgs = action === 'deploy' && terraformReplaceVmids.length > 0 ? buildTerraformTargetArgs(terraformReplaceVmids) : [];
+          if (terraformBlueprintVms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
               merged,
-              job.data.blueprint.vms
+              terraformBlueprintVms
             );
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
               vmid: Number(vm.vmid),
@@ -1488,14 +1946,30 @@ export function startTerraformWorker(connection) {
               tags: mergeVmTags(vm.tags, job.data.deploymentNumber == null ? null : String(job.data.deploymentNumber)),
               vlan_tag: Number(vm.vlanTag ?? merged.network_vlan_tag ?? 0)
             }));
+          } else {
+            merged.vm_definitions = [];
           }
-          const hasWindowsVm = Array.isArray(merged.vm_definitions)
-            && merged.vm_definitions.some(vm => isWindowsOsType(vm.os_type));
+          const hasWindowsVm = allBlueprintVms.some(vm => isWindowsOsType(vm.osType));
           merged.windows_admin_password = resolvedWindowsAdminPassword;
           if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim()) {
             throw new Error(
               'windows_admin_password must be set on the blueprint before deploying a Windows template with Cloudbase-Init wait'
             );
+          }
+          if (action === 'deploy') {
+            const targetVmids = replaceVmids.length > 0
+              ? allBlueprintVms.filter(vm => replaceVmids.includes(Number(vm.plannedVmid ?? vm.vmid))).map(vm => Number(vm.vmid))
+              : allBlueprintVms.map(vm => Number(vm.vmid));
+            readinessReporter = createDeploymentReadinessReporter(job, targetVmids);
+            await readinessReporter.publish();
+            await deleteReplacedPoolVms({ merged, replacedPoolVmids });
+            await configurePooledVmsForDeployment({
+              job,
+              merged,
+              vms: replaceVmids.length > 0
+                ? allBlueprintVms.filter(vm => replaceVmids.includes(Number(vm.plannedVmid ?? vm.vmid)))
+                : allBlueprintVms
+            });
           }
           delete merged.network_gateway;
           await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2));
@@ -1645,7 +2119,7 @@ export function startTerraformWorker(connection) {
         const blueprintVms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
         const scopedBlueprintVms =
           replaceVmids.length > 0
-            ? blueprintVms.filter(vm => replaceVmids.includes(Number(vm.vmid)))
+            ? blueprintVms.filter(vm => replaceVmids.includes(Number(vm.plannedVmid ?? vm.vmid)))
             : blueprintVms;
 
         await runCommand('terraform', ['init', '-input=false'], {
@@ -1677,10 +2151,14 @@ export function startTerraformWorker(connection) {
           await cleanupDestroyedVmVolumes(merged, merged.vm_definitions).catch(error => {
             console.warn(`Post-destroy volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
           });
+          await deletePoolAllocationsForDeployment({
+            merged,
+            deploymentId: job.data?.deploymentId
+          });
         } else {
           if (replaceVmids.length > 0) {
             const replaceVmDefinitions = (Array.isArray(merged.vm_definitions) ? merged.vm_definitions : [])
-              .filter(vm => replaceVmids.includes(Number(vm.vmid)));
+              .filter(vm => terraformReplaceVmids.includes(Number(vm.vmid)));
             // A replace recreates the same VMID — if a prior destroy/replace left orphaned Ceph
             // volumes behind for it (e.g. an interrupted earlier attempt), Terraform's create step
             // collides with them ("rbd: ... already exists") since it only knows about the
@@ -1723,7 +2201,7 @@ export function startTerraformWorker(connection) {
                     '-input=false',
                     `-parallelism=${terraformParallelism}`,
                     `-var-file=${preparedVarFile}`,
-                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => replaceVmids.includes(vmid))),
+                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => terraformVmidsToReplace.includes(vmid))),
                     ...buildTerraformTargetArgs(failedVmids)
                   ],
                   { cwd: terraformDir, env, signal: abortController.signal }
@@ -1829,6 +2307,15 @@ export function startTerraformWorker(connection) {
         };
       } catch (error) {
         console.error(`Terraform job ${job.id} failed for deployment ${deploymentLabel} (${action})`, error);
+        if (action === 'deploy') {
+          await markReservedPoolInstancesFailedForRun({
+            deploymentId: job.data?.deploymentId,
+            runId: job.data?.runId,
+            error
+          }).catch(markError => {
+            console.warn(`Unable to mark reserved pool VM(s) failed after job failure: ${markError.message}`);
+          });
+        }
         await safeUpdateLifecycleStatus(job.data.labInstanceId, 'failed', {
           action,
           jobId: String(job.id),
@@ -1879,6 +2366,13 @@ export async function resetStalledTerraformDeployments() {
     if (result.rowCount > 0) {
       console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) remis à failed`);
     }
+    await dbPool.query(
+      `UPDATE vm_pool_instances
+          SET status = 'failed',
+              last_error = 'terraform worker restarted while VM was reserved',
+              updated_at = NOW()
+        WHERE status = 'reserved'`
+    );
   } catch (err) {
     console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
   }

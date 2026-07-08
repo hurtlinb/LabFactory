@@ -539,7 +539,18 @@ function renderModelList() {
 
   modelList.innerHTML = state.templates
     .map(
-      template => `
+      template => {
+        const poolStats = template.poolStats || {};
+        const poolTarget = Number(template.poolTargetReadyCount || 0);
+        const poolMeta = poolTarget > 0
+          ? `
+              <span class="mini-pill">pool target ${poolTarget}</span>
+              <span class="mini-pill">ready ${Number(poolStats.ready || 0)}</span>
+              <span class="mini-pill">preparing ${Number(poolStats.preparing || 0)}</span>
+              ${Number(poolStats.failed || 0) ? `<span class="mini-pill">failed ${Number(poolStats.failed || 0)}</span>` : ''}
+            `
+          : '<span class="mini-pill">pool off</span>';
+        return `
         <article class="blueprint-item${template.id === state.editingTemplateId ? ' active' : ''}" data-template-id="${template.id}">
           <div class="panel-head">
             <div>
@@ -555,11 +566,13 @@ function renderModelList() {
           <div class="panel-head">
             <div class="template-meta">
               <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
+              ${poolMeta}
             </div>
             <button class="icon-btn delete-model-button" type="button" data-template-id="${template.id}" aria-label="Delete VM model">×</button>
           </div>
         </article>
-      `
+      `;
+      }
     )
     .join('');
 
@@ -1922,6 +1935,7 @@ function populateTemplateForm(template) {
   templateForm.elements.proxmoxTemplateVmid.value = String(template.proxmoxTemplateVmid || '');
   templateForm.elements.language.value = template.language || 'en';
   templateForm.elements.fullClone.checked = Boolean(template.fullClone);
+  templateForm.elements.poolTargetReadyCount.value = String(template.poolTargetReadyCount || 0);
   const osRadio = templateForm.querySelector(`input[name="osType"][value="${template.osType}"]`);
   if (osRadio) {
     osRadio.checked = true;
@@ -1942,6 +1956,7 @@ function resetTemplateForm({ keepVisible = false } = {}) {
   state.editingTemplateId = null;
   state.isTemplateEditorVisible = keepVisible;
   templateForm.reset();
+  templateForm.elements.poolTargetReadyCount.value = '0';
   if (templateSubmitButton) {
     templateSubmitButton.textContent = 'Add model';
   }
@@ -2611,7 +2626,8 @@ templateForm.addEventListener('submit', async event => {
     osType: String(form.get('osType') || 'ubuntu'),
     language: String(form.get('language') || 'en').trim().toLowerCase(),
     proxmoxTemplateVmid: Number(form.get('proxmoxTemplateVmid') || 0),
-    fullClone: form.get('fullClone') === 'on'
+    fullClone: form.get('fullClone') === 'on',
+    poolTargetReadyCount: Number(form.get('poolTargetReadyCount') || 0)
   };
 
   try {

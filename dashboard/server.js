@@ -20,6 +20,10 @@ import {
   readTerraformEnvSettings,
   assertRequiredTerraformEnvSettings
 } from '../lib/terraformSettings.js';
+import {
+  applyDeploymentVmAllocations,
+  fetchDeploymentVmAllocations
+} from '../lib/deploymentVmAllocations.js';
 
 const require = createRequire(import.meta.url);
 const { Queue } = require('bullmq');
@@ -33,6 +37,7 @@ const queueNames = {
   terraform: 'terraform-workflows',
   ansible: 'ansible-workflows'
 };
+const workerNames = ['terraform', 'ansible', 'pool-manager'];
 const queues = Object.fromEntries(
   Object.entries(queueNames).map(([key, name]) => [key, new Queue(name, { connection })])
 );
@@ -185,6 +190,7 @@ const templateSchema = z.object({
   language: z.enum(['fr', 'en']).optional().default('en'),
   proxmoxTemplateVmid: z.number().int().positive(),
   fullClone: z.boolean().optional().default(false),
+  poolTargetReadyCount: z.number().int().min(0).max(500).optional().default(0),
 });
 
 const blueprintVmSchema = z
@@ -761,6 +767,14 @@ const mapTemplate = row => ({
   language: row.language ?? 'en',
   proxmoxTemplateVmid: row.proxmox_template_vmid,
   fullClone: Boolean(row.full_clone),
+  poolTargetReadyCount: Number(row.pool_target_ready_count ?? 0),
+  poolStats: {
+    preparing: Number(row.pool_preparing_count ?? 0),
+    ready: Number(row.pool_ready_count ?? 0),
+    reserved: Number(row.pool_reserved_count ?? 0),
+    consumed: Number(row.pool_consumed_count ?? 0),
+    failed: Number(row.pool_failed_count ?? 0)
+  },
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -1059,7 +1073,8 @@ const fetchBlueprintById = async blueprintId => {
         t.os_type,
         t.language,
         t.proxmox_template_vmid,
-        t.full_clone
+        t.full_clone,
+        t.pool_target_ready_count
       FROM lab_blueprint_vms v
      INNER JOIN vm_templates t ON t.id = v.template_id
      WHERE v.blueprint_id = $1
@@ -1085,7 +1100,8 @@ const fetchBlueprintById = async blueprintId => {
         osType: row.os_type,
         language: row.language ?? 'en',
         proxmoxTemplateVmid: row.proxmox_template_vmid,
-        fullClone: Boolean(row.full_clone)
+        fullClone: Boolean(row.full_clone),
+        poolTargetReadyCount: Number(row.pool_target_ready_count ?? 0)
       }
     }))
   };
@@ -1128,6 +1144,9 @@ const buildTerraformBlueprintPayload = blueprint => {
         tags: teacherTag || null,
         hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + index,
+        templateId: vm.template.id,
+        templateProxmoxVmid: vm.template.proxmoxTemplateVmid,
+        poolTargetReadyCount: Number(vm.template.poolTargetReadyCount ?? 0),
         osType: vm.template.osType,
         language: vm.template.language ?? 'en',
         windowsAdminUsername: getWindowsAdminUsername(vm.template.language),
@@ -1259,6 +1278,9 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         tags: teacherTag || null,
         hostname: resolveVmCustomHostname(vm),
         vmid: baseVmid + vms.length,
+        templateId: vm.template.id,
+        templateProxmoxVmid: vm.template.proxmoxTemplateVmid,
+        poolTargetReadyCount: Number(vm.template.poolTargetReadyCount ?? 0),
         osType: vm.template.osType,
         language: vm.template.language ?? 'en',
         windowsAdminUsername: getWindowsAdminUsername(vm.template.language),
@@ -1290,6 +1312,17 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
     networkVlanMask: classroom.networkVlanMask,
     vms
   };
+};
+
+const buildDeploymentRuntimeVmPlan = async ({ deployment, blueprint, classroom }) => {
+  const vmPlan = buildTerraformDeploymentPayload({
+    deploymentId: deployment.id,
+    blueprint,
+    classroom,
+    teacher: deployment.teacher
+  });
+  const allocations = await fetchDeploymentVmAllocations(dbPool, deployment.id);
+  return applyDeploymentVmAllocations(vmPlan, allocations);
 };
 
 const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request' } = {}) => {
@@ -1825,7 +1858,7 @@ app.get(
 
     const workers = Object.fromEntries(
       await Promise.all(
-        Object.keys(queueNames).map(async workerName => {
+        workerNames.map(async workerName => {
           try {
             const state = await redisClient.hGetAll(`worker:${workerName}`);
             return [workerName, state.status || 'unknown'];
@@ -2047,7 +2080,7 @@ app.get(
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+      const vmPlan = await buildDeploymentRuntimeVmPlan({ deployment, blueprint, classroom });
       const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
       const customizationProgress = deployment.status === 'customizing'
         ? await fetchAnsibleCustomizationProgress(deployment)
@@ -2098,12 +2131,8 @@ app.post(
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmids = buildTerraformDeploymentPayload({
-        deploymentId: deployment.id,
-        blueprint,
-        classroom,
-        teacher: deployment.teacher
-      }).vms.map(vm => vm.vmid);
+      const vmPlan = await buildDeploymentRuntimeVmPlan({ deployment, blueprint, classroom });
+      const vmids = vmPlan.vms.map(vm => vm.vmid);
 
       const reconciledStatus = deriveDeploymentStatusFromResources(
         deployment.status,
@@ -2188,7 +2217,7 @@ app.get(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = await buildDeploymentRuntimeVmPlan({ deployment, blueprint, classroom });
 
     let resourceByVmid = null;
     try {
@@ -2285,7 +2314,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = await buildDeploymentRuntimeVmPlan({ deployment, blueprint, classroom });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -2420,7 +2449,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = await buildDeploymentRuntimeVmPlan({ deployment, blueprint, classroom });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -2542,6 +2571,7 @@ app.post(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const runtimeVmPlan = await buildDeploymentRuntimeVmPlan({ deployment, blueprint, classroom });
 
     let resourceByVmid = null;
     try {
@@ -2553,7 +2583,7 @@ app.post(
 
     const effectiveDeploymentStatus = deriveDeploymentStatusFromResources(
       deployment.status,
-      terraformBlueprintPayload.vms.map(vm => vm.vmid),
+      runtimeVmPlan.vms.map(vm => vm.vmid),
       resourceByVmid
     );
     if (!workstationRedeployableStatuses.has(effectiveDeploymentStatus)) {
@@ -2720,7 +2750,19 @@ app.get(
   '/api/templates',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
-    const result = await dbPool.query('SELECT * FROM vm_templates ORDER BY name ASC');
+    const result = await dbPool.query(
+      `SELECT
+         t.*,
+         COUNT(p.id) FILTER (WHERE p.status = 'preparing')::int AS pool_preparing_count,
+         COUNT(p.id) FILTER (WHERE p.status = 'ready')::int AS pool_ready_count,
+         COUNT(p.id) FILTER (WHERE p.status = 'reserved')::int AS pool_reserved_count,
+         COUNT(p.id) FILTER (WHERE p.status = 'consumed')::int AS pool_consumed_count,
+         COUNT(p.id) FILTER (WHERE p.status = 'failed')::int AS pool_failed_count
+       FROM vm_templates t
+       LEFT JOIN vm_pool_instances p ON p.template_id = t.id
+       GROUP BY t.id
+       ORDER BY LOWER(t.name) ASC`
+    );
     res.json(result.rows.map(mapTemplate));
   })
 );
@@ -2738,8 +2780,8 @@ app.post(
     const id = uuidv4();
     const result = await dbPool.query(
       `INSERT INTO vm_templates
-        (id, name, description, os_type, language, proxmox_template_vmid, full_clone, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+        (id, name, description, os_type, language, proxmox_template_vmid, full_clone, pool_target_ready_count, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
        RETURNING *`,
       [
         id,
@@ -2748,7 +2790,8 @@ app.post(
         parsed.data.osType,
         parsed.data.language,
         parsed.data.proxmoxTemplateVmid,
-        parsed.data.fullClone
+        parsed.data.fullClone,
+        parsed.data.poolTargetReadyCount
       ]
     );
 
@@ -2774,6 +2817,7 @@ app.put(
               language = $5,
               proxmox_template_vmid = $6,
               full_clone = $7,
+              pool_target_ready_count = $8,
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
@@ -2784,7 +2828,8 @@ app.put(
         parsed.data.osType,
         parsed.data.language,
         parsed.data.proxmoxTemplateVmid,
-        parsed.data.fullClone
+        parsed.data.fullClone,
+        parsed.data.poolTargetReadyCount
       ]
     );
 
@@ -3194,7 +3239,7 @@ app.post('/api/jobs/clear-history', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY
 app.get('/api/workers', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
     const workers = [];
-    for (const workerName of Object.keys(queueNames)) {
+    for (const workerName of workerNames) {
       const state = await redisClient.hGetAll(`worker:${workerName}`);
       workers.push({
         name: workerName,
@@ -3265,7 +3310,7 @@ app.post(
 
 app.post('/api/control', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   const { worker, action } = req.body;
-  if (!queueNames[worker] || !['pause', 'resume'].includes(action)) {
+  if (!workerNames.includes(worker) || !['pause', 'resume'].includes(action)) {
     return res.status(400).json({ error: 'invalid worker or action' });
   }
 

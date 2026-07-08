@@ -67,6 +67,19 @@ VM models are stored in PostgreSQL and include:
 
 The UI exposes OS selection with logos and uses the selected OS in the model cards and blueprint palette.
 
+### Prepared Windows VM Pool
+Windows VM models can define a `Pool ready target` from the VM Models page.
+
+When the target is greater than `0`, the `pool-manager` service keeps fresh Windows clones ready in the Proxmox resource pool configured by `VM_POOL_PROXMOX_POOL` (`vm-pool` by default). A prepared VM is considered ready only after WinRM responds and Cloudbase-Init has written its `done.flag`.
+
+Important behavior:
+- only Windows models are currently pooled
+- each manager run creates at most `VM_POOL_MANAGER_BATCH_SIZE` VMs, default `5`
+- a VM consumed by a lab never returns to the pool
+- if the pool lacks enough ready VMs, deployment falls back to the normal Terraform clone path for the missing VMs
+- pool VMs use a temporary preparation network from `VM_POOL_IP_PREFIX`, `VM_POOL_IP_START`, `VM_POOL_IP_END`, `VM_POOL_NETWORK_MASK`, `VM_POOL_GATEWAY`, and `VM_POOL_VLAN_TAG`
+- `VM_POOL_WINDOWS_ADMIN_PASSWORD` is the temporary password injected during pool preparation; the deployment password is applied when the VM is consumed
+
 ### Blueprints
 Blueprints are created with drag and drop:
 - drag VM models from the palette

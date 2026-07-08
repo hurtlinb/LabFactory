@@ -64,6 +64,25 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run ansible-worker
 
+  pool-manager:
+    build: .
+    image: lab-orchestrator-demo:latest
+    restart: on-failure
+    depends_on:
+      - redis
+      - postgres
+    env_file:
+      - .env
+    volumes:
+      - ./ansible:/usr/src/app/ansible:cached
+      - ./config:/usr/src/app/config:cached
+    environment:
+      - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+    command: npm run pool-manager
+
   dashboard:
     build: .
     image: lab-orchestrator-demo:latest
