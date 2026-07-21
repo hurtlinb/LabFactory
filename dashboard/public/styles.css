@@ -690,6 +690,8 @@ input:focus, textarea:focus, select:focus {
 }
 
 .icon-btn:hover { background: var(--surface-soft); border-color: var(--line-strong); }
+.icon-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.icon-btn:disabled:hover { background: var(--surface); border-color: var(--line); }
 
 /* ── Pills / badges ───────────────────────────────────────────── */
 .pill {
@@ -723,6 +725,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .warning-pill { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
+.lock-pill { border-color: var(--line-strong); background: var(--surface-soft); color: var(--text-secondary); }
 .teacher-pill { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 
 .role-badge-admin    { border-color: rgba(83, 74, 183, 0.3); background: var(--brand-soft);  color: var(--brand); }
@@ -818,6 +821,16 @@ input:focus, textarea:focus, select:focus {
 
 .vm-lib-item:hover { background: var(--brand-soft); border-color: rgba(83, 74, 183, 0.3); }
 .vm-lib-item.dragging { opacity: 0.4; }
+.template-palette.is-disabled .vm-lib-item,
+.template-palette.is-disabled .vm-lib-cust {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.template-palette.is-disabled .vm-lib-item:hover,
+.template-palette.is-disabled .vm-lib-cust:hover {
+  background: var(--surface);
+  border-color: var(--line);
+}
 
 .vm-lib-dot {
   width: 7px;
@@ -896,6 +909,7 @@ input:focus, textarea:focus, select:focus {
 }
 
 .dropzone.dragover { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone.is-locked { border-style: solid; background: var(--surface); }
 
 .dropzone-copy { padding: 2px 0 0; }
 .dropzone-copy p { margin: 0 0 3px; font-size: 13px; font-weight: 500; color: var(--text-secondary); }

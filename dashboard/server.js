@@ -78,6 +78,10 @@ const wrapAsync =
         res.status(400).json({ error: err.message });
         return;
       }
+      if (err?.code === 'P0001' && String(err?.message ?? '').includes('blueprint is locked')) {
+        res.status(409).json({ error: 'blueprint is locked because it is used by an existing deployment' });
+        return;
+      }
       console.error('Unhandled request error', err);
       res.status(500).json({ error: 'internal server error' });
     });
@@ -790,6 +794,8 @@ const mapBlueprintSummary = row => ({
       ''
   },
   vmCount: Number(row.vm_count ?? 0),
+  deploymentCount: Number(row.deployment_count ?? 0),
+  isLocked: Number(row.deployment_count ?? 0) > 0,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -1033,7 +1039,12 @@ const fetchBlueprintById = async blueprintId => {
       t.first_name AS teacher_first_name,
       t.last_name AS teacher_last_name,
       t.display_name AS teacher_display_name,
-       COUNT(v.id) AS vm_count
+      COUNT(v.id) AS vm_count,
+      (
+        SELECT COUNT(*)::int
+        FROM lab_deployments d
+        WHERE d.blueprint_id = b.id
+      ) AS deployment_count
      FROM lab_blueprints b
      LEFT JOIN courses c ON c.id = b.course_id
      LEFT JOIN teachers t ON t.email = b.teacher_email
@@ -2844,7 +2855,12 @@ app.get(
          t.first_name AS teacher_first_name,
          t.last_name AS teacher_last_name,
          t.display_name AS teacher_display_name,
-         COUNT(v.id) AS vm_count
+         COUNT(v.id) AS vm_count,
+         (
+           SELECT COUNT(*)::int
+           FROM lab_deployments d
+           WHERE d.blueprint_id = b.id
+         ) AS deployment_count
        FROM lab_blueprints b
        LEFT JOIN courses c ON c.id = b.course_id
        LEFT JOIN teachers t ON t.email = b.teacher_email
@@ -2901,12 +2917,17 @@ app.put(
       return;
     }
 
-    await validateBlueprintGuestPassword(parsed.data);
     const existing = await fetchBlueprintById(req.params.id);
     if (!existing) {
       res.status(404).json({ error: 'blueprint not found' });
       return;
     }
+    if (existing.isLocked) {
+      res.status(409).json({ error: 'blueprint is locked because it is used by an existing deployment' });
+      return;
+    }
+
+    await validateBlueprintGuestPassword(parsed.data);
     const course = await fetchCourseById(parsed.data.courseId);
     if (!course) {
       res.status(404).json({ error: 'course not found' });

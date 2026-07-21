@@ -176,8 +176,20 @@ function createEmptyBlueprint() {
     courseId: '',
     windowsAdminPassword: '',
     linuxDefaultUsername: 'ubuntu',
+    deploymentCount: 0,
+    isLocked: false,
     vms: []
   };
+}
+
+function isCurrentBlueprintLocked() {
+  return Boolean(state.currentBlueprint?.isLocked);
+}
+
+function getBlueprintLockMessage(blueprint = state.currentBlueprint) {
+  const count = Number(blueprint?.deploymentCount ?? 0);
+  if (count > 1) return `Blueprint locked by ${count} labs`;
+  return 'Blueprint locked by 1 lab';
 }
 
 function showMessage(target, message, status = 'success', timeout = 3200) {
@@ -243,11 +255,34 @@ function syncBlueprintFields() {
   if (blueprintLinuxDefaultUsernameInput) {
     blueprintLinuxDefaultUsernameInput.value = state.currentBlueprint.linuxDefaultUsername || 'ubuntu';
   }
+  const locked = isCurrentBlueprintLocked();
+  [
+    blueprintNameInput,
+    blueprintDescriptionInput,
+    blueprintCourseIdInput,
+    blueprintWindowsAdminPasswordInput,
+    blueprintLinuxDefaultUsernameInput
+  ].filter(Boolean).forEach(input => {
+    input.disabled = locked;
+  });
+  if (saveBlueprintButton) {
+    saveBlueprintButton.disabled = locked;
+    saveBlueprintButton.textContent = locked ? 'Blueprint locked' : 'Save blueprint';
+    saveBlueprintButton.title = locked ? getBlueprintLockMessage() : '';
+  }
 }
 
 function renderBlueprintWorkspace() {
   if (blueprintWorkspace) {
     blueprintWorkspace.hidden = !state.isBlueprintWorkspaceVisible;
+    blueprintWorkspace.classList.toggle('blueprint-locked', isCurrentBlueprintLocked());
+  }
+  if (dropzone) {
+    dropzone.classList.toggle('is-locked', isCurrentBlueprintLocked());
+    dropzone.title = isCurrentBlueprintLocked() ? getBlueprintLockMessage() : '';
+  }
+  if (templatePalette) {
+    templatePalette.classList.toggle('is-disabled', isCurrentBlueprintLocked());
   }
 }
 
@@ -271,7 +306,10 @@ function renderBlueprintList() {
 
   blueprintList.innerHTML = state.blueprints
     .map(
-      blueprint => `
+      blueprint => {
+        const locked = Boolean(blueprint.isLocked);
+        const lockTitle = locked ? getBlueprintLockMessage(blueprint) : '';
+        return `
         <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${blueprint.id}">
           <div class="panel-head">
             <div class="blueprint-summary">
@@ -279,14 +317,16 @@ function renderBlueprintList() {
               <p class="muted">${escapeHtml(blueprint.description || 'No description')}</p>
             </div>
             <div class="inline-actions">
+              ${locked ? `<span class="mini-pill lock-pill" title="${escapeHtmlAttr(lockTitle)}">Locked</span>` : ''}
               ${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}
               <span class="mini-pill">${new Date(blueprint.updatedAt).toLocaleString()}</span>
               <span class="pill">${blueprint.vmCount} VM</span>
-              <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint">×</button>
+              <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle)}" ${locked ? 'disabled' : ''}>×</button>
             </div>
           </div>
         </article>
-      `
+      `;
+      }
     )
     .join('');
 
@@ -315,6 +355,27 @@ function renderBlueprintList() {
       }
     });
   });
+}
+
+function syncCurrentBlueprintLockStateFromSummaries() {
+  if (!state.currentBlueprint?.id) return;
+  const summary = state.blueprints.find(blueprint => blueprint.id === state.currentBlueprint.id);
+  if (!summary) return;
+
+  const deploymentCount = Number(summary.deploymentCount ?? 0);
+  const isLocked = Boolean(summary.isLocked);
+  const changed =
+    state.currentBlueprint.deploymentCount !== deploymentCount ||
+    state.currentBlueprint.isLocked !== isLocked;
+
+  state.currentBlueprint.deploymentCount = deploymentCount;
+  state.currentBlueprint.isLocked = isLocked;
+
+  if (changed) {
+    syncBlueprintFields();
+    renderBlueprintWorkspace();
+    renderCanvas();
+  }
 }
 
 function renderDeploymentSelectors() {
@@ -505,6 +566,10 @@ function renderTemplates() {
 
   templatePalette.querySelectorAll('.vm-lib-item').forEach(card => {
     card.addEventListener('dragstart', event => {
+      if (isCurrentBlueprintLocked()) {
+        event.preventDefault();
+        return;
+      }
       card.classList.add('dragging');
       activeDragItem = { type: 'template', value: card.dataset.templateId };
       event.dataTransfer.setData('application/x-labfactory-item-type', 'template');
@@ -518,6 +583,10 @@ function renderTemplates() {
 
   templatePalette.querySelectorAll('.vm-lib-cust').forEach(card => {
     card.addEventListener('dragstart', event => {
+      if (isCurrentBlueprintLocked()) {
+        event.preventDefault();
+        return;
+      }
       card.classList.add('dragging');
       activeDragItem = { type: 'customization', value: card.dataset.customizationKey };
       event.dataTransfer.setData('application/x-labfactory-item-type', 'customization');
@@ -672,11 +741,20 @@ function renderClassrooms() {
   renderDeploymentSelectors();
 }
 
+function renderBlueprintPillAction({ action, customizationKey = '', label, icon }) {
+  if (isCurrentBlueprintLocked()) return '';
+  const customizationAttr = customizationKey ? ` data-customization-key="${escapeHtmlAttr(customizationKey)}"` : '';
+  return `<button class="pill-action-button" type="button" data-action="${escapeHtmlAttr(action)}"${customizationAttr} aria-label="${escapeHtmlAttr(label)}" title="${escapeHtmlAttr(label)}">${escapeHtml(icon)}</button>`;
+}
+
 function renderCanvas() {
+  const locked = isCurrentBlueprintLocked();
   vmCount.textContent = `${state.currentBlueprint.vms.length} VM`;
 
   if (!state.currentBlueprint.vms.length) {
-    canvasVmList.innerHTML = '<p class="placeholder">The lab is empty. Drag a template into the workspace.</p>';
+    canvasVmList.innerHTML = locked
+      ? '<p class="placeholder">Blueprint locked.</p>'
+      : '<p class="placeholder">The lab is empty. Drag a template into the workspace.</p>';
     return;
   }
 
@@ -687,14 +765,14 @@ function renderCanvas() {
       vmPills.push(`
         <span class="mini-pill vm-ip-pill">
           <span>IP: x.x.x.${escapeHtml(String(vm.ipLastOctet ?? '?'))}</span>
-          <button class="pill-action-button" type="button" data-action="edit-ip" aria-label="Edit IP last octet" title="Edit IP last octet">✎</button>
+          ${renderBlueprintPillAction({ action: 'edit-ip', label: 'Edit IP last octet', icon: '✎' })}
         </span>
       `);
       if (vm.config?.customNameEnabled && String(vm.name || '').trim()) {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>Hostname: ${escapeHtml(vm.name.trim())}</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="name" aria-label="Remove Hostname customization" title="Remove Hostname customization">×</button>
+            ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'name', label: 'Remove Hostname customization', icon: '×' })}
           </span>
         `);
       }
@@ -703,7 +781,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>${escapeHtml(diskLabel)}</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="second-disk" aria-label="Remove Second Disk customization" title="Remove Second Disk customization">×</button>
+            ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'second-disk', label: 'Remove Second Disk customization', icon: '×' })}
           </span>
         `);
       }
@@ -711,7 +789,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>Timezone: ${escapeHtml(String(vm.config.timezone).trim())}</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="timezone" aria-label="Remove Timezone customization" title="Remove Timezone customization">×</button>
+            ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'timezone', label: 'Remove Timezone customization', icon: '×' })}
           </span>
         `);
       }
@@ -719,7 +797,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill vm-domain-pill">
             <span>DC: ${escapeHtml(vm.config.domainName)}</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="domain-controller" aria-label="Remove Domain Controller" title="Remove Domain Controller">×</button>
+            ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'domain-controller', label: 'Remove Domain Controller', icon: '×' })}
           </span>
         `);
       }
@@ -727,7 +805,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill vm-domain-pill">
             <span>Member: ${escapeHtml(vm.config.domainName)}</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="domain-member" aria-label="Remove Domain Member" title="Remove Domain Member">×</button>
+            ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'domain-member', label: 'Remove Domain Member', icon: '×' })}
           </span>
         `);
       }
@@ -735,7 +813,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>Docker CE</span>
-            <button class="pill-action-button" type="button" data-action="remove-customization" data-customization-key="docker-install" aria-label="Remove Docker CE" title="Remove Docker CE">×</button>
+            ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'docker-install', label: 'Remove Docker CE', icon: '×' })}
           </span>
         `);
       }
@@ -754,13 +832,15 @@ function renderCanvas() {
           <div class="vm-controls">
             <div class="vm-pills">${vmPills.join('')}</div>
             <div class="vm-actions">
-              <button class="icon-btn" type="button" data-action="remove" aria-label="Remove VM">×</button>
+              ${locked ? '' : '<button class="icon-btn" type="button" data-action="remove" aria-label="Remove VM">×</button>'}
             </div>
           </div>
         </article>
       `;
     })
     .join('');
+
+  if (locked) return;
 
   canvasVmList.querySelectorAll('.vm-card').forEach(card => {
     const vmId = card.dataset.vmId;
@@ -876,7 +956,7 @@ function renderCanvas() {
       });
       renderCanvas();
     });
-    card.querySelector('[data-action="remove"]').addEventListener('click', () => {
+    card.querySelector('[data-action="remove"]')?.addEventListener('click', () => {
       state.currentBlueprint.vms = state.currentBlueprint.vms.filter(vm => vm.id !== vmId);
       renderCanvas();
     });
@@ -1048,6 +1128,7 @@ function renderLifecycleLabs() {
       try {
         await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, { method: 'DELETE' });
         await refreshLifecycleLabs();
+        await loadBlueprints();
         showMessage(globalStatus, 'Deployment deleted.', 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
@@ -1485,6 +1566,11 @@ function updateVm(vmId, mutator) {
 }
 
 function addVmFromTemplate(templateId) {
+  if (isCurrentBlueprintLocked()) {
+    showMessage(globalStatus, 'Blueprint is locked because it is used by an existing deployment', 'danger');
+    return;
+  }
+
   const template = state.templates.find(item => item.id === templateId);
   if (!template) return;
 
@@ -2157,6 +2243,7 @@ async function loadClassrooms() {
 
 async function loadBlueprints() {
   state.blueprints = await fetchJson('/api/blueprints');
+  syncCurrentBlueprintLockStateFromSummaries();
   renderBlueprintList();
   renderDeploymentSelectors();
   renderDashboard();
@@ -2209,6 +2296,8 @@ async function loadBlueprint(blueprintId) {
     courseId: blueprint.course?.id || '',
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
     linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
+    deploymentCount: Number(blueprint.deploymentCount ?? 0),
+    isLocked: Boolean(blueprint.isLocked),
     vms: blueprint.vms.map(vm => ({
       id: vm.id,
       templateId: vm.template.id,
@@ -2235,6 +2324,10 @@ function resetBlueprintEditor({ keepVisible = false } = {}) {
 }
 
 async function saveBlueprint() {
+  if (isCurrentBlueprintLocked()) {
+    throw new Error('Blueprint is locked because it is used by an existing deployment');
+  }
+
   state.currentBlueprint.name = blueprintNameInput.value.trim();
   state.currentBlueprint.description = blueprintDescriptionInput.value.trim();
   state.currentBlueprint.courseId = blueprintCourseIdInput?.value || '';
@@ -2293,8 +2386,11 @@ async function saveBlueprint() {
     name: blueprint.name,
     description: blueprint.description || '',
     status: blueprint.status,
+    courseId: blueprint.course?.id || '',
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
     linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
+    deploymentCount: Number(blueprint.deploymentCount ?? 0),
+    isLocked: Boolean(blueprint.isLocked),
     vms: blueprint.vms.map(vm => ({
       id: vm.id,
       templateId: vm.template.id,
@@ -2590,6 +2686,7 @@ document.getElementById('dashGotoModels')?.addEventListener('click', () => setAc
 
 [blueprintNameInput, blueprintDescriptionInput, blueprintCourseIdInput, blueprintWindowsAdminPasswordInput, blueprintLinuxDefaultUsernameInput].forEach(input => {
   input.addEventListener('input', () => {
+    if (isCurrentBlueprintLocked()) return;
     state.currentBlueprint.name = blueprintNameInput.value;
     state.currentBlueprint.description = blueprintDescriptionInput.value;
     state.currentBlueprint.courseId = blueprintCourseIdInput?.value || '';
@@ -2732,6 +2829,7 @@ deploymentForm?.addEventListener('submit', async event => {
       await loadTeachers();
     }
     await refreshLifecycleLabs();
+    await loadBlueprints();
     showMessage(globalStatus, 'Deployment prepared.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
@@ -2749,11 +2847,15 @@ saveBlueprintButton.addEventListener('click', async () => {
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   } finally {
-    saveBlueprintButton.disabled = false;
+    saveBlueprintButton.disabled = isCurrentBlueprintLocked();
   }
 });
 
 dropzone.addEventListener('dragover', event => {
+  if (isCurrentBlueprintLocked()) {
+    dropzone.classList.remove('dragover');
+    return;
+  }
   event.preventDefault();
   dropzone.classList.toggle('dragover', getDragItemType(event.dataTransfer) === 'template');
 });
@@ -2765,6 +2867,10 @@ dropzone.addEventListener('dragleave', () => {
 dropzone.addEventListener('drop', event => {
   event.preventDefault();
   dropzone.classList.remove('dragover');
+  if (isCurrentBlueprintLocked()) {
+    activeDragItem = null;
+    return;
+  }
   const itemType = getDragItemType(event.dataTransfer);
   if (itemType !== 'template') {
     return;
