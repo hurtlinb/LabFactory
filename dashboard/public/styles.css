@@ -1124,6 +1124,13 @@ input:focus, textarea:focus, select:focus {
   gap: 0;
 }
 
+.deployment-card-foreign,
+.deployment-card-foreign .deploy-head,
+.deployment-card-foreign .lc-steps,
+.deployment-card-foreign .lc-actions {
+  background: var(--surface-soft);
+}
+
 .deploy-head {
   padding: 12px 14px;
   border-bottom: 0.5px solid var(--line);

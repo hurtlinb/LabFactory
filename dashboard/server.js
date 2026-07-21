@@ -1775,6 +1775,21 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
 
 const auth = await initializeOidcAuth(app);
 
+const normalizeEmail = value => String(value ?? '').trim().toLowerCase();
+const getRequestUser = req => req.auth?.user ?? req.session?.user ?? null;
+const requestHasRole = (req, role) => Array.isArray(getRequestUser(req)?.roles) && getRequestUser(req).roles.includes(role);
+const isRequestAdmin = req => !auth.enabled || requestHasRole(req, auth.ROLES.ADMIN);
+const isDeploymentCreator = (req, deployment) => {
+  if (!auth.enabled) return true;
+  const userEmail = normalizeEmail(getRequestUser(req)?.email);
+  const ownerEmail = normalizeEmail(deployment?.teacherEmail);
+  return Boolean(userEmail && ownerEmail && userEmail === ownerEmail);
+};
+const canManageDeployment = (req, deployment) => isRequestAdmin(req) || isDeploymentCreator(req, deployment);
+const denyDeploymentManagement = res => {
+  res.status(403).json({ error: 'deployment can only be deployed or deleted by its creator or an admin' });
+};
+
 app.use(auth.attachUser);
 app.use(express.json());
 app.use(auth.requireAuth);
@@ -2246,9 +2261,10 @@ app.get(
         status: effectiveDeploymentStatus,
         lastAction: deployment.lastAction,
         teacher: deployment.teacher,
+        teacherEmail: deployment.teacherEmail,
         blueprintName: deployment.blueprint.name,
         classroomName: deployment.classroom.name,
-        canRedeployWorkstations: workstationRedeployableStatuses.has(effectiveDeploymentStatus),
+        canRedeployWorkstations: workstationRedeployableStatuses.has(effectiveDeploymentStatus) && canManageDeployment(req, deployment),
         busy: deploymentBusyStatuses.has(effectiveDeploymentStatus),
         activeWorkstationNumbers
       },
@@ -2545,6 +2561,11 @@ app.post(
       return;
     }
 
+    if (!canManageDeployment(req, deployment)) {
+      denyDeploymentManagement(res);
+      return;
+    }
+
     if (deploymentBusyStatuses.has(deployment.status)) {
       res.status(409).json({ error: 'deployment already has an operation in progress' });
       return;
@@ -2646,6 +2667,11 @@ app.post(
       return;
     }
 
+    if (['deploy', 'destroy'].includes(action) && !canManageDeployment(req, deployment)) {
+      denyDeploymentManagement(res);
+      return;
+    }
+
     if (deploymentBusyStatuses.has(deployment.status)) {
       res.status(409).json({ error: 'deployment already has an operation in progress' });
       return;
@@ -2714,6 +2740,11 @@ app.delete(
     const deployment = await fetchDeploymentById(req.params.id);
     if (!deployment) {
       res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    if (!canManageDeployment(req, deployment)) {
+      denyDeploymentManagement(res);
       return;
     }
 

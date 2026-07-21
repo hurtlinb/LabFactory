@@ -1035,14 +1035,19 @@ function renderLifecycleLabs() {
   lifecycleList.innerHTML = state.deployments
     .map(deployment => {
       const actions = resolveLifecycleActions(deployment.status);
-      const canDeleteDeployment = ['idle', 'failed', 'destroyed'].includes(deployment.status);
+      const canManage = canManageDeployment(deployment);
+      const foreign = isForeignDeployment(deployment);
+      const visibleActions = actions.busy
+        ? []
+        : actions.items.filter(item => canManage || !['deploy', 'destroy'].includes(item.action));
+      const canDeleteDeployment = canManage && ['idle', 'failed', 'destroyed'].includes(deployment.status);
       const hasWarning = deployment.status === 'mixed';
       const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
       const totalVmCount = Number(deployment.totalVmCount ?? 0);
 
       const actionButtons = actions.busy
         ? `<span class="loading-spinner" aria-hidden="true"></span>`
-        : actions.items
+        : visibleActions
             .map(a => `<button class="btn lifecycle-action" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${a.icon} ${a.label}</button>`)
             .join('');
 
@@ -1059,7 +1064,7 @@ function renderLifecycleLabs() {
         : '';
 
       return `
-        <article class="panel deployment-card" data-deployment-id="${deployment.id}">
+        <article class="panel deployment-card${foreign ? ' deployment-card-foreign' : ''}" data-deployment-id="${deployment.id}">
           <div class="panel-head deploy-head">
             <div>
               <p class="deploy-title">
@@ -2125,6 +2130,29 @@ if (changelogBtn && changelogDialog) {
 
 function hasRole(role) {
   return Array.isArray(state.currentUser?.roles) && state.currentUser.roles.includes(role);
+}
+
+function normalizeEmail(value) {
+  return String(value ?? '').trim().toLowerCase();
+}
+
+function getDeploymentOwnerEmail(deployment) {
+  return normalizeEmail(deployment?.teacherEmail || deployment?.teacher?.email);
+}
+
+function isDeploymentOwnedByCurrentUser(deployment) {
+  if (!state.auth.enabled) return true;
+  const userEmail = normalizeEmail(state.currentUser?.email);
+  const ownerEmail = getDeploymentOwnerEmail(deployment);
+  return Boolean(userEmail && ownerEmail && userEmail === ownerEmail);
+}
+
+function isForeignDeployment(deployment) {
+  return Boolean(state.auth.enabled && getDeploymentOwnerEmail(deployment) && !isDeploymentOwnedByCurrentUser(deployment));
+}
+
+function canManageDeployment(deployment) {
+  return !state.auth.enabled || state.isAdmin || isDeploymentOwnedByCurrentUser(deployment);
 }
 
 function applyRoleVisibility() {
