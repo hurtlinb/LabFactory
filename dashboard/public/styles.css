@@ -639,6 +639,9 @@ input:focus, textarea:focus, select:focus {
 .switch:has(input:checked) .switch-track { background: var(--brand); border-color: var(--brand); }
 .switch:has(input:checked) .switch-thumb { transform: translateX(17px); }
 
+.lab-filter-toggle { margin-left: auto; }
+.lab-filter-toggle .switch-label { min-width: 118px; }
+
 /* ── Buttons ──────────────────────────────────────────────────── */
 .btn {
   display: inline-flex;

@@ -6,6 +6,18 @@ All notable changes to LabFactory are documented here.
 
 ---
 
+## [1.7.5] — 2026-07-21
+
+### Ajouts
+- Page Labs : ajout du toggle `Show all labs / Show only my labs`, avec affichage de tous les labs par défaut
+- Les labs appartenant à d'autres utilisateurs sont affichés avec un fond grisé dans la liste
+
+### Sécurité
+- Un lab ne peut désormais être déployé, détruit ou supprimé que par son créateur ou par un admin ; les actions Start/Stop restent disponibles
+- Un blueprint utilisé par un lab déployé devient verrouillé en lecture seule et ne peut plus être modifié côté dashboard, API ou base de données
+
+---
+
 ## [1.7.4] — 2026-06-25
 
 ### Corrections

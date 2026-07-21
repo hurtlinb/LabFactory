@@ -22,6 +22,7 @@
   isAdmin: false,
   isLabsUser: false,
   activeDeploymentDetailsId: null,
+  showOnlyMyLabs: false,
   currentBlueprint: createEmptyBlueprint()
 };
 
@@ -34,6 +35,8 @@ const blueprintWorkspace = document.getElementById('blueprintWorkspace');
 const modelList = document.getElementById('modelList');
 const classroomList = document.getElementById('classroomList');
 const lifecycleList = document.getElementById('lifecycleList');
+const showOnlyMyLabsToggle = document.getElementById('showOnlyMyLabsToggle');
+const showOnlyMyLabsLabel = document.getElementById('showOnlyMyLabsLabel');
 const templatePalette = document.getElementById('templatePalette');
 const vmCount = document.getElementById('vmCount');
 const canvasVmList = document.getElementById('canvasVmList');
@@ -1025,14 +1028,36 @@ function renderLifecycleSteps(status) {
     </div>`).join('')}</div>`;
 }
 
+function syncLabVisibilityToggle() {
+  if (showOnlyMyLabsToggle) {
+    showOnlyMyLabsToggle.checked = state.showOnlyMyLabs;
+  }
+  if (showOnlyMyLabsLabel) {
+    showOnlyMyLabsLabel.textContent = state.showOnlyMyLabs ? 'Show only my labs' : 'Show all labs';
+  }
+}
+
+function getVisibleLifecycleDeployments() {
+  if (!state.showOnlyMyLabs) return state.deployments;
+  return state.deployments.filter(deployment => isDeploymentOwnedByCurrentUser(deployment));
+}
+
 function renderLifecycleLabs() {
   if (!lifecycleList) return;
+  syncLabVisibilityToggle();
+
   if (!state.deployments.length) {
     lifecycleList.innerHTML = '<p class="placeholder">No deployments yet.</p>';
     return;
   }
 
-  lifecycleList.innerHTML = state.deployments
+  const visibleDeployments = getVisibleLifecycleDeployments();
+  if (!visibleDeployments.length) {
+    lifecycleList.innerHTML = '<p class="placeholder">No labs match the current filter.</p>';
+    return;
+  }
+
+  lifecycleList.innerHTML = visibleDeployments
     .map(deployment => {
       const actions = resolveLifecycleActions(deployment.status);
       const canManage = canManageDeployment(deployment);
@@ -2711,6 +2736,11 @@ navButtons.forEach(button => {
 
 document.getElementById('dashGotoLifecycle')?.addEventListener('click', () => setActiveView('lifecycle'));
 document.getElementById('dashGotoModels')?.addEventListener('click', () => setActiveView('models'));
+
+showOnlyMyLabsToggle?.addEventListener('change', () => {
+  state.showOnlyMyLabs = Boolean(showOnlyMyLabsToggle.checked);
+  renderLifecycleLabs();
+});
 
 [blueprintNameInput, blueprintDescriptionInput, blueprintCourseIdInput, blueprintWindowsAdminPasswordInput, blueprintLinuxDefaultUsernameInput].forEach(input => {
   input.addEventListener('input', () => {
