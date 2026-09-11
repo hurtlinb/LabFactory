@@ -2552,6 +2552,130 @@ app.post(
 );
 
 app.post(
+  '/api/lifecycle/deployments/:id/vms/:vmid/pause-updates',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
+  wrapAsync(async (req, res) => {
+    const vmid = Number(req.params.vmid);
+    if (!Number.isInteger(vmid) || vmid <= 0) {
+      res.status(400).json({ error: 'invalid vmid' });
+      return;
+    }
+
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+
+    const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
+    if (!targetVm) {
+      res.status(404).json({ error: 'VM not found in deployment plan' });
+      return;
+    }
+
+    if (!isWindowsOsType(targetVm.osType)) {
+      res.status(400).json({ error: 'Windows Update pause is only supported for Windows VMs' });
+      return;
+    }
+    if (deploymentBusyStatuses.has(deployment.status)) {
+      res.status(409).json({ error: 'deployment already has an operation in progress' });
+      return;
+    }
+
+    const envSettings = readTerraformEnvSettings();
+    assertRequiredTerraformEnvSettings(envSettings);
+
+    let vmResource;
+    try {
+      const resources = await fetchClusterVmResources({ context: `pause-updates vmid ${vmid}` });
+      vmResource = resources.find(r => Number(r.vmid) === vmid);
+    } catch {
+      res.status(502).json({ error: 'Unable to reach Proxmox cluster' });
+      return;
+    }
+
+    if (!vmResource) {
+      res.status(404).json({ error: 'VM not found in Proxmox cluster' });
+      return;
+    }
+    if (vmResource.status !== 'running') {
+      res.status(409).json({ error: 'VM must be running to pause Windows updates' });
+      return;
+    }
+
+    const node = vmResource.node;
+    // Standard pause policies: 35 days, then automatic resumption.
+    // https://learn.microsoft.com/windows/deployment/update/waas-configure-wufb
+    const psScript = [
+      "$ErrorActionPreference = 'Stop'",
+      "$path = 'HKLM:\\SOFTWARE\\Policies\\Microsoft\\Windows\\WindowsUpdate'",
+      "$start = (Get-Date).ToString('yyyy-MM-dd')",
+      "New-Item -Path $path -Force | Out-Null",
+      "New-ItemProperty -Path $path -Name 'PauseQualityUpdatesStartTime' -Value $start -PropertyType String -Force | Out-Null",
+      ...(targetVm.osType === 'windows11' ? [
+        "New-ItemProperty -Path $path -Name 'PauseFeatureUpdatesStartTime' -Value $start -PropertyType String -Force | Out-Null"
+      ] : []),
+      "if ((Get-ItemPropertyValue -Path $path -Name 'PauseQualityUpdatesStartTime') -ne $start) { throw 'Unable to verify Windows Update pause policy' }"
+    ].join('; ');
+    const command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', psScript];
+
+    let pid;
+    try {
+      const execPayload = await requestProxmoxJson(
+        envSettings,
+        `nodes/${encodeURIComponent(node)}/qemu/${vmid}/agent/exec`,
+        { method: 'POST', body: { command }, timeoutMs: 10000 }
+      );
+      pid = execPayload?.data?.pid;
+    } catch (error) {
+      console.error(`Guest agent exec failed for vmid ${vmid}:`, error);
+      let detail = error.message;
+      try { detail = JSON.parse(error.responseBody)?.errors ?? detail; } catch { /* noop */ }
+      res.status(502).json({ error: `Guest agent exec failed: ${detail}` });
+      return;
+    }
+
+    if (!pid) {
+      res.status(502).json({ error: 'Guest agent did not return a PID' });
+      return;
+    }
+
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline) {
+      await sleep(1500);
+      let execStatus;
+      try {
+        const statusPayload = await requestProxmoxJson(
+          envSettings,
+          `nodes/${encodeURIComponent(node)}/qemu/${vmid}/agent/exec-status?pid=${pid}`,
+          { timeoutMs: 8000 }
+        );
+        execStatus = statusPayload?.data ?? {};
+      } catch {
+        continue;
+      }
+
+      if (execStatus.exited) {
+        const exitCode = execStatus.exitcode ?? execStatus['exit-code'] ?? -1;
+        if (exitCode === 0) {
+          res.json({ success: true, days: 35 });
+        } else {
+          const details = String(execStatus['err-data'] || execStatus['out-data'] || `Exit code: ${exitCode}`).trim();
+          res.status(422).json({ error: 'Windows Update pause command failed', details });
+        }
+        return;
+      }
+    }
+
+    res.status(504).json({ error: 'Windows Update pause timed out waiting for command completion' });
+  })
+);
+
+app.post(
   '/api/lifecycle/deployments/:id/workstations/:workstationNumber/redeploy',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {

@@ -4,6 +4,9 @@ All notable changes to LabFactory are documented here.
 
 ## [Unreleased]
 
+### Ajouts
+- Bouton Pause Windows Update dans les details du lab pour Windows 11 et Server 2022 : suspension standard de 35 jours, avec reprise automatique.
+
 ---
 
 ## [1.7.5] — 2026-07-21

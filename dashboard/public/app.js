@@ -1292,7 +1292,7 @@ function getDeploymentWorkstationNumber(vm) {
   return match?.[1] ?? 'n/a';
 }
 
-function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false) {
+function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false) {
   return vms
     .map(
       vm => {
@@ -1314,6 +1314,11 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
               </svg>
             </button>`
           : '';
+        const pauseUpdatesButton = canPauseUpdates && ['windows11', 'windows-server'].includes(vm.osType) && vm.proxmoxStatus === 'running'
+          ? `<button class="icon-btn pause-updates-button" type="button" title="Pause Windows Update (5 weeks)" aria-label="Pause Windows Update (5 weeks)" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9 8v8M15 8v8"/></svg>
+            </button>`
+          : '';
         return `
         <tr>
           <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
@@ -1327,7 +1332,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
           <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
-          <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}</td>
+          <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}</td>
         </tr>
       `;
       }
@@ -1401,6 +1406,29 @@ async function resetVmPassword(deploymentId, vmid, button) {
   }
 }
 
+async function pauseVmUpdates(deploymentId, vmid, button) {
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  try {
+    const result = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms/${vmid}/pause-updates`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, `Windows Update pause configured for ${result.days} days for VMID ${vmid}. Updates will resume automatically.`, 'success', 8000);
+    }
+  } catch (error) {
+    if (deploymentDetailsStatus) {
+      showMessage(deploymentDetailsStatus, error.message, 'danger', 8000);
+    }
+  } finally {
+    if (button.isConnected) {
+      button.disabled = false;
+      button.removeAttribute('aria-busy');
+    }
+  }
+}
+
 function renderDeploymentVmDetails(payload) {
   if (!deploymentVmDetailsList) return;
   const deployment = payload?.deployment ?? {};
@@ -1423,6 +1451,7 @@ function renderDeploymentVmDetails(payload) {
   const canRedeployWorkstations = Boolean(deployment.canRedeployWorkstations) && !isDeploymentBusy(deployment.status);
   const canResetIp = deployment.status === 'running';
   const canResetPassword = deployment.status === 'running';
+  const canPauseUpdates = ['running', 'mixed', 'deployed'].includes(deployment.status);
 
   deploymentVmDetailsList.innerHTML = `
     <div class="workstation-detail-list">
@@ -1465,7 +1494,7 @@ function renderDeploymentVmDetails(payload) {
                       <th scope="col"></th>
                     </tr>
                   </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword)}</tbody>
+                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword, canPauseUpdates)}</tbody>
                 </table>
               </div>
             </section>
@@ -1490,6 +1519,13 @@ function renderDeploymentVmDetails(payload) {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       await resetVmIp(button.dataset.deploymentId, button.dataset.vmid, button);
+    });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.pause-updates-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      await pauseVmUpdates(button.dataset.deploymentId, button.dataset.vmid, button);
     });
   });
 
