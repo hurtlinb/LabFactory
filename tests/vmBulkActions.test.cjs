@@ -82,7 +82,7 @@ test('selections and results are isolated by lab and retained when reopened', ()
 
 test('select all, partial selection and refresh preserve row selection and counts', () => {
   const { context, selection } = setup();
-  const control = dataset => ({ dataset, addEventListener(event, handler) { this[event] = handler; } });
+  const control = dataset => ({ dataset, setAttribute(name, value) { this[name] = value; }, addEventListener(event, handler) { this[event] = handler; } });
   const all = control({}), count = {}, feedback = {};
   const rows = [control({ vmid: '1' }), control({ vmid: '2' })];
   const buttons = ['reset-ip', 'reset-password', 'pause-updates'].map(action => control({ vmBulkAction: action }));
@@ -99,7 +99,7 @@ test('select all, partial selection and refresh preserve row selection and count
   context.renderDeploymentVmDetails(payload);
   all.change({ target: { checked: true } });
   assert.equal(selection.selected.size, 2); assert.equal(count.textContent, '2 / 2 selected');
-  assert.equal(buttons[2].textContent, 'Pause updates (1)');
+  assert.equal(buttons[2]['aria-label'], 'Pause updates: 1 compatible VM(s); 1 will be skipped');
   rows[1].checked = false; rows[1].change();
   assert.equal(all.indeterminate, true);
   context.renderDeploymentVmDetails(payload);

@@ -1299,6 +1299,15 @@ const vmBulkActions = {
   'pause-updates': 'Pause updates'
 };
 
+function renderVmActionIcon(action) {
+  const shapes = {
+    'reset-ip': '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/>',
+    'reset-password': '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    'pause-updates': '<circle cx="12" cy="12" r="10"/><path d="M9 8v8M15 8v8"/>'
+  };
+  return `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${shapes[action] || ''}</svg>`;
+}
+
 function getDeploymentVmSelection(deploymentId) {
   if (!deploymentVmSelections.has(deploymentId)) {
     deploymentVmSelections.set(deploymentId, { selected: new Set(), payload: null, running: false, results: [], action: null });
@@ -1341,8 +1350,9 @@ function updateVmBulkControls(deploymentId) {
     const action = button.dataset.vmBulkAction;
     const eligible = selected.filter(vm => !getVmActionUnavailableReason(vm, payload.deployment, action)).length;
     button.disabled = selection.running || eligible === 0;
-    button.textContent = `${vmBulkActions[action]} (${eligible})`;
-    button.title = `${eligible} compatible VM(s); ${selected.length - eligible} will be skipped`;
+    const label = `${vmBulkActions[action]}: ${eligible} compatible VM(s); ${selected.length - eligible} will be skipped`;
+    button.title = label;
+    button.setAttribute('aria-label', label);
   });
   const results = deploymentVmDetailsList.querySelector('.vm-bulk-feedback');
   if (results) results.innerHTML = renderVmBulkResults(selection);
@@ -1399,24 +1409,17 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
         const resetIpButton = canResetIp && hasStaticIp && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="2" y1="12" x2="22" y2="12"/>
-                <path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/>
-              </svg>
+              ${renderVmActionIcon('reset-ip')}
             </button>`
           : '';
         const resetPasswordButton = canResetPassword && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn reset-password-button" type="button" title="Reset Password" aria-label="Reset Password" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                <rect x="5" y="11" width="14" height="10" rx="2"/>
-                <path d="M8 11V7a4 4 0 0 1 8 0v4"/>
-              </svg>
+              ${renderVmActionIcon('reset-password')}
             </button>`
           : '';
         const pauseUpdatesButton = canPauseUpdates && ['windows11', 'windows-server'].includes(vm.osType) && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn pause-updates-button" type="button" title="Pause updates" aria-label="Pause updates" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9 8v8M15 8v8"/></svg>
+              ${renderVmActionIcon('pause-updates')}
             </button>`
           : '';
         return `
@@ -1463,7 +1466,7 @@ async function redeployDeploymentWorkstation(deploymentId, workstationNumber, bu
 async function resetVmIp(deploymentId, vmid, button) {
   if (!confirm(`Reset IP configuration for VMID ${vmid}?\n\nThis will re-apply the network settings from the blueprint via the Proxmox guest agent.`)) return;
   button.disabled = true;
-  const originalText = button.textContent;
+  const originalMarkup = button.innerHTML;
   button.textContent = 'Resetting…';
   try {
     const result = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms/${vmid}/reset-ip`, {
@@ -1480,7 +1483,7 @@ async function resetVmIp(deploymentId, vmid, button) {
   } finally {
     if (button.isConnected) {
       button.disabled = false;
-      button.textContent = originalText;
+      button.innerHTML = originalMarkup;
     }
   }
 }
@@ -1562,7 +1565,7 @@ function renderDeploymentVmDetails(payload) {
     <div class="vm-bulk-toolbar">
       <label><input class="vm-select-all" type="checkbox" /> Select all VMs</label>
       <span class="vm-selection-count" aria-live="polite"></span>
-      <div class="vm-bulk-actions">${Object.entries(vmBulkActions).map(([action, label]) => `<button type="button" class="secondary" data-vm-bulk-action="${action}" disabled>${label}</button>`).join('')}</div>
+      <div class="vm-bulk-actions">${Object.entries(vmBulkActions).map(([action, label]) => `<button type="button" class="icon-btn" data-vm-bulk-action="${action}" title="${label}" aria-label="${label}" disabled>${renderVmActionIcon(action)}</button>`).join('')}</div>
       <small class="muted">Actions apply to compatible running VMs. Other selected VMs are skipped.</small>
     </div>
     <div class="vm-bulk-feedback"></div>
