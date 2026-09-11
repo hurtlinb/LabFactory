@@ -1309,21 +1309,23 @@ input:focus, textarea:focus, select:focus {
   width: 100%;
 }
 
-/* Fixed column widths — dot | VM name (flex) | VMID | OS | VLAN | IP | State | Proxmox */
+/* Fixed column widths — selection | dot | VM name (flex) | VMID | OS | VLAN | IP | State | Proxmox | actions */
 .vm-state-table th:nth-child(1),
-.vm-state-table td:nth-child(1) { width: 24px; }
-.vm-state-table th:nth-child(3),
-.vm-state-table td:nth-child(3) { width: 68px; }
+.vm-state-table td:nth-child(1) { width: 32px; }
+.vm-state-table th:nth-child(2),
+.vm-state-table td:nth-child(2) { width: 24px; }
 .vm-state-table th:nth-child(4),
-.vm-state-table td:nth-child(4) { width: 108px; }
+.vm-state-table td:nth-child(4) { width: 68px; }
 .vm-state-table th:nth-child(5),
-.vm-state-table td:nth-child(5) { width: 58px; }
+.vm-state-table td:nth-child(5) { width: 108px; }
 .vm-state-table th:nth-child(6),
-.vm-state-table td:nth-child(6) { width: 118px; }
+.vm-state-table td:nth-child(6) { width: 58px; }
 .vm-state-table th:nth-child(7),
-.vm-state-table td:nth-child(7) { width: 148px; overflow: hidden; text-overflow: ellipsis; }
+.vm-state-table td:nth-child(7) { width: 118px; }
 .vm-state-table th:nth-child(8),
-.vm-state-table td:nth-child(8) { width: 80px; }
+.vm-state-table td:nth-child(8) { width: 148px; overflow: hidden; text-overflow: ellipsis; }
+.vm-state-table th:nth-child(9),
+.vm-state-table td:nth-child(9) { width: 80px; }
 
 .vm-state-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vm-state-name-cell { text-align: left; }
@@ -1681,3 +1683,12 @@ input:focus, textarea:focus, select:focus {
   .dash-metrics { grid-template-columns: repeat(2, 1fr); }
   .seat-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+.vm-bulk-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); }
+.vm-bulk-toolbar label { display: flex; align-items: center; gap: 6px; margin: 0; }
+.vm-bulk-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.vm-bulk-toolbar small { flex-basis: 100%; }
+.vm-bulk-toolbar input, .vm-selection-cell input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
+.vm-bulk-results { padding: 10px; border: 1px solid var(--line); border-radius: var(--r); }
+.vm-bulk-results ul { max-height: 180px; overflow-y: auto; overflow-wrap: anywhere; padding-left: 22px; }
+.vm-state-table th:last-child, .vm-state-table td:last-child { width: 112px; }

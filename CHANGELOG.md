@@ -5,6 +5,7 @@ All notable changes to LabFactory are documented here.
 ## [Unreleased]
 
 ### Ajouts
+- Selection multiple ou globale des VM dans les details du lab, avec Reset IP, Reset Password et pause Windows Update groupes ; progression et resultat par VM.
 - Bouton Pause Windows Update dans les details du lab pour Windows 11 et Server 2022 : suspension standard de 35 jours, avec reprise automatique.
 
 ---

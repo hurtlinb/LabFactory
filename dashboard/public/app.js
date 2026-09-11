@@ -1292,12 +1292,112 @@ function getDeploymentWorkstationNumber(vm) {
   return match?.[1] ?? 'n/a';
 }
 
+const deploymentVmSelections = new Map();
+const vmBulkActions = {
+  'reset-ip': 'Reset IP',
+  'reset-password': 'Reset Password',
+  'pause-updates': 'Pause updates'
+};
+
+function getDeploymentVmSelection(deploymentId) {
+  if (!deploymentVmSelections.has(deploymentId)) {
+    deploymentVmSelections.set(deploymentId, { selected: new Set(), payload: null, running: false, results: [], action: null });
+  }
+  return deploymentVmSelections.get(deploymentId);
+}
+
+function getVmActionUnavailableReason(vm, deployment, action) {
+  if (!['running', 'mixed', 'deployed'].includes(deployment.status)) return 'Lab is not ready';
+  if (vm.proxmoxStatus !== 'running') return 'VM is not running';
+  if (action === 'pause-updates' && !['windows11', 'windows-server'].includes(vm.osType)) return 'Windows only';
+  if (action === 'reset-ip' && (!vm.ipAddress || ['dhcp', 'n/a'].includes(vm.ipAddress))) return 'No static IP configured';
+  return '';
+}
+
+function renderVmBulkResults(selection) {
+  if (!selection.results.length) return '';
+  const completed = selection.results.filter(result => ['success', 'error', 'skipped'].includes(result.status)).length;
+  return `<details class="vm-bulk-results" open>
+    <summary aria-live="polite">${escapeHtml(vmBulkActions[selection.action])}: ${completed}/${selection.results.length} completed</summary>
+    <ul>${selection.results.map(result => `<li><strong>${escapeHtml(result.name)} (${escapeHtml(result.vmid)})</strong>: ${escapeHtml(result.status)}${result.message ? ' ? ' + escapeHtml(result.message) : ''}</li>`).join('')}</ul>
+  </details>`;
+}
+
+function updateVmBulkControls(deploymentId) {
+  if (state.activeDeploymentDetailsId !== deploymentId) return;
+  const selection = getDeploymentVmSelection(deploymentId);
+  const payload = selection.payload;
+  if (!payload) return;
+  const selected = payload.vms.filter(vm => selection.selected.has(String(vm.vmid)));
+  const all = deploymentVmDetailsList.querySelector('.vm-select-all');
+  if (all) {
+    all.checked = selected.length > 0 && selected.length === payload.vms.length;
+    all.indeterminate = selected.length > 0 && selected.length < payload.vms.length;
+    all.disabled = selection.running;
+  }
+  const count = deploymentVmDetailsList.querySelector('.vm-selection-count');
+  if (count) count.textContent = `${selected.length} / ${payload.vms.length} selected`;
+  deploymentVmDetailsList.querySelectorAll('[data-vm-bulk-action]').forEach(button => {
+    const action = button.dataset.vmBulkAction;
+    const eligible = selected.filter(vm => !getVmActionUnavailableReason(vm, payload.deployment, action)).length;
+    button.disabled = selection.running || eligible === 0;
+    button.textContent = `${vmBulkActions[action]} (${eligible})`;
+    button.title = `${eligible} compatible VM(s); ${selected.length - eligible} will be skipped`;
+  });
+  const results = deploymentVmDetailsList.querySelector('.vm-bulk-feedback');
+  if (results) results.innerHTML = renderVmBulkResults(selection);
+}
+
+async function runVmBulkAction(deploymentId, action) {
+  const selection = getDeploymentVmSelection(deploymentId);
+  if (selection.running || !vmBulkActions[action] || !selection.payload) return;
+  const { deployment, vms } = selection.payload;
+  const selected = vms.filter(vm => selection.selected.has(String(vm.vmid)));
+  const eligible = selected.filter(vm => !getVmActionUnavailableReason(vm, deployment, action));
+  if (!eligible.length) return;
+  if (action !== 'pause-updates' && !confirm(`${vmBulkActions[action]} for ${eligible.length} VM(s)?\n\nThe blueprint settings will be re-applied. ${selected.length - eligible.length} incompatible VM(s) will be skipped.`)) return;
+  selection.running = true;
+  selection.action = action;
+  selection.results = selected.map(vm => {
+    const reason = getVmActionUnavailableReason(vm, deployment, action);
+    return { vmid: String(vm.vmid), name: vm.name, status: reason ? 'skipped' : 'waiting', message: reason };
+  });
+  if (state.activeDeploymentDetailsId === deploymentId) renderDeploymentVmDetails(selection.payload);
+  const pending = selection.results.filter(result => result.status === 'waiting');
+  let next = 0;
+  // Limit parallel guest-agent calls, and keep processing after individual failures.
+  async function worker() {
+    while (next < pending.length) {
+      const result = pending[next++];
+      result.status = 'running';
+      updateVmBulkControls(deploymentId);
+      try {
+        const response = await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms/${result.vmid}/${action}`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }
+        });
+        result.status = 'success';
+        result.message = action === 'pause-updates' ? `Paused for ${response.days} days` : action === 'reset-ip' ? `IP: ${response.ip}` : 'Password reset';
+      } catch (error) {
+        result.status = 'error';
+        result.message = error.message;
+      }
+      updateVmBulkControls(deploymentId);
+    }
+  }
+  try {
+    await Promise.all(Array.from({ length: Math.min(3, pending.length) }, () => worker()));
+  } finally {
+    selection.running = false;
+    if (state.activeDeploymentDetailsId === deploymentId) renderDeploymentVmDetails(selection.payload);
+  }
+}
+
 function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false) {
   return vms
     .map(
       vm => {
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
-        const resetIpButton = canResetIp && hasStaticIp
+        const resetIpButton = canResetIp && hasStaticIp && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <circle cx="12" cy="12" r="10"/>
@@ -1306,7 +1406,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
               </svg>
             </button>`
           : '';
-        const resetPasswordButton = canResetPassword
+        const resetPasswordButton = canResetPassword && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn reset-password-button" type="button" title="Reset Password" aria-label="Reset Password" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                 <rect x="5" y="11" width="14" height="10" rx="2"/>
@@ -1315,12 +1415,13 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
             </button>`
           : '';
         const pauseUpdatesButton = canPauseUpdates && ['windows11', 'windows-server'].includes(vm.osType) && vm.proxmoxStatus === 'running'
-          ? `<button class="icon-btn pause-updates-button" type="button" title="Pause Windows Update (5 weeks)" aria-label="Pause Windows Update (5 weeks)" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
+          ? `<button class="icon-btn pause-updates-button" type="button" title="Pause updates" aria-label="Pause updates" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
               <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M9 8v8M15 8v8"/></svg>
             </button>`
           : '';
         return `
         <tr>
+          <td class="vm-selection-cell"><input class="vm-select" type="checkbox" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Select ${escapeHtmlAttr(vm.name)} (VMID ${escapeHtmlAttr(String(vm.vmid))})" ${getDeploymentVmSelection(deploymentId).selected.has(String(vm.vmid)) ? 'checked' : ''} /></td>
           <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
           <td class="vm-state-name-cell">
             <strong>${escapeHtml(vm.name)}</strong>
@@ -1433,6 +1534,10 @@ function renderDeploymentVmDetails(payload) {
   if (!deploymentVmDetailsList) return;
   const deployment = payload?.deployment ?? {};
   const vms = Array.isArray(payload?.vms) ? payload.vms : [];
+  const selection = getDeploymentVmSelection(deployment.id);
+  selection.payload = { ...payload, deployment, vms };
+  const availableVmids = new Set(vms.map(vm => String(vm.vmid)));
+  selection.selected = new Set([...selection.selected].filter(vmid => availableVmids.has(vmid)));
   if (!vms.length) {
     deploymentVmDetailsList.innerHTML = '<p class="placeholder">No VMs found for this deployment.</p>';
     return;
@@ -1449,11 +1554,18 @@ function renderDeploymentVmDetails(payload) {
   const orderedWorkstations = [...workstationGroups.keys()].sort((left, right) => Number(left) - Number(right));
   const activeWorkstationNumbers = new Set(Array.isArray(deployment.activeWorkstationNumbers) ? deployment.activeWorkstationNumbers : []);
   const canRedeployWorkstations = Boolean(deployment.canRedeployWorkstations) && !isDeploymentBusy(deployment.status);
-  const canResetIp = deployment.status === 'running';
-  const canResetPassword = deployment.status === 'running';
+  const canResetIp = ['running', 'mixed', 'deployed'].includes(deployment.status);
+  const canResetPassword = ['running', 'mixed', 'deployed'].includes(deployment.status);
   const canPauseUpdates = ['running', 'mixed', 'deployed'].includes(deployment.status);
 
   deploymentVmDetailsList.innerHTML = `
+    <div class="vm-bulk-toolbar">
+      <label><input class="vm-select-all" type="checkbox" /> Select all VMs</label>
+      <span class="vm-selection-count" aria-live="polite"></span>
+      <div class="vm-bulk-actions">${Object.entries(vmBulkActions).map(([action, label]) => `<button type="button" class="secondary" data-vm-bulk-action="${action}" disabled>${label}</button>`).join('')}</div>
+      <small class="muted">Actions apply to compatible running VMs. Other selected VMs are skipped.</small>
+    </div>
+    <div class="vm-bulk-feedback"></div>
     <div class="workstation-detail-list">
       ${orderedWorkstations
         .map(workstationNumber => {
@@ -1483,6 +1595,7 @@ function renderDeploymentVmDetails(payload) {
                 <table class="queue-table vm-state-table">
                   <thead>
                     <tr>
+                      <th scope="col" aria-label="Selection"></th>
                       <th scope="col"></th>
                       <th scope="col">VM</th>
                       <th scope="col">VMID</th>
@@ -1503,6 +1616,26 @@ function renderDeploymentVmDetails(payload) {
         .join('')}
     </div>
   `;
+
+  if (selection.running) {
+    deploymentVmDetailsList.querySelectorAll('button, input').forEach(control => { control.disabled = true; });
+  }
+  deploymentVmDetailsList.querySelector('.vm-select-all')?.addEventListener('change', event => {
+    selection.selected = event.target.checked ? new Set(vms.map(vm => String(vm.vmid))) : new Set();
+    deploymentVmDetailsList.querySelectorAll('.vm-select').forEach(input => { input.checked = selection.selected.has(input.dataset.vmid); });
+    updateVmBulkControls(deployment.id);
+  });
+  deploymentVmDetailsList.querySelectorAll('.vm-select').forEach(input => {
+    input.addEventListener('change', () => {
+      if (input.checked) selection.selected.add(input.dataset.vmid);
+      else selection.selected.delete(input.dataset.vmid);
+      updateVmBulkControls(deployment.id);
+    });
+  });
+  deploymentVmDetailsList.querySelectorAll('[data-vm-bulk-action]').forEach(button => {
+    button.addEventListener('click', () => runVmBulkAction(deployment.id, button.dataset.vmBulkAction));
+  });
+  updateVmBulkControls(deployment.id);
 
   deploymentVmDetailsList.querySelectorAll('.workstation-redeploy-button').forEach(button => {
     button.addEventListener('click', async event => {
