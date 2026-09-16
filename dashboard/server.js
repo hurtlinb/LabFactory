@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
+import { getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
 import express from 'express';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -3470,6 +3470,11 @@ app.get('/api/workers', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (re
     res.status(500).json({ error: 'unable to fetch worker statuses' });
   }
 });
+
+app.get('/api/maintenance/files', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await getBlueprintFileStorage(dbPool));
+}));
 
 app.get('/api/settings/terraform', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {

@@ -52,6 +52,13 @@ test('HTTP multiple uploads, legacy resave, individual replacement/removal and b
     added.forEach(response => assert.equal(response.status, 200));
     let files = (await api(base)).body.vms[0].config.fileUploads;
     assert.equal(files.length, 3, 'concurrent additions preserve existing files');
+    const inventory = await api('/api/maintenance/files');
+    assert.equal(inventory.status, 200);
+    const storedFiles = inventory.body.files.filter(file => file.blueprintId === blueprintId);
+    assert.equal(storedFiles.length, 3);
+    assert.equal(storedFiles.reduce((sum, file) => sum + file.size, 0), 300 * 1024 * 1024 + 24);
+    assert.ok(storedFiles.every(file => file.blueprintName === 'Upload test'));
+    assert.ok(inventory.body.availableBytes > 0);
     await fs.access(path.join(directory, first.id));
     const missingReplacement = await api(url + '&replaceId=' + randomUUID(), { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: 'must not be saved' });
     assert.equal(missingReplacement.status, 400);

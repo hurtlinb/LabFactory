@@ -526,6 +526,30 @@
             </div>
           </article>
 
+          <article class="panel" id="uploadedFilesPanel" aria-labelledby="uploadedFilesTitle">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Storage</p>
+                <h3 id="uploadedFilesTitle">Uploaded files</h3>
+              </div>
+              <button type="button" id="refreshUploadedFilesButton" class="btn btn-secondary">Refresh</button>
+            </div>
+            <dl class="file-storage-summary">
+              <div><dt>Stored files</dt><dd id="uploadedFilesCount">—</dd></div>
+              <div><dt>Total file size</dt><dd id="uploadedFilesTotal">—</dd></div>
+              <div><dt>Available space</dt><dd id="uploadedFilesAvailable">—</dd></div>
+              <div><dt>Storage capacity</dt><dd id="uploadedFilesCapacity">—</dd></div>
+            </dl>
+            <p class="muted">Available space is measured on the file storage volume.</p>
+            <p id="uploadedFilesStatus" class="muted" role="status" aria-live="polite"></p>
+            <div class="table-wrap uploaded-files-table-wrap">
+              <table class="queue-table uploaded-files-table">
+                <thead><tr><th scope="col">File</th><th scope="col">Blueprint</th><th scope="col">Size</th></tr></thead>
+                <tbody id="uploadedFilesBody"><tr><td colspan="3" class="muted">Open Maintenance to load files.</td></tr></tbody>
+              </table>
+            </div>
+          </article>
+
           <article class="panel danger-panel">
             <p class="eyebrow danger-eyebrow">danger zone</p>
             <div class="inline-actions section-actions danger-actions">

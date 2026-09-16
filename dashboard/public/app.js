@@ -234,6 +234,7 @@ function setActiveView(view) {
     if (titleEl) titleEl.textContent = info.title;
     if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
   }
+  if (view === 'admin-settings') void loadUploadedFiles();
   if (view !== 'blueprint') {
     state.isBlueprintWorkspaceVisible = false;
     renderBlueprintWorkspace();
@@ -2778,6 +2779,61 @@ function collectSettingsPayload() {
   });
   return payload;
 }
+
+function formatStorageBytes(bytes) {
+  if (bytes === null || bytes === undefined || !Number.isFinite(Number(bytes))) return '\u2014';
+  const value = Math.max(0, Number(bytes));
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+  const exponent = value ? Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1) : 0;
+  return (value / 1024 ** exponent).toLocaleString(undefined, { maximumFractionDigits: exponent ? 2 : 0 }) + ' ' + units[exponent];
+}
+
+let uploadedFilesLoading = false;
+async function loadUploadedFiles() {
+  if (!state.isAdmin || uploadedFilesLoading) return;
+  const panel = document.getElementById('uploadedFilesPanel');
+  if (!panel) return;
+  const button = document.getElementById('refreshUploadedFilesButton');
+  const status = document.getElementById('uploadedFilesStatus');
+  const body = document.getElementById('uploadedFilesBody');
+  uploadedFilesLoading = true;
+  button.disabled = true;
+  panel.setAttribute('aria-busy', 'true');
+  status.textContent = 'Loading storage information...';
+  status.style.color = '';
+  try {
+    const storage = await fetchJson('/api/maintenance/files');
+    document.getElementById('uploadedFilesCount').textContent = storage.storedFileCount.toLocaleString();
+    for (const [element, value] of [['uploadedFilesTotal', storage.totalBytes], ['uploadedFilesAvailable', storage.availableBytes], ['uploadedFilesCapacity', storage.capacityBytes]]) {
+      const node = document.getElementById(element);
+      node.textContent = formatStorageBytes(value);
+      node.title = value.toLocaleString() + ' bytes';
+    }
+    body.innerHTML = storage.files.length ? storage.files.map(file => {
+      const note = file.status === 'missing' ? 'Missing from storage' : file.status === 'unreferenced' ? 'Upload in progress or unlinked file' : '';
+      const blueprint = file.blueprintName
+        ? '<button type="button" class="btn btn-ghost" data-open-file-blueprint="' + escapeHtmlAttr(file.blueprintId) + '">' + escapeHtml(file.blueprintName) + '</button>'
+        : '<span class="muted">No linked blueprint</span>';
+      return '<tr><td>' + escapeHtml(file.name) + (note ? '<span class="muted file-note">' + note + '</span>' : '') + '</td><td>' + blueprint + '</td><td title="' + escapeHtmlAttr(file.size === null ? '' : file.size.toLocaleString() + ' bytes') + '">' + formatStorageBytes(file.size) + '</td></tr>';
+    }).join('') : '<tr><td colspan="3" class="muted">No uploaded files.</td></tr>';
+    body.querySelectorAll('[data-open-file-blueprint]').forEach(link => {
+      link.addEventListener('click', async () => {
+        try { await loadBlueprint(link.dataset.openFileBlueprint); setActiveView('blueprint'); }
+        catch (error) { showMessage(globalStatus, error.message, 'danger'); }
+      });
+    });
+    status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+  } catch (error) {
+    status.textContent = 'Unable to load uploaded files: ' + error.message;
+    status.style.color = 'var(--danger)';
+  } finally {
+    uploadedFilesLoading = false;
+    button.disabled = false;
+    panel.setAttribute('aria-busy', 'false');
+  }
+}
+
+document.getElementById('refreshUploadedFilesButton')?.addEventListener('click', loadUploadedFiles);
 
 async function loadTerraformSettings() {
   if (!terraformSettingsForm || !terraformSettingsStatus) return;

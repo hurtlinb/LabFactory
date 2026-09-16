@@ -8,7 +8,7 @@ import { randomUUID, createHash } from 'node:crypto';
 
 const root = await fs.mkdtemp(path.join(tmpdir(), 'labfactory-file-tests-'));
 process.env.BLUEPRINT_FILES_DIR = root;
-const { getFileUploads, validateFileUpload, receiveBlueprintFile, blueprintFileDirectory, persistFileUpload,
+const { getBlueprintFileStorage, getFileUploads, validateFileUpload, receiveBlueprintFile, blueprintFileDirectory, persistFileUpload,
   resolveFileUpload, cleanupBlueprintFiles, lockBlueprintFiles, maxBlueprintFileBytes } = await import('../lib/blueprintFiles.js');
 after(async () => { await fs.rm(root, { recursive: true, force: true }); });
 const metadata = overrides => ({ id: randomUUID(), name: 'example.bin', directory: '/opt/lab/files', ...overrides });
@@ -113,4 +113,41 @@ test('normalizes legacy single files and preserves multiple file entries', () =>
   assert.deepEqual(getFileUploads({ fileUploads: [first, second] }), [first, second]);
   assert.deepEqual(getFileUploads({ fileUploads: [], fileUpload: first }), []);
   assert.throws(() => getFileUploads({ fileUploads: 'invalid' }), /must be an array/);
+});
+
+test('storage inventory counts actual bytes once and includes legacy, missing and unlinked files', async () => {
+  const inventoryRoot = await fs.mkdtemp(path.join(root, 'inventory-'));
+  const blueprintId = randomUUID();
+  const first = await receiveBlueprintFile(Readable.from(['12345']), blueprintId, { root: inventoryRoot });
+  const second = await receiveBlueprintFile(Readable.from(['1234567']), blueprintId, { root: inventoryRoot });
+  const orphan = await receiveBlueprintFile(Readable.from(['123']), blueprintId, { root: inventoryRoot });
+  const missing = metadata();
+  const legacy = metadata({ ...first, name: 'legacy.bin', size: 9999 });
+  const rows = [
+    { blueprint_id: blueprintId, blueprint_name: 'Test blueprint', config: { fileUpload: legacy } },
+    { blueprint_id: blueprintId, blueprint_name: 'Test blueprint', config: { fileUploads: [legacy, metadata(second), missing] } }
+  ];
+  await fs.writeFile(path.join(inventoryRoot, blueprintId, 'ignored.txt'), 'not an uploaded file');
+  const report = await getBlueprintFileStorage({ query: async () => ({ rows }) }, inventoryRoot);
+  assert.equal(report.storedFileCount, 3);
+  assert.equal(report.totalBytes, 15);
+  assert.equal(report.files.length, 4);
+  assert.equal(report.files.find(file => file.id === first.id).size, 5);
+  assert.equal(report.files.find(file => file.id === first.id).blueprintName, 'Test blueprint');
+  assert.equal(report.files.find(file => file.id === orphan.id).status, 'unreferenced');
+  assert.equal(report.files.find(file => file.id === missing.id).status, 'missing');
+  assert.equal(report.files.find(file => file.id === missing.id).size, null);
+  const volume = await fs.statfs(inventoryRoot);
+  assert.equal(report.capacityBytes, volume.blocks * volume.bsize);
+  assert.ok(report.availableBytes >= 0 && report.availableBytes <= report.capacityBytes);
+});
+
+test('storage inventory works before the first upload and does not create directories', async () => {
+  const absent = path.join(root, 'absent', 'uploads');
+  const report = await getBlueprintFileStorage({ query: async () => ({ rows: [] }) }, absent);
+  assert.deepEqual(report.files, []);
+  assert.equal(report.totalBytes, 0);
+  assert.equal(report.storedFileCount, 0);
+  assert.ok(report.capacityBytes > 0);
+  await assert.rejects(fs.access(absent), { code: 'ENOENT' });
 });

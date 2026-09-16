@@ -5,6 +5,7 @@ All notable changes to LabFactory are documented here.
 ## [Unreleased]
 
 ### Ajouts
+- Maintenance (admin) : inventaire des fichiers uploadés avec lien vers leur blueprint, taille individuelle, total des fichiers et espace disponible sur le volume de stockage.
 - Plusieurs customizations « Upload File » par VM, avec dossier cible, modification et suppression indépendants pour chaque fichier ; compatibilité avec les fichiers déjà configurés.
 - Customization « Upload File » pour Windows et Linux : création du dossier cible et copie du fichier lors du déploiement.
 - Stockage persistant des fichiers sur disque, partagé avec Ansible, avec nettoyage lors de la suppression du blueprint ou du remplacement du fichier.

@@ -1091,6 +1091,14 @@ input:focus, textarea:focus, select:focus {
   background: var(--surface);
 }
 
+.file-storage-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 16px; margin: 18px 0; }
+.file-storage-summary dt { color: var(--muted); font-size: 12px; }
+.file-storage-summary dd { margin: 6px 0 0; font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.uploaded-files-table-wrap { max-height: 420px; overflow-y: auto; }
+.uploaded-files-table td { overflow-wrap: anywhere; }
+.uploaded-files-table th:last-child, .uploaded-files-table td:last-child { text-align: right; white-space: nowrap; }
+.uploaded-files-table .file-note { display: block; margin-top: 4px; }
+
 .queue-table { width: 100%; border-collapse: collapse; }
 
 .queue-table th, .queue-table td {

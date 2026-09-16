@@ -360,6 +360,8 @@ File contents are stored on disk, never in PostgreSQL or Redis. PostgreSQL keeps
 
 `BLUEPRINT_FILE_MAX_BYTES` sets the maximum size per file, default **1073741824 bytes (1 GiB)**. Uploads are streamed, including files of several hundred MiB. If using a reverse proxy, configure its request size and timeout accordingly. The dashboard allows up to one hour per HTTP request.
 
+Administrators can inspect **Maintenance > Uploaded files** to see each stored file, its linked blueprint and actual size, plus total file size, available space and storage volume capacity. The list loads when opening Maintenance and can be refreshed manually. Shared references are counted once; missing files and uploads still in progress or awaiting cleanup are marked separately.
+
 Deleting a blueprint removes its stored files. Replacing a file or saving removal of a VM/customization removes files that are no longer referenced. Interrupted uploads are removed immediately; startup and hourly cleanup also remove orphaned files after crashes. Blueprints used by a deployment remain locked under the existing rules.
 
 Validation: `node --test tests/blueprintFiles.test.js`. To include PostgreSQL integration tests, set `BLUEPRINT_FILES_TEST_DATABASE_URL` to a test database where the test runner may create and drop an isolated schema.
