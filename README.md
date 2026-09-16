@@ -360,6 +360,8 @@ File contents are stored on disk, never in PostgreSQL or Redis. PostgreSQL keeps
 
 `BLUEPRINT_FILE_MAX_BYTES` sets the maximum size per file, default **1073741824 bytes (1 GiB)**. Uploads are streamed, including files of several hundred MiB. If using a reverse proxy, configure its request size and timeout accordingly. The dashboard allows up to one hour per HTTP request.
 
+Uploads with a known size are checked against available storage before writing. Insufficient space, a full disk or an exhausted filesystem quota returns HTTP 507 with “Not enough storage space to upload this file. Contact your adminstrator.” Partial uploads are cleaned up and existing files are preserved. Concurrent uploads can still exhaust space after the initial check; write failures return the same explicit message.
+
 Administrators can inspect **Maintenance > Uploaded files** to see each stored file, its linked blueprint and actual size, plus total file size, available space and storage volume capacity. The list loads when opening Maintenance and can be refreshed manually. Shared references are counted once; missing files and uploads still in progress or awaiting cleanup are marked separately.
 
 Deleting a blueprint removes its stored files. Replacing a file or saving removal of a VM/customization removes files that are no longer referenced. Interrupted uploads are removed immediately; startup and hourly cleanup also remove orphaned files after crashes. Blueprints used by a deployment remain locked under the existing rules.

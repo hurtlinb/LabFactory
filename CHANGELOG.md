@@ -4,6 +4,9 @@ All notable changes to LabFactory are documented here.
 
 ## [Unreleased]
 
+### Corrections
+- Upload : vérification de l'espace disponible avant l'envoi et message explicite « Not enough storage space to upload this file. Contact your adminstrator. » en cas de capacité insuffisante ou de disque plein pendant l'écriture.
+
 ### Ajouts
 - Maintenance (admin) : inventaire des fichiers uploadés avec lien vers leur blueprint, taille individuelle, total des fichiers et espace disponible sur le volume de stockage.
 - Plusieurs customizations « Upload File » par VM, avec dossier cible, modification et suppression indépendants pour chaque fichier ; compatibilité avec les fichiers déjà configurés.

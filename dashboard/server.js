@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
+import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
 import express from 'express';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -75,6 +75,10 @@ const wrapAsync =
   handler =>
   (req, res) =>
     Promise.resolve(handler(req, res)).catch(err => {
+      if (isInsufficientStorageError(err)) {
+        res.status(507).json({ error: INSUFFICIENT_STORAGE_MESSAGE });
+        return;
+      }
       if (err?.code === 'VALIDATION') {
         res.status(400).json({ error: err.message });
         return;
@@ -3049,7 +3053,9 @@ app.put('/api/blueprints/:id/vms/:vmId/file', auth.requireRole(auth.ROLE_GROUPS.
     if (replaceId !== undefined && (typeof replaceId !== 'string' || !files.some(file => file.id === replaceId))) {
       throw createErrorWithCode('Uploaded file to replace was not found on this VM', 'VALIDATION');
     }
-    const stored = await receiveBlueprintFile(req, req.params.id);
+    const stored = await receiveBlueprintFile(req, req.params.id, {
+      expectedBytes: req.headers['content-length'] === undefined ? null : Number(req.headers['content-length'])
+    });
     const metadata = { ...upload, ...stored };
     const nextFiles = replaceId ? files.map(file => file.id === replaceId ? metadata : file) : [...files, metadata];
     await client.query("UPDATE lab_blueprint_vms SET config = jsonb_set(config - 'fileUpload', '{fileUploads}', $3::jsonb), updated_at = NOW() WHERE blueprint_id = $1 AND id = $2", [req.params.id, req.params.vmId, JSON.stringify(nextFiles)]);
