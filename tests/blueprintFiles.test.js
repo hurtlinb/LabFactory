@@ -8,7 +8,7 @@ import { randomUUID, createHash } from 'node:crypto';
 
 const root = await fs.mkdtemp(path.join(tmpdir(), 'labfactory-file-tests-'));
 process.env.BLUEPRINT_FILES_DIR = root;
-const { validateFileUpload, receiveBlueprintFile, blueprintFileDirectory, persistFileUpload,
+const { getFileUploads, validateFileUpload, receiveBlueprintFile, blueprintFileDirectory, persistFileUpload,
   resolveFileUpload, cleanupBlueprintFiles, lockBlueprintFiles, maxBlueprintFileBytes } = await import('../lib/blueprintFiles.js');
 after(async () => { await fs.rm(root, { recursive: true, force: true }); });
 const metadata = overrides => ({ id: randomUUID(), name: 'example.bin', directory: '/opt/lab/files', ...overrides });
@@ -104,4 +104,13 @@ test('PostgreSQL metadata lifecycle, deployment lookup, rollback and deletion cl
     await admin.query('DROP SCHEMA ' + schema + ' CASCADE');
     await admin.end();
   }
+});
+
+test('normalizes legacy single files and preserves multiple file entries', () => {
+  const first = metadata(), second = metadata();
+  assert.deepEqual(getFileUploads({}), []);
+  assert.deepEqual(getFileUploads({ fileUpload: first }), [first]);
+  assert.deepEqual(getFileUploads({ fileUploads: [first, second] }), [first, second]);
+  assert.deepEqual(getFileUploads({ fileUploads: [], fileUpload: first }), []);
+  assert.throws(() => getFileUploads({ fileUploads: 'invalid' }), /must be an array/);
 });

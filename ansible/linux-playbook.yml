@@ -128,16 +128,20 @@
 
     - name: Create uploaded file destination directory
       ansible.builtin.file:
-        path: "{{ file_upload.directory }}"
+        path: "{{ item.directory }}"
         state: directory
-      when: file_upload is defined
+      loop: "{{ file_uploads | default([]) }}"
+      loop_control:
+        label: "{{ item.destination }}"
 
     - name: Copy blueprint file to guest
       ansible.builtin.copy:
-        src: "{{ file_upload.source }}"
-        dest: "{{ file_upload.destination }}"
+        src: "{{ item.source }}"
+        dest: "{{ item.destination }}"
         mode: '0644'
-      when: file_upload is defined
+      loop: "{{ file_uploads | default([]) }}"
+      loop_control:
+        label: "{{ item.destination }}"
 
     - name: Reboot Linux at end of customization
       ansible.builtin.reboot:

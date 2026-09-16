@@ -352,7 +352,7 @@ docker compose down -v
 
 ### Upload File customization
 
-Drag **Upload File** onto a Windows or Linux VM, choose a file and an absolute destination directory (for example `C:\LabFiles` or `/opt/lab/files`). **Save and upload** saves the blueprint and streams the file to application storage with upload progress. The lab guest password must be set. One file can be attached per VM; the edit button replaces the file or changes its destination. Removing the customization takes effect when the blueprint is saved.
+Drag **Upload File** onto a Windows or Linux VM, choose a file and an absolute destination directory (for example `C:\LabFiles` or `/opt/lab/files`). **Save and upload** saves the blueprint and streams the file to application storage with upload progress. The lab guest password must be set. Add the customization again to attach another file to the same VM. Each file has its own destination, edit button and remove button. Existing single-file configurations remain supported. Removing the customization takes effect when the blueprint is saved.
 
 Ansible creates the destination directory, including missing parents, then copies the file with its original name. An existing file at that destination is replaced. Linux files are owned by the privileged Ansible user and use mode `0644`.
 

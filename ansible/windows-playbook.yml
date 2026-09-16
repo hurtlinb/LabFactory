@@ -55,15 +55,19 @@
 
     - name: Create uploaded file destination directory
       ansible.windows.win_file:
-        path: "{{ file_upload.directory }}"
+        path: "{{ item.directory }}"
         state: directory
-      when: file_upload is defined
+      loop: "{{ file_uploads | default([]) }}"
+      loop_control:
+        label: "{{ item.destination }}"
 
     - name: Copy blueprint file to guest
       ansible.windows.win_copy:
-        src: "{{ file_upload.source }}"
-        dest: "{{ file_upload.destination }}"
-      when: file_upload is defined
+        src: "{{ item.source }}"
+        dest: "{{ item.destination }}"
+      loop: "{{ file_uploads | default([]) }}"
+      loop_control:
+        label: "{{ item.destination }}"
 
     - name: Reboot (applique le nouveau nom d'ordinateur)
       # Fire-and-forget: la reconnexion est suivie côté Node (waitForWindowsReconnect dans

@@ -1,3 +1,4 @@
+import { getFileUploads } from '../lib/blueprintFiles.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -1760,7 +1761,7 @@ export function startTerraformWorker(connection) {
                     String(vm.timezone ?? '').trim() ||
                     String(vm.hostname ?? '').trim() ||
                     String(vm.domainRole ?? '').trim() ||
-                    vm.fileUpload ||
+                    getFileUploads(vm).length ||
                     vm.installDocker ||
                     (vm.secondDiskSizeGb && vm.secondDiskConfigure)
                   ) &&
@@ -1780,7 +1781,7 @@ export function startTerraformWorker(connection) {
                 timezone: String(vm.timezone ?? '').trim() || null,
                 domainRole: String(vm.domainRole ?? '').trim() || null,
                 domainName: String(vm.domainName ?? '').trim() || null,
-                fileUpload: vm.fileUpload ?? null,
+                fileUploads: getFileUploads(vm),
                 installDocker: Boolean(vm.installDocker),
                 secondDiskSizeGb: vm.secondDiskSizeGb ?? null,
                 secondDiskConfigure: Boolean(vm.secondDiskConfigure),

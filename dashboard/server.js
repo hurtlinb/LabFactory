@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
+import { getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
 import express from 'express';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -201,10 +201,12 @@ const blueprintVmSchema = z
     config: z.record(z.string(), z.unknown()).optional().default({})
   })
   .superRefine((vm, ctx) => {
-    if (vm.config?.fileUpload !== undefined) {
-      try { validateFileUpload(vm.config.fileUpload); } catch (error) {
-        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'fileUpload'], message: error.message });
-      }
+    try {
+      const files = getFileUploads(vm.config);
+      for (const file of files) validateFileUpload(file);
+      if (new Set(files.map(file => file.id)).size !== files.length) throw new Error('Duplicate uploaded file reference');
+    } catch (error) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'fileUploads'], message: error.message });
     }
     if (vm.config?.customNameEnabled === true && !String(vm.name ?? '').trim()) {
       ctx.addIssue({
@@ -407,7 +409,7 @@ const validateBlueprintGuestPassword = async payload => {
     if (!isLinuxOsType(osType)) {
       return false;
     }
-    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall || vm.config?.fileUpload);
+    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall || getFileUploads(vm.config).length);
   });
 
   if ((hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
@@ -1153,7 +1155,7 @@ const buildTerraformBlueprintPayload = blueprint => {
         ipLastOctet: vm.ipLastOctet ?? null,
         customNameEnabled: isVmCustomNameEnabled(vm),
         timezone: String(vm.config?.timezone ?? '').trim() || null,
-        fileUpload: vm.config?.fileUpload ?? null,
+        fileUploads: getFileUploads(vm.config),
         installDocker: Boolean(vm.config?.dockerInstall)
       };
     })
@@ -1287,7 +1289,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         timezone: String(vm.config?.timezone ?? '').trim() || null,
         domainRole: String(vm.config?.domainRole ?? '').trim() || null,
         domainName: String(vm.config?.domainName ?? '').trim() || null,
-        fileUpload: vm.config?.fileUpload ?? null,
+        fileUploads: getFileUploads(vm.config),
         installDocker: Boolean(vm.config?.dockerInstall),
         secondDiskSizeGb: vm.config?.secondDiskSizeGb ? Number(vm.config.secondDiskSizeGb) : null,
         secondDiskConfigure: vm.config?.secondDiskConfigure !== false,
@@ -1758,10 +1760,13 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
 
     const uploads = new Map();
     for (const vm of payload.vms) {
-      if (!vm.config?.fileUpload) continue;
+      const files = getFileUploads(vm.config);
+      if (!files.length) continue;
       const template = await client.query('SELECT os_type FROM vm_templates WHERE id = $1', [vm.templateId]);
       if (!template.rowCount) throw createErrorWithCode('Template not found', 'VALIDATION');
-      uploads.set(vm, await persistFileUpload(client, blueprintId, vm.config.fileUpload, template.rows[0].os_type));
+      const retained = [];
+      for (const file of files) retained.push(await persistFileUpload(client, blueprintId, file, template.rows[0].os_type));
+      uploads.set(vm, retained);
     }
     await client.query('DELETE FROM lab_blueprint_vms WHERE blueprint_id = $1', [blueprintId]);
     for (const [index, vm] of payload.vms.entries()) {
@@ -1769,7 +1774,8 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
         ...(vm.config ?? {}),
         ...(vm.ipLastOctet == null ? {} : { ipLastOctet: vm.ipLastOctet })
       };
-      if (config.fileUpload) config.fileUpload = uploads.get(vm);
+      delete config.fileUpload;
+      config.fileUploads = uploads.get(vm) || [];
       await client.query(
         `INSERT INTO lab_blueprint_vms
           (id, blueprint_id, template_id, name, vm_order, config, created_at, updated_at)
@@ -3035,12 +3041,18 @@ app.put('/api/blueprints/:id/vms/:vmId/file', auth.requireRole(auth.ROLE_GROUPS.
       res.status(409).json({ error: 'blueprint is locked because it is used by an existing deployment' });
       return;
     }
-    const vm = await client.query('SELECT v.id, t.os_type FROM lab_blueprint_vms v JOIN vm_templates t ON t.id = v.template_id WHERE v.blueprint_id = $1 AND v.id = $2', [req.params.id, req.params.vmId]);
+    const vm = await client.query('SELECT v.id, v.config, t.os_type FROM lab_blueprint_vms v JOIN vm_templates t ON t.id = v.template_id WHERE v.blueprint_id = $1 AND v.id = $2', [req.params.id, req.params.vmId]);
     if (!vm.rowCount) throw createErrorWithCode('Blueprint VM not found', 'VALIDATION');
     validateFileUpload(upload, vm.rows[0].os_type, { newFile: true });
+    const files = getFileUploads(vm.rows[0].config);
+    const replaceId = req.query.replaceId;
+    if (replaceId !== undefined && (typeof replaceId !== 'string' || !files.some(file => file.id === replaceId))) {
+      throw createErrorWithCode('Uploaded file to replace was not found on this VM', 'VALIDATION');
+    }
     const stored = await receiveBlueprintFile(req, req.params.id);
     const metadata = { ...upload, ...stored };
-    await client.query("UPDATE lab_blueprint_vms SET config = jsonb_set(config, '{fileUpload}', $3::jsonb), updated_at = NOW() WHERE blueprint_id = $1 AND id = $2", [req.params.id, req.params.vmId, JSON.stringify(metadata)]);
+    const nextFiles = replaceId ? files.map(file => file.id === replaceId ? metadata : file) : [...files, metadata];
+    await client.query("UPDATE lab_blueprint_vms SET config = jsonb_set(config - 'fileUpload', '{fileUploads}', $3::jsonb), updated_at = NOW() WHERE blueprint_id = $1 AND id = $2", [req.params.id, req.params.vmId, JSON.stringify(nextFiles)]);
     await client.query('UPDATE lab_blueprints SET updated_at = NOW() WHERE id = $1', [req.params.id]);
     await client.query('COMMIT');
     res.json(metadata);

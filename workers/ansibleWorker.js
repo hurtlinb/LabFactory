@@ -1,4 +1,4 @@
-import { resolveFileUpload } from '../lib/blueprintFiles.js';
+import { getFileUploads, resolveFileUpload } from '../lib/blueprintFiles.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -182,8 +182,8 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, all
         '          ansible_winrm_server_cert_validation: ignore',
         `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
       ];
-      if (target.stagedFileUpload) {
-        lines.push(`          file_upload: ${JSON.stringify(target.stagedFileUpload)}`);
+      if (target.stagedFileUploads) {
+        lines.push(`          file_uploads: ${JSON.stringify(target.stagedFileUploads)}`);
       }
       if (String(target.timezone ?? '').trim()) {
         lines.push(`          target_timezone: ${JSON.stringify(target.timezone)}`);
@@ -238,8 +238,8 @@ const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets })
         `          ansible_become_password: ${JSON.stringify(linuxPassword)}`,
         `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
       ];
-      if (target.stagedFileUpload) {
-        lines.push(`          file_upload: ${JSON.stringify(target.stagedFileUpload)}`);
+      if (target.stagedFileUploads) {
+        lines.push(`          file_uploads: ${JSON.stringify(target.stagedFileUploads)}`);
       }
       if (String(target.timezone ?? '').trim()) {
         lines.push(`          target_timezone: ${JSON.stringify(target.timezone)}`);
@@ -294,14 +294,14 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (target.fileUpload || target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
+            (getFileUploads(target).length || target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
         const linuxTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&
             target.ipAddress &&
-            (target.fileUpload || target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
+            (getFileUploads(target).length || target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
@@ -315,7 +315,10 @@ export function startAnsibleWorker(connection) {
 
         fileStagingDirectory = await fs.mkdtemp(path.join(tmpdir(), 'labfactory-files-'));
         for (const target of [...windowsTimezoneTargets, ...linuxTimezoneTargets]) {
-          if (target.fileUpload) target.stagedFileUpload = await resolveFileUpload(dbPool, job.data.deploymentId, target.fileUpload, target.osType);
+          target.stagedFileUploads = [];
+          for (const file of getFileUploads(target)) {
+            target.stagedFileUploads.push(await resolveFileUpload(dbPool, job.data.deploymentId, file, target.osType));
+          }
         }
         const inventoryPath = path.join(fileStagingDirectory, 'inventory.yml');
         const inventoryParts = [];

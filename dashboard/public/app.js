@@ -748,10 +748,20 @@ function renderClassrooms() {
   renderDeploymentSelectors();
 }
 
-function renderBlueprintPillAction({ action, customizationKey = '', label, icon }) {
+function getVmFileUploads(config = {}) {
+  return Array.isArray(config.fileUploads) ? config.fileUploads : (config.fileUpload ? [config.fileUpload] : []);
+}
+
+function setVmFileUploads(vm, files) {
+  delete vm.config.fileUpload;
+  vm.config.fileUploads = files;
+}
+
+function renderBlueprintPillAction({ action, customizationKey = '', fileId = '', label, icon }) {
   if (isCurrentBlueprintLocked()) return '';
+  const fileAttr = fileId ? ` data-file-id="${escapeHtmlAttr(fileId)}"` : "";
   const customizationAttr = customizationKey ? ` data-customization-key="${escapeHtmlAttr(customizationKey)}"` : '';
-  return `<button class="pill-action-button" type="button" data-action="${escapeHtmlAttr(action)}"${customizationAttr} aria-label="${escapeHtmlAttr(label)}" title="${escapeHtmlAttr(label)}">${escapeHtml(icon)}</button>`;
+  return `<button class="pill-action-button" type="button" data-action="${escapeHtmlAttr(action)}"${customizationAttr}${fileAttr} aria-label="${escapeHtmlAttr(label)}" title="${escapeHtmlAttr(label)}">${escapeHtml(icon)}</button>`;
 }
 
 function renderCanvas() {
@@ -769,8 +779,8 @@ function renderCanvas() {
     .map(vm => {
       const template = state.templates.find(item => item.id === vm.templateId);
       const vmPills = [];
-      if (vm.config?.fileUpload) {
-        vmPills.push(`<span class="mini-pill vm-customization-pill"><span>File: ${escapeHtml(vm.config.fileUpload.name)} &rarr; ${escapeHtml(vm.config.fileUpload.directory)}</span>${renderBlueprintPillAction({ action: "edit-file-upload", label: "Edit uploaded file", icon: "Edit" })}${renderBlueprintPillAction({ action: "remove-customization", customizationKey: "file-upload", label: "Remove uploaded file", icon: "x" })}</span>`);
+      for (const file of getVmFileUploads(vm.config)) {
+        vmPills.push(`<span class="mini-pill vm-customization-pill"><span>File: ${escapeHtml(file.name)} &rarr; ${escapeHtml(file.directory)}</span>${renderBlueprintPillAction({ action: "edit-file-upload", fileId: file.id, label: "Edit uploaded file", icon: "Edit" })}${renderBlueprintPillAction({ action: "remove-customization", customizationKey: "file-upload", fileId: file.id, label: "Remove uploaded file", icon: "x" })}</span>`);
       }
       vmPills.push(`
         <span class="mini-pill vm-ip-pill">
@@ -914,12 +924,14 @@ function renderCanvas() {
         }
       }
     });
-    card.querySelector('[data-action="edit-file-upload"]')?.addEventListener('click', () => promptFileUpload(vmId));
+    card.querySelectorAll('[data-action="edit-file-upload"]').forEach(button => {
+      button.addEventListener('click', () => promptFileUpload(vmId, button.dataset.fileId));
+    });
     card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
       button.addEventListener('click', event => {
         event.stopPropagation();
         if (button.dataset.customizationKey === 'file-upload') {
-          updateVm(vmId, vm => { delete vm.config.fileUpload; });
+          updateVm(vmId, vm => setVmFileUploads(vm, getVmFileUploads(vm.config).filter(file => file.id !== button.dataset.fileId)));
           renderCanvas();
         }
         if (button.dataset.customizationKey === 'name') {
@@ -3367,14 +3379,15 @@ bootstrap().catch(error => {
 });
 
 
-async function promptFileUpload(vmId) {
+async function promptFileUpload(vmId, fileId = null) {
   if (isCurrentBlueprintLocked()) return;
   const vmIndex = state.currentBlueprint.vms.findIndex(item => item.id === vmId);
   const vm = state.currentBlueprint.vms[vmIndex];
   if (!vm) return;
   const template = state.templates.find(item => item.id === vm.templateId);
   const windows = ['windows11', 'windows-server'].includes(template?.osType);
-  const current = vm.config?.fileUpload;
+  const current = fileId ? getVmFileUploads(vm.config).find(file => file.id === fileId) : null;
+  if (fileId && !current) return;
   const dialog = document.createElement('dialog');
   dialog.className = 'modal-dialog';
   dialog.innerHTML = '<form class="modal-card"><h3>Upload File</h3><p class="file-limit">Loading upload limit...</p><label class="field"><span>File</span><input type="file" name="file"></label><p class="file-current"></p><label class="field"><span>Destination directory</span><input name="directory" type="text" required></label><p>The directory will be created if needed. An existing file with the same name will be replaced.</p><p>Uploading saves the current blueprint and attaches the file to this VM.</p><p class="file-error" role="status" aria-live="polite"></p><div class="inline-actions"><button class="btn btn-ghost" type="button" data-cancel>Cancel</button><button class="btn btn-primary" type="submit" disabled>Save and upload</button></div></form>';
@@ -3401,7 +3414,7 @@ async function promptFileUpload(vmId) {
       const directory = form.elements.directory.value.trim();
       if (windows ? !/^[a-z]:[\\/]/i.test(directory) : !directory.startsWith('/')) throw new Error('Enter an absolute destination directory');
       if (!file) {
-        updateVm(vmId, next => { next.config.fileUpload = { ...current, directory }; });
+        updateVm(vmId, next => setVmFileUploads(next, getVmFileUploads(next.config).map(item => item.id === fileId ? { ...item, directory } : item)));
         await saveBlueprint();
         renderCanvas();
         dialog.close();
@@ -3417,6 +3430,7 @@ async function promptFileUpload(vmId) {
       const metadata = await new Promise((resolve, reject) => {
         request = new XMLHttpRequest();
         const query = new URLSearchParams({ name: file.name, directory });
+        if (fileId) query.set('replaceId', fileId);
         request.open('PUT', '/api/blueprints/' + blueprintId + '/vms/' + savedVmId + '/file?' + query);
         request.setRequestHeader('Content-Type', 'application/octet-stream');
         request.upload.onprogress = progress => {
@@ -3432,7 +3446,10 @@ async function promptFileUpload(vmId) {
         request.onabort = () => reject(new Error('Upload cancelled'));
         request.send(file);
       });
-      updateVm(savedVmId, next => { next.config.fileUpload = metadata; });
+      updateVm(savedVmId, next => {
+        const files = getVmFileUploads(next.config);
+        setVmFileUploads(next, fileId ? files.map(item => item.id === fileId ? metadata : item) : [...files, metadata]);
+      });
       renderCanvas();
       showMessage(globalStatus, 'Blueprint and uploaded file saved.', 'success');
       dialog.close();

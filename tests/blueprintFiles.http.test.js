@@ -5,7 +5,7 @@ import { Readable } from 'node:stream';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
-test('HTTP upload, resave, replacement, removal and blueprint deletion', {
+test('HTTP multiple uploads, legacy resave, individual replacement/removal and blueprint deletion', {
   skip: !process.env.BLUEPRINT_FILES_TEST_API_URL || !process.env.BLUEPRINT_FILES_TEST_STORAGE || !process.env.BLUEPRINT_FILES_TEST_DATABASE_URL
 }, async () => {
   const { Pool } = await import('pg');
@@ -33,23 +33,41 @@ test('HTTP upload, resave, replacement, removal and blueprint deletion', {
     assert.equal(first.size, 300 * 1024 * 1024);
     assert.equal((await fs.stat(path.join(directory, first.id))).size, first.size);
     const blueprint = (await api(base)).body;
-    assert.equal(blueprint.vms[0].config.fileUpload.id, first.id);
+    assert.equal(blueprint.vms[0].config.fileUploads[0].id, first.id);
+    // Simulate a blueprint created before multi-file support.
+    await db.query('UPDATE lab_blueprint_vms SET config = $2 WHERE id = $1', [vmId, { fileUpload: first }]);
+    blueprint.vms[0].config = { fileUpload: first };
     assert.equal(JSON.stringify(blueprint).includes('contentBase64'), false);
     const payload = { name: blueprint.name, courseId, windowsAdminPassword: blueprint.windowsAdminPassword,
       vms: [{ id: vmId, templateId, name: 'linux-test', config: blueprint.vms[0].config }] };
     const save = () => api(base, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     result = await save();
     assert.equal(result.status, 200, JSON.stringify(result.body));
-    result = await api(url, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from([0, 255, 128, 10]) });
+    assert.deepEqual(result.body.vms[0].config.fileUploads.map(file => file.id), [first.id]);
+    assert.equal(result.body.vms[0].config.fileUpload, undefined);
+    const append = directory => api(base + '/vms/' + vmId + '/file?' + new URLSearchParams({ name: 'another.bin', directory }), {
+      method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: 'another file'
+    });
+    const added = await Promise.all([append('/opt/second'), append('/opt/third')]);
+    added.forEach(response => assert.equal(response.status, 200));
+    let files = (await api(base)).body.vms[0].config.fileUploads;
+    assert.equal(files.length, 3, 'concurrent additions preserve existing files');
+    await fs.access(path.join(directory, first.id));
+    const missingReplacement = await api(url + '&replaceId=' + randomUUID(), { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: 'must not be saved' });
+    assert.equal(missingReplacement.status, 400);
+    result = await api(url + '&replaceId=' + first.id, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: Buffer.from([0, 255, 128, 10]) });
     assert.equal(result.status, 200, JSON.stringify(result.body));
     // Wait for request-finally cleanup by acquiring the same blueprint lock through a save.
-    payload.vms[0].config.fileUpload = result.body;
+    payload.vms[0].config = (await api(base)).body.vms[0].config;
+    assert.equal(payload.vms[0].config.fileUploads.length, 3);
     assert.equal((await save()).status, 200);
     await assert.rejects(fs.access(path.join(directory, first.id)), { code: 'ENOENT' });
     assert.deepEqual(await fs.readFile(path.join(directory, result.body.id)), Buffer.from([0, 255, 128, 10]));
-    delete payload.vms[0].config.fileUpload;
+    payload.vms[0].config.fileUploads = payload.vms[0].config.fileUploads.filter(file => file.id !== result.body.id);
     assert.equal((await save()).status, 200);
-    await assert.rejects(fs.access(directory), { code: 'ENOENT' });
+    await assert.rejects(fs.access(path.join(directory, result.body.id)), { code: 'ENOENT' });
+    for (const response of added) await fs.access(path.join(directory, response.body.id));
+    assert.equal((await api(base)).body.vms[0].config.fileUploads.length, 2);
     result = await api(url, { method: 'PUT', headers: { 'Content-Type': 'application/octet-stream' }, body: 'delete with blueprint' });
     assert.equal(result.status, 200, JSON.stringify(result.body));
     assert.equal((await api(base, { method: 'DELETE' })).status, 200);
