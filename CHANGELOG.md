@@ -4,6 +4,11 @@ All notable changes to LabFactory are documented here.
 
 ## [Unreleased]
 
+### Ajouts
+- Customization « Upload File » pour Windows et Linux : création du dossier cible et copie du fichier lors du déploiement.
+- Stockage persistant des fichiers sur disque, partagé avec Ansible, avec nettoyage lors de la suppression du blueprint ou du remplacement du fichier.
+- Envoi en streaming avec progression et limite configurable de 1 Go par fichier.
+
 ---
 
 ## [1.7.6] — 2026-09-11

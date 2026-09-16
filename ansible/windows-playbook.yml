@@ -53,6 +53,18 @@
         - second_disk_size_gb is defined
         - second_disk_configure | default(true) | bool
 
+    - name: Create uploaded file destination directory
+      ansible.windows.win_file:
+        path: "{{ file_upload.directory }}"
+        state: directory
+      when: file_upload is defined
+
+    - name: Copy blueprint file to guest
+      ansible.windows.win_copy:
+        src: "{{ file_upload.source }}"
+        dest: "{{ file_upload.destination }}"
+      when: file_upload is defined
+
     - name: Reboot (applique le nouveau nom d'ordinateur)
       # Fire-and-forget: la reconnexion est suivie côté Node (waitForWindowsReconnect dans
       # ansibleWorker.js), VM par VM, pour ne pas bloquer tout le lot sur la plus lente.

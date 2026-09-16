@@ -349,3 +349,19 @@ docker compose down -v
   - `terraform/.terraform`
   - `terraform/.terraform-vars.json`
   - any local `terraform.tfstate*` artifacts if present
+
+### Upload File customization
+
+Drag **Upload File** onto a Windows or Linux VM, choose a file and an absolute destination directory (for example `C:\LabFiles` or `/opt/lab/files`). **Save and upload** saves the blueprint and streams the file to application storage with upload progress. The lab guest password must be set. One file can be attached per VM; the edit button replaces the file or changes its destination. Removing the customization takes effect when the blueprint is saved.
+
+Ansible creates the destination directory, including missing parents, then copies the file with its original name. An existing file at that destination is replaced. Linux files are owned by the privileged Ansible user and use mode `0644`.
+
+File contents are stored on disk, never in PostgreSQL or Redis. PostgreSQL keeps only the file reference, name, size and destination in the VM configuration. Docker Compose mounts the persistent `blueprint-files` volume in the dashboard (read/write) and Ansible worker (read-only). For other deployments, mount the same persistent storage on both services and set `BLUEPRINT_FILES_DIR` to its path; the default is `data/blueprint-files` under the application root. Include that directory in backups alongside the database.
+
+`BLUEPRINT_FILE_MAX_BYTES` sets the maximum size per file, default **1073741824 bytes (1 GiB)**. Uploads are streamed, including files of several hundred MiB. If using a reverse proxy, configure its request size and timeout accordingly. The dashboard allows up to one hour per HTTP request.
+
+Deleting a blueprint removes its stored files. Replacing a file or saving removal of a VM/customization removes files that are no longer referenced. Interrupted uploads are removed immediately; startup and hourly cleanup also remove orphaned files after crashes. Blueprints used by a deployment remain locked under the existing rules.
+
+Validation: `node --test tests/blueprintFiles.test.js`. To include PostgreSQL integration tests, set `BLUEPRINT_FILES_TEST_DATABASE_URL` to a test database where the test runner may create and drop an isolated schema.
+
+For the HTTP integration test, start an isolated dashboard with a test PostgreSQL database, Redis and file directory, then set `BLUEPRINT_FILES_TEST_DATABASE_URL`, `BLUEPRINT_FILES_TEST_API_URL`, and `BLUEPRINT_FILES_TEST_STORAGE` and run `node --test tests/blueprintFiles.http.test.js`. It uploads 300 MiB and checks save, replacement, customization removal and blueprint deletion.

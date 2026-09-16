@@ -1760,6 +1760,7 @@ export function startTerraformWorker(connection) {
                     String(vm.timezone ?? '').trim() ||
                     String(vm.hostname ?? '').trim() ||
                     String(vm.domainRole ?? '').trim() ||
+                    vm.fileUpload ||
                     vm.installDocker ||
                     (vm.secondDiskSizeGb && vm.secondDiskConfigure)
                   ) &&
@@ -1779,6 +1780,7 @@ export function startTerraformWorker(connection) {
                 timezone: String(vm.timezone ?? '').trim() || null,
                 domainRole: String(vm.domainRole ?? '').trim() || null,
                 domainName: String(vm.domainName ?? '').trim() || null,
+                fileUpload: vm.fileUpload ?? null,
                 installDocker: Boolean(vm.installDocker),
                 secondDiskSizeGb: vm.secondDiskSizeGb ?? null,
                 secondDiskConfigure: Boolean(vm.secondDiskConfigure),

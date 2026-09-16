@@ -126,6 +126,19 @@
         - second_disk_configure | default(true) | bool
         - second_disk_device.stdout | default('') != ''
 
+    - name: Create uploaded file destination directory
+      ansible.builtin.file:
+        path: "{{ file_upload.directory }}"
+        state: directory
+      when: file_upload is defined
+
+    - name: Copy blueprint file to guest
+      ansible.builtin.copy:
+        src: "{{ file_upload.source }}"
+        dest: "{{ file_upload.destination }}"
+        mode: '0644'
+      when: file_upload is defined
+
     - name: Reboot Linux at end of customization
       ansible.builtin.reboot:
         reboot_timeout: 1800

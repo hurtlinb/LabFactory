@@ -10,3 +10,8 @@ terraform/.terraform
 terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/.terraform-vars.json
+
+data/blueprint-files/
+ansible/.inventory-*.yml
+k8s/**/02-secrets.yaml
+config/terraform-settings.json

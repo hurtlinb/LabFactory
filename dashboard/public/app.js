@@ -528,6 +528,10 @@ function renderTemplates() {
   const custHtml = `
     <div class="vm-lib-group">
       <p class="vm-lib-group-label">Customization</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="file-upload">
+        <span class="vm-lib-cust-icon" aria-hidden="true">&#8593;</span>
+        <span class="vm-lib-cust-name">Upload File</span>
+      </article>
       <article class="vm-lib-cust" draggable="true" data-customization-key="name">
         <span class="vm-lib-cust-icon" aria-hidden="true">${getCustomizationIcon('name')}</span>
         <span class="vm-lib-cust-name">Hostname</span>
@@ -765,6 +769,9 @@ function renderCanvas() {
     .map(vm => {
       const template = state.templates.find(item => item.id === vm.templateId);
       const vmPills = [];
+      if (vm.config?.fileUpload) {
+        vmPills.push(`<span class="mini-pill vm-customization-pill"><span>File: ${escapeHtml(vm.config.fileUpload.name)} &rarr; ${escapeHtml(vm.config.fileUpload.directory)}</span>${renderBlueprintPillAction({ action: "edit-file-upload", label: "Edit uploaded file", icon: "Edit" })}${renderBlueprintPillAction({ action: "remove-customization", customizationKey: "file-upload", label: "Remove uploaded file", icon: "x" })}</span>`);
+      }
       vmPills.push(`
         <span class="mini-pill vm-ip-pill">
           <span>IP: x.x.x.${escapeHtml(String(vm.ipLastOctet ?? '?'))}</span>
@@ -869,6 +876,7 @@ function renderCanvas() {
         activeDragItem?.type === 'customization'
           ? activeDragItem.value
           : event.dataTransfer.getData('application/x-labfactory-customization-key');
+      if (customizationKey === 'file-upload') await promptFileUpload(vmId);
       if (customizationKey === 'name') {
         await promptVmName(vmId);
       }
@@ -906,9 +914,14 @@ function renderCanvas() {
         }
       }
     });
+    card.querySelector('[data-action="edit-file-upload"]')?.addEventListener('click', () => promptFileUpload(vmId));
     card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
       button.addEventListener('click', event => {
         event.stopPropagation();
+        if (button.dataset.customizationKey === 'file-upload') {
+          updateVm(vmId, vm => { delete vm.config.fileUpload; });
+          renderCanvas();
+        }
         if (button.dataset.customizationKey === 'name') {
           updateVm(vmId, vm => {
             vm.config.customNameEnabled = false;
@@ -3353,3 +3366,86 @@ bootstrap().catch(error => {
   showMessage(globalStatus, error.message || 'Unable to initialise dashboard', 'danger', 5000);
 });
 
+
+async function promptFileUpload(vmId) {
+  if (isCurrentBlueprintLocked()) return;
+  const vmIndex = state.currentBlueprint.vms.findIndex(item => item.id === vmId);
+  const vm = state.currentBlueprint.vms[vmIndex];
+  if (!vm) return;
+  const template = state.templates.find(item => item.id === vm.templateId);
+  const windows = ['windows11', 'windows-server'].includes(template?.osType);
+  const current = vm.config?.fileUpload;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'modal-dialog';
+  dialog.innerHTML = '<form class="modal-card"><h3>Upload File</h3><p class="file-limit">Loading upload limit...</p><label class="field"><span>File</span><input type="file" name="file"></label><p class="file-current"></p><label class="field"><span>Destination directory</span><input name="directory" type="text" required></label><p>The directory will be created if needed. An existing file with the same name will be replaced.</p><p>Uploading saves the current blueprint and attaches the file to this VM.</p><p class="file-error" role="status" aria-live="polite"></p><div class="inline-actions"><button class="btn btn-ghost" type="button" data-cancel>Cancel</button><button class="btn btn-primary" type="submit" disabled>Save and upload</button></div></form>';
+  const form = dialog.querySelector('form');
+  const submit = form.querySelector('[type="submit"]');
+  const status = dialog.querySelector('.file-error');
+  form.elements.directory.placeholder = windows ? 'C:\\LabFiles' : '/opt/lab/files';
+  form.elements.directory.value = current?.directory || '';
+  form.elements.file.required = !current;
+  dialog.querySelector('.file-current').textContent = current ? 'Current file: ' + current.name : '';
+  let request;
+  let uploading = false;
+  let maxBytes;
+  dialog.querySelector('[data-cancel]').onclick = () => dialog.close();
+  dialog.addEventListener('close', () => { request?.abort(); dialog.remove(); }, { once: true });
+  form.onsubmit = async event => {
+    event.preventDefault();
+    if (uploading) return;
+    uploading = true;
+    submit.disabled = true;
+    try {
+      const file = form.elements.file.files[0];
+      if (file && file.size > maxBytes) throw new Error('File exceeds the configured upload limit');
+      const directory = form.elements.directory.value.trim();
+      if (windows ? !/^[a-z]:[\\/]/i.test(directory) : !directory.startsWith('/')) throw new Error('Enter an absolute destination directory');
+      if (!file) {
+        updateVm(vmId, next => { next.config.fileUpload = { ...current, directory }; });
+        await saveBlueprint();
+        renderCanvas();
+        dialog.close();
+        return;
+      }
+      status.textContent = 'Saving blueprint...';
+      await saveBlueprint();
+      if (!dialog.open) return;
+      const blueprintId = state.currentBlueprint.id;
+      const savedVmId = state.currentBlueprint.vms[vmIndex].id;
+      vmId = savedVmId;
+      status.textContent = 'Uploading... 0%';
+      const metadata = await new Promise((resolve, reject) => {
+        request = new XMLHttpRequest();
+        const query = new URLSearchParams({ name: file.name, directory });
+        request.open('PUT', '/api/blueprints/' + blueprintId + '/vms/' + savedVmId + '/file?' + query);
+        request.setRequestHeader('Content-Type', 'application/octet-stream');
+        request.upload.onprogress = progress => {
+          if (progress.lengthComputable) status.textContent = 'Uploading... ' + Math.round(progress.loaded / progress.total * 100) + '%';
+        };
+        request.onload = () => {
+          let body;
+          try { body = JSON.parse(request.responseText); } catch { reject(new Error('Invalid upload response')); return; }
+          if (request.status >= 200 && request.status < 300) resolve(body);
+          else reject(new Error(body.error || 'File upload failed'));
+        };
+        request.onerror = () => reject(new Error('File upload failed. Check the connection and server upload limit.'));
+        request.onabort = () => reject(new Error('Upload cancelled'));
+        request.send(file);
+      });
+      updateVm(savedVmId, next => { next.config.fileUpload = metadata; });
+      renderCanvas();
+      showMessage(globalStatus, 'Blueprint and uploaded file saved.', 'success');
+      dialog.close();
+    } catch (error) {
+      status.textContent = error.message;
+    } finally { uploading = false; submit.disabled = false; }
+  };
+  document.body.append(dialog);
+  dialog.showModal();
+  try {
+    const settings = await fetchJson('/api/blueprint-file-settings');
+    maxBytes = settings.maxBytes;
+    dialog.querySelector('.file-limit').textContent = 'Windows and Linux - maximum ' + Math.round(maxBytes / 1024 / 1024) + ' MiB per file.';
+    submit.disabled = false;
+  } catch (error) { status.textContent = error.message; }
+}

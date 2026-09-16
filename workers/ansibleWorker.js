@@ -1,3 +1,4 @@
+import { resolveFileUpload } from '../lib/blueprintFiles.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -181,6 +182,9 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, all
         '          ansible_winrm_server_cert_validation: ignore',
         `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
       ];
+      if (target.stagedFileUpload) {
+        lines.push(`          file_upload: ${JSON.stringify(target.stagedFileUpload)}`);
+      }
       if (String(target.timezone ?? '').trim()) {
         lines.push(`          target_timezone: ${JSON.stringify(target.timezone)}`);
       }
@@ -234,6 +238,9 @@ const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets })
         `          ansible_become_password: ${JSON.stringify(linuxPassword)}`,
         `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
       ];
+      if (target.stagedFileUpload) {
+        lines.push(`          file_upload: ${JSON.stringify(target.stagedFileUpload)}`);
+      }
       if (String(target.timezone ?? '').trim()) {
         lines.push(`          target_timezone: ${JSON.stringify(target.timezone)}`);
       }
@@ -277,6 +284,7 @@ export function startAnsibleWorker(connection) {
         windows_admin_password: String(job.data.windowsAdminPassword ?? '').trim() || null
       };
 
+      let fileStagingDirectory;
       try {
         console.log(`Ansible job ${job.id} started for deployment ${deploymentLabel} (customize)`);
         if (extraVars.windows_admin_password !== blueprintWindowsAdminPassword) {
@@ -286,14 +294,14 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
+            (target.fileUpload || target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
         const linuxTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&
             target.ipAddress &&
-            (target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
+            (target.fileUpload || target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
@@ -305,7 +313,11 @@ export function startAnsibleWorker(connection) {
           return { status: 'ansible-skipped', extraVars };
         }
 
-        const inventoryPath = path.join(ansibleDir, `.inventory-${job.id}.yml`);
+        fileStagingDirectory = await fs.mkdtemp(path.join(tmpdir(), 'labfactory-files-'));
+        for (const target of [...windowsTimezoneTargets, ...linuxTimezoneTargets]) {
+          if (target.fileUpload) target.stagedFileUpload = await resolveFileUpload(dbPool, job.data.deploymentId, target.fileUpload, target.osType);
+        }
+        const inventoryPath = path.join(fileStagingDirectory, 'inventory.yml');
         const inventoryParts = [];
 
         if (windowsTimezoneTargets.length) {
@@ -433,6 +445,7 @@ export function startAnsibleWorker(connection) {
         });
         throw error;
       } finally {
+        if (fileStagingDirectory) await fs.rm(fileStagingDirectory, { recursive: true, force: true });
         activeAbortControllers.delete(String(job.id));
       }
     },

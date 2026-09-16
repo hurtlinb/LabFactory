@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
 import express from 'express';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -200,6 +201,11 @@ const blueprintVmSchema = z
     config: z.record(z.string(), z.unknown()).optional().default({})
   })
   .superRefine((vm, ctx) => {
+    if (vm.config?.fileUpload !== undefined) {
+      try { validateFileUpload(vm.config.fileUpload); } catch (error) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'fileUpload'], message: error.message });
+      }
+    }
     if (vm.config?.customNameEnabled === true && !String(vm.name ?? '').trim()) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -401,7 +407,7 @@ const validateBlueprintGuestPassword = async payload => {
     if (!isLinuxOsType(osType)) {
       return false;
     }
-    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall);
+    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall || vm.config?.fileUpload);
   });
 
   if ((hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
@@ -1147,6 +1153,7 @@ const buildTerraformBlueprintPayload = blueprint => {
         ipLastOctet: vm.ipLastOctet ?? null,
         customNameEnabled: isVmCustomNameEnabled(vm),
         timezone: String(vm.config?.timezone ?? '').trim() || null,
+        fileUpload: vm.config?.fileUpload ?? null,
         installDocker: Boolean(vm.config?.dockerInstall)
       };
     })
@@ -1280,6 +1287,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         timezone: String(vm.config?.timezone ?? '').trim() || null,
         domainRole: String(vm.config?.domainRole ?? '').trim() || null,
         domainName: String(vm.config?.domainName ?? '').trim() || null,
+        fileUpload: vm.config?.fileUpload ?? null,
         installDocker: Boolean(vm.config?.dockerInstall),
         secondDiskSizeGb: vm.config?.secondDiskSizeGb ? Number(vm.config.secondDiskSizeGb) : null,
         secondDiskConfigure: vm.config?.secondDiskConfigure !== false,
@@ -1723,6 +1731,7 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
   const client = await dbPool.connect();
   try {
     await client.query('BEGIN');
+    await lockBlueprintFiles(client, blueprintId);
     await client.query(
       `INSERT INTO lab_blueprints (id, name, description, course_id, teacher_email, status, windows_admin_password, linux_default_username, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
@@ -1747,13 +1756,20 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
       ]
     );
 
+    const uploads = new Map();
+    for (const vm of payload.vms) {
+      if (!vm.config?.fileUpload) continue;
+      const template = await client.query('SELECT os_type FROM vm_templates WHERE id = $1', [vm.templateId]);
+      if (!template.rowCount) throw createErrorWithCode('Template not found', 'VALIDATION');
+      uploads.set(vm, await persistFileUpload(client, blueprintId, vm.config.fileUpload, template.rows[0].os_type));
+    }
     await client.query('DELETE FROM lab_blueprint_vms WHERE blueprint_id = $1', [blueprintId]);
-
     for (const [index, vm] of payload.vms.entries()) {
       const config = {
         ...(vm.config ?? {}),
         ...(vm.ipLastOctet == null ? {} : { ipLastOctet: vm.ipLastOctet })
       };
+      if (config.fileUpload) config.fileUpload = uploads.get(vm);
       await client.query(
         `INSERT INTO lab_blueprint_vms
           (id, blueprint_id, template_id, name, vm_order, config, created_at, updated_at)
@@ -1770,6 +1786,7 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
     client.release();
   }
 
+  await cleanupBlueprintFiles(dbPool, blueprintId);
   return fetchBlueprintById(blueprintId);
 };
 
@@ -2990,6 +3007,52 @@ app.delete(
   })
 );
 
+app.get('/api/blueprint-file-settings', auth.requireRole(auth.ROLE_GROUPS.LABS), (req, res) => {
+  res.json({ maxBytes: maxBlueprintFileBytes });
+});
+
+app.put('/api/blueprints/:id/vms/:vmId/file', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(async (req, res) => {
+  if (!req.is('application/octet-stream')) {
+    res.status(415).json({ error: 'File upload requires application/octet-stream' });
+    return;
+  }
+  if (Number(req.headers['content-length']) > maxBlueprintFileBytes) {
+    res.status(413).json({ error: 'File exceeds configured upload limit' });
+    return;
+  }
+  const upload = { name: req.query.name, directory: req.query.directory };
+  validateFileUpload(upload, undefined, { newFile: true });
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+    await lockBlueprintFiles(client, req.params.id);
+    const blueprint = await client.query('SELECT id, windows_admin_password FROM lab_blueprints WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!blueprint.rowCount) throw createErrorWithCode('Blueprint not found', 'VALIDATION');
+    if (!String(blueprint.rows[0].windows_admin_password || '').trim()) throw createErrorWithCode('A lab guest password is required for file upload customization', 'VALIDATION');
+    const locked = await client.query('SELECT id FROM lab_deployments WHERE blueprint_id = $1 LIMIT 1', [req.params.id]);
+    if (locked.rowCount) {
+      await client.query('ROLLBACK');
+      res.status(409).json({ error: 'blueprint is locked because it is used by an existing deployment' });
+      return;
+    }
+    const vm = await client.query('SELECT v.id, t.os_type FROM lab_blueprint_vms v JOIN vm_templates t ON t.id = v.template_id WHERE v.blueprint_id = $1 AND v.id = $2', [req.params.id, req.params.vmId]);
+    if (!vm.rowCount) throw createErrorWithCode('Blueprint VM not found', 'VALIDATION');
+    validateFileUpload(upload, vm.rows[0].os_type, { newFile: true });
+    const stored = await receiveBlueprintFile(req, req.params.id);
+    const metadata = { ...upload, ...stored };
+    await client.query("UPDATE lab_blueprint_vms SET config = jsonb_set(config, '{fileUpload}', $3::jsonb), updated_at = NOW() WHERE blueprint_id = $1 AND id = $2", [req.params.id, req.params.vmId, JSON.stringify(metadata)]);
+    await client.query('UPDATE lab_blueprints SET updated_at = NOW() WHERE id = $1', [req.params.id]);
+    await client.query('COMMIT');
+    res.json(metadata);
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+    await cleanupBlueprintFiles(dbPool, req.params.id).catch(error => console.error('Blueprint file cleanup failed; scheduled cleanup will retry', error));
+  }
+}));
+
 app.get(
   '/api/blueprints',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
@@ -3104,7 +3167,18 @@ app.delete(
       return;
     }
 
-    const result = await dbPool.query('DELETE FROM lab_blueprints WHERE id = $1 RETURNING id', [req.params.id]);
+    const client = await dbPool.connect();
+    let result;
+    try {
+      await client.query('BEGIN');
+      await lockBlueprintFiles(client, req.params.id);
+      result = await client.query('DELETE FROM lab_blueprints WHERE id = $1 RETURNING id', [req.params.id]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally { client.release(); }
+    await cleanupBlueprintFiles(dbPool, req.params.id);
     if (!result.rowCount) {
       res.status(404).json({ error: 'blueprint not found' });
       return;
@@ -3497,10 +3571,14 @@ process.on('SIGTERM', shutdown);
 (async () => {
   await ensureTerraformSettingsFile();
   await runMigrations();
+  const cleanFiles = () => cleanupOrphanedBlueprintFiles(dbPool).catch(error => console.error('Blueprint file cleanup failed', error));
+  await cleanFiles();
+  setInterval(cleanFiles, 60 * 60 * 1000).unref();
   await redisClient.connect();
-  app.listen(port, () => {
+  const server = app.listen(port, () => {
     console.log(`Dashboard listening on http://localhost:${port}`);
   });
+  server.requestTimeout = 60 * 60 * 1000; // Allow large streamed uploads over slower connections.
 })().catch(err => {
   console.error('Failed to start dashboard', err);
   process.exit(1);
