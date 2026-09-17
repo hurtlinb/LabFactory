@@ -2,7 +2,7 @@
 
 All notable changes to LabFactory are documented here.
 
-## [Unreleased]
+## [1.7.7] — 2026-09-17
 
 ### Corrections
 - Upload : vérification de l'espace disponible avant l'envoi et message explicite « Not enough storage space to upload this file. Contact your adminstrator. » en cas de capacité insuffisante ou de disque plein pendant l'écriture.
