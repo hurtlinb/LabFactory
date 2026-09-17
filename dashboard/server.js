@@ -1600,7 +1600,10 @@ const fetchAnsibleCustomizationProgress = async deployment => {
     const progress = job?.progress;
     const targetVmids = Array.isArray(progress?.targetVmids) ? parseVmidsToSet(progress.targetVmids) : null;
     const reconnectedVmids = parseVmidsToSet(progress?.reconnectedVmids);
-    const failedVmids = parseVmidsToSet(job?.data?.readinessFailedVmids);
+    const failedVmids = new Set([
+      ...parseVmidsToSet(progress?.failedVmids),
+      ...parseVmidsToSet(job?.data?.readinessFailedVmids)
+    ]);
     const hasProgress = progress?.type === 'customization-reconnect' && targetVmids instanceof Set && targetVmids.size > 0;
     return {
       jobState,

@@ -108,12 +108,14 @@ const waitForWindowsHostReconnect = async ({ target, password, signal }) => {
 const createCustomizationReconnectReporter = (job, targetVmids) => {
   const targetVmidSet = new Set(targetVmids.map(Number));
   const reconnectedVmids = new Set();
+  const failedVmids = new Set();
 
   const publish = async () => {
     await job.updateProgress({
       type: 'customization-reconnect',
       targetVmids: Array.from(targetVmidSet).sort((a, b) => a - b),
-      reconnectedVmids: Array.from(reconnectedVmids).sort((a, b) => a - b)
+      reconnectedVmids: Array.from(reconnectedVmids).sort((a, b) => a - b),
+      failedVmids: Array.from(failedVmids).sort((a, b) => a - b)
     });
   };
 
@@ -122,6 +124,13 @@ const createCustomizationReconnectReporter = (job, targetVmids) => {
       const numericVmid = Number(vmid);
       if (targetVmidSet.has(numericVmid)) {
         reconnectedVmids.add(numericVmid);
+      }
+      await publish();
+    },
+    markFailed: async vmid => {
+      const numericVmid = Number(vmid);
+      if (targetVmidSet.has(numericVmid)) {
+        failedVmids.add(numericVmid);
       }
       await publish();
     }
@@ -405,12 +414,17 @@ export function startAnsibleWorker(connection) {
             );
             await Promise.all(
               windowsTimezoneTargets.map(async target => {
-                await waitForWindowsHostReconnect({
-                  target,
-                  password: extraVars.windows_admin_password,
-                  signal: abortController.signal
-                });
-                await reconnectReporter.markReconnected(target.vmid);
+                try {
+                  await waitForWindowsHostReconnect({
+                    target,
+                    password: String(target.windowsAdminPassword ?? extraVars.windows_admin_password ?? '').trim(),
+                    signal: abortController.signal
+                  });
+                  await reconnectReporter.markReconnected(target.vmid);
+                } catch (error) {
+                  await reconnectReporter.markFailed(target.vmid);
+                  console.warn(`Ansible reconnect failed for VM ${target.vmid} (${target.name}): ${error.message}`);
+                }
               })
             );
 
