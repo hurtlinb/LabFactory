@@ -658,9 +658,8 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
   const envSettings = readTerraformEnvSettings();
   assertRequiredTerraformEnvSettings(envSettings);
   const configuredNodes = parseNodeList(envSettings.proxmox_nodes);
-  const targetNodes = configuredNodes.length ? configuredNodes : parseNodeList(envSettings.proxmox_node);
-  const targetNode = targetNodes[0] || '';
-  if (!targetNode) {
+  const fallbackNodes = configuredNodes.length ? configuredNodes : parseNodeList(envSettings.proxmox_node);
+  if (!fallbackNodes.length) {
     throw new Error('No Proxmox node configured for orphaned disk cleanup');
   }
   if (!ORPHANED_DISK_CLEANUP_POOL) {
@@ -675,46 +674,57 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
   );
   const qemuConfigs = await fetchQemuConfigs(envSettings, resources);
   const configTexts = qemuConfigs.map(({ config }) => JSON.stringify(config));
-  const storageContent = await fetchStorageContent(envSettings, targetNode, ORPHANED_DISK_CLEANUP_POOL);
+  const targetNodes = [...new Set([
+    ...fallbackNodes,
+    ...resources.map(resource => String(resource?.node ?? '').trim()).filter(Boolean)
+  ])];
+  const storageContentByNode = await Promise.all(
+    targetNodes.map(async node => ({
+      node,
+      volumes: await fetchStorageContent(envSettings, node, ORPHANED_DISK_CLEANUP_POOL)
+    }))
+  );
   const skippedVolumes = [];
   const candidateVolumes = [];
 
-  for (const volume of storageContent) {
-    const volid = String(volume?.volid ?? '').trim();
-    if (!volid.startsWith(`${ORPHANED_DISK_CLEANUP_POOL}:`) || !isStorageImageVolume(volume)) {
-      continue;
-    }
+  for (const { node, volumes } of storageContentByNode) {
+    for (const volume of volumes) {
+      const volid = String(volume?.volid ?? '').trim();
+      if (!volid.startsWith(`${ORPHANED_DISK_CLEANUP_POOL}:`) || !isStorageImageVolume(volume)) {
+        continue;
+      }
 
-    const imageName = getStorageVolumeName(volid);
-    if (!imageName) {
-      skippedVolumes.push({ volid, reason: 'missing image name' });
-      continue;
-    }
+      const imageName = getStorageVolumeName(volid);
+      if (!imageName) {
+        skippedVolumes.push({ node, volid, reason: 'missing image name' });
+        continue;
+      }
 
-    const vmid = parseVmidFromVolume(volume);
-    if (vmid != null && existingVmids.has(vmid)) {
-      skippedVolumes.push({ volid, reason: `VMID ${vmid} still exists` });
-      continue;
-    }
+      const vmid = parseVmidFromVolume(volume);
+      if (vmid != null && existingVmids.has(vmid)) {
+        skippedVolumes.push({ node, volid, reason: `VMID ${vmid} still exists` });
+        continue;
+      }
 
-    if (configTexts.some(configText => configText.includes(imageName) || configText.includes(volid))) {
-      skippedVolumes.push({ volid, reason: 'referenced by a VM config' });
-      continue;
-    }
+      if (configTexts.some(configText => configText.includes(imageName) || configText.includes(volid))) {
+        skippedVolumes.push({ node, volid, reason: 'referenced by a VM config' });
+        continue;
+      }
 
-    candidateVolumes.push(volid);
+      candidateVolumes.push({ node, volid });
+    }
   }
 
   const deletedVolumes = [];
-  for (const volid of candidateVolumes) {
+  for (const { node, volid } of candidateVolumes) {
     try {
-      const taskId = await deleteStorageVolume(envSettings, targetNode, ORPHANED_DISK_CLEANUP_POOL, volid);
-      await waitForProxmoxTask(envSettings, targetNode, taskId);
+      const taskId = await deleteStorageVolume(envSettings, node, ORPHANED_DISK_CLEANUP_POOL, volid);
+      await waitForProxmoxTask(envSettings, node, taskId);
       deletedVolumes.push(volid);
     } catch (error) {
       const message = error?.exitStatus || error?.message || 'delete failed';
       if (/still has watchers|image has watchers|watcher/i.test(message)) {
-        skippedVolumes.push({ volid, reason: 'image still has watchers' });
+        skippedVolumes.push({ node, volid, reason: 'image still has watchers' });
         continue;
       }
       throw error;
@@ -723,12 +733,13 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
 
   const stdoutLines = [
     ...deletedVolumes.map(volid => `Suppression de ${volid}`),
-    ...skippedVolumes.map(volume => `Ignored ${volume.volid}: ${volume.reason}`),
+    ...skippedVolumes.map(volume => `Ignored ${volume.volid} sur ${volume.node}: ${volume.reason}`),
     `Clean orphaned disks completed: ${deletedVolumes.length} deleted, ${skippedVolumes.length} ignored`
   ];
 
   return {
-    node: targetNode,
+    node: targetNodes[0],
+    nodes: targetNodes,
     pool: ORPHANED_DISK_CLEANUP_POOL,
     deletedVolumes,
     skippedVolumes,
