@@ -268,11 +268,14 @@ function syncBlueprintFields() {
     blueprintLinuxDefaultUsernameInput.value = state.currentBlueprint.linuxDefaultUsername || 'ubuntu';
   }
   const locked = isCurrentBlueprintLocked();
+  const randomPasswordMode = blueprintGuestPasswordModeInput?.checked === true;
+  if (blueprintWindowsAdminPasswordInput) {
+    blueprintWindowsAdminPasswordInput.disabled = locked || randomPasswordMode;
+  }
   [
     blueprintNameInput,
     blueprintDescriptionInput,
     blueprintCourseIdInput,
-    blueprintWindowsAdminPasswordInput,
     blueprintGuestPasswordModeInput,
     blueprintLinuxDefaultUsernameInput
   ].filter(Boolean).forEach(input => {

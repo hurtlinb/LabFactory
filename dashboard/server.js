@@ -2434,7 +2434,9 @@ app.get(
           vm.name,
           vm.vmid,
           vm.osType,
-          vm.windowsAdminUsername || (isWindowsOsType(vm.osType) ? getWindowsAdminUsername(vm.language) : blueprint.linuxDefaultUsername),
+          isWindowsOsType(vm.osType)
+            ? getWindowsAdminUsername(vm.language)
+            : String(blueprint.linuxDefaultUsername ?? 'ubuntu').trim() || 'ubuntu',
           vm.windowsAdminPassword,
           buildDeploymentVmIpAddress(vm),
           vm.vlanTag,
