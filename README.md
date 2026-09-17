@@ -9,7 +9,7 @@ LabFactory is a Proxmox lab orchestration dashboard built around:
 
 The UI is served by the `dashboard` service, state is stored in PostgreSQL, and workflow execution is handled by Redis-backed workers.
 
-Current version: `1.7.7`
+Current version: `1.7.8`
 
 Blueprints can use one shared guest password or generate a different password for each workstation when a lab is deployed. Deployment details include a `Download VM CSV` action with the workstation, VM, IP, username, and password information for mail merge workflows.
 

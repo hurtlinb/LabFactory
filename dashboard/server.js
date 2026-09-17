@@ -1016,12 +1016,18 @@ const generateGuestPassword = () => {
   return password.join('');
 };
 
+const isGeneratedGuestPassword = password =>
+  /^[A-Za-z0-9]{18}$/.test(String(password ?? '')) &&
+  /[A-Z]/.test(password) &&
+  /[a-z]/.test(password) &&
+  /\d/.test(password);
+
 const normalizeWorkstationPasswords = value => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value)
       .map(([workstation, password]) => [String(workstation), String(password ?? '').trim()])
-      .filter(([, password]) => password)
+      .filter(([, password]) => isGeneratedGuestPassword(password))
   );
 };
 

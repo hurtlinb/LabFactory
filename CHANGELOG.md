@@ -2,6 +2,20 @@
 
 All notable changes to LabFactory are documented here.
 
+## [1.7.8] — 2026-09-17
+
+### Ajouts
+- Génération de mots de passe alphanumériques par poste de travail, avec au moins une majuscule, une minuscule et un chiffre.
+- Export CSV des informations des VM depuis les détails d'un déploiement, avec les usernames adaptés à l'OS et à la langue.
+- Toggle dans les blueprints pour choisir entre un mot de passe partagé et des mots de passe générés par poste.
+
+### Corrections
+- Rejet et régénération des anciens mots de passe contenant des caractères spéciaux.
+- Correction des erreurs Terraform et des contrôles de readiness lors des déploiements avec des mots de passe par VM.
+- Conservation des valeurs CPU, sockets et mémoire du template Proxmox lors du clonage.
+
+---
+
 ## [1.7.7] — 2026-09-17
 
 ### Corrections
