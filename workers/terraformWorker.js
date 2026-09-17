@@ -1272,8 +1272,7 @@ const waitForGuestReadiness = async ({
   }
 
   if (windowsReadinessTargets.length > 0) {
-    const windowsPassword = String(windowsReadinessTargets[0]?.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
-    if (!windowsPassword) {
+    if (windowsReadinessTargets.some(target => !String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim())) {
       throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
     }
   }
@@ -1289,8 +1288,7 @@ const waitForGuestReadiness = async ({
   }
 
   if (linuxReadinessTargets.length > 0) {
-    const linuxPassword = String(linuxReadinessTargets[0]?.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
-    if (!linuxPassword) {
+    if (linuxReadinessTargets.some(target => !String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim())) {
       throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
     }
   }
@@ -1298,13 +1296,12 @@ const waitForGuestReadiness = async ({
   const readinessTasks = [];
 
   if (windowsReadinessTargets.length > 0) {
-    const windowsPassword = String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
     console.log(`Waiting for ${windowsReadinessTargets.length} Windows guest(s) to respond over WinRM during ${action}`);
     readinessTasks.push(
       ...windowsReadinessTargets.map(async target => {
         await waitForWindowsHostReadiness({
           target,
-          password: windowsPassword,
+          password: String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
           signal: abortController.signal
         });
         await activateVmHaAfterReadiness({ action, merged, target });
@@ -1315,14 +1312,13 @@ const waitForGuestReadiness = async ({
 
   if (linuxReadinessTargets.length > 0) {
     const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
-    const linuxPassword = String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
     console.log(`Waiting for ${linuxReadinessTargets.length} Linux guest(s) to respond over SSH during ${action}`);
     readinessTasks.push(
       ...linuxReadinessTargets.map(async target => {
         await waitForLinuxSshAndCloudInit({
           host: target.host,
           user: linuxUser,
-          password: linuxPassword,
+          password: String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
           signal: abortController.signal
         });
         await activateVmHaAfterReadiness({ action, merged, target });
