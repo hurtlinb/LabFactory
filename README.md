@@ -9,6 +9,8 @@ LabFactory is a Proxmox lab orchestration dashboard built around:
 
 The UI is served by the `dashboard` service, state is stored in PostgreSQL, and workflow execution is handled by Redis-backed workers.
 
+Current version: `1.7.7`
+
 ## Authentication
 The dashboard can be protected with OpenID Connect through Keycloak.
 
