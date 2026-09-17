@@ -94,9 +94,7 @@ resource "proxmox_vm_qemu" "lab_vm" {
   full_clone = each.value.full_clone
   ipconfig0  = try(each.value.ipconfig0, "ip=dhcp")
   ciuser     = contains(local.windows_os_types, try(each.value.os_type, "")) ? local.windows_admin_usernames[each.key] : var.linux_default_username
-  cipassword = trimspace(try(each.value.windows_admin_password, "")) != ""
-    ? each.value.windows_admin_password
-    : (trimspace(var.windows_admin_password) == "" ? null : var.windows_admin_password)
+  cipassword = trimspace(try(each.value.windows_admin_password, "")) != "" ? each.value.windows_admin_password : (trimspace(var.windows_admin_password) == "" ? null : var.windows_admin_password)
   bios       = try(each.value.bios, null)
   machine    = try(each.value.machine, null)
   tags       = try(each.value.tags, null)
