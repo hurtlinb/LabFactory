@@ -7,6 +7,7 @@ import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 import { promises as fs } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createClient } from 'redis';
@@ -244,6 +245,7 @@ const blueprintSchema = z.object({
   status: z.enum(['draft', 'ready', 'archived']).optional().default('draft'),
   courseId: z.string().uuid(),
   windowsAdminPassword: z.string().optional().default(''),
+  guestPasswordMode: z.enum(['shared', 'per-workstation']).optional().default('shared'),
   linuxDefaultUsername: z.string().trim().optional().default('ubuntu'),
   vms: z.array(blueprintVmSchema).min(1)
 });
@@ -416,7 +418,7 @@ const validateBlueprintGuestPassword = async payload => {
     return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall || getFileUploads(vm.config).length);
   });
 
-  if ((hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
+  if (payload.guestPasswordMode !== 'per-workstation' && (hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
     throw createErrorWithCode(
       'A lab guest password is required when the blueprint contains a Windows VM or Linux customization.',
       'VALIDATION'
@@ -833,6 +835,7 @@ const mapBlueprintSummary = row => ({
   },
   vmCount: Number(row.vm_count ?? 0),
   deploymentCount: Number(row.deployment_count ?? 0),
+  guestPasswordMode: row.guest_password_mode === 'per-workstation' ? 'per-workstation' : 'shared',
   isLocked: Number(row.deployment_count ?? 0) > 0,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
@@ -993,6 +996,33 @@ const mapDeployment = row => ({
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
 
+const generateGuestPassword = () => randomBytes(18).toString('base64url');
+
+const normalizeWorkstationPasswords = value => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([workstation, password]) => [String(workstation), String(password ?? '').trim()])
+      .filter(([, password]) => password)
+  );
+};
+
+const ensureDeploymentWorkstationPasswords = async (deployment, classroom, passwordMode) => {
+  if (passwordMode !== 'per-workstation') return {};
+  const existing = normalizeWorkstationPasswords(deployment.workstationPasswords);
+  const passwords = { ...existing };
+  for (let index = 0; index < classroom.workstationCount; index += 1) {
+    const workstation = String(index + 1).padStart(2, '0');
+    if (!passwords[workstation]) passwords[workstation] = generateGuestPassword();
+  }
+  await dbPool.query(
+    'UPDATE lab_deployments SET workstation_passwords = $2::jsonb, updated_at = NOW() WHERE id = $1',
+    [deployment.id, JSON.stringify(passwords)]
+  );
+  deployment.workstationPasswords = passwords;
+  return passwords;
+};
+
 const deploymentBusyStatuses = new Set(['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying']);
 const workstationRedeployableStatuses = new Set(['running', 'failed']);
 
@@ -1067,6 +1097,7 @@ const fetchBlueprintById = async blueprintId => {
       b.course_id,
       b.teacher_email,
       b.windows_admin_password,
+      b.guest_password_mode,
       b.linux_default_username,
       b.status,
       b.created_at,
@@ -1120,6 +1151,7 @@ const fetchBlueprintById = async blueprintId => {
   return {
     ...blueprint,
     windowsAdminPassword: blueprintResult.rows[0].windows_admin_password ?? '',
+    guestPasswordMode: blueprintResult.rows[0].guest_password_mode === 'per-workstation' ? 'per-workstation' : 'shared',
     linuxDefaultUsername: blueprintResult.rows[0].linux_default_username ?? 'ubuntu',
     vms: vmResult.rows.map(row => ({
       id: row.id,
@@ -1230,7 +1262,9 @@ const fetchDeploymentById = async deploymentId => {
     [deploymentId]
   );
   if (!result.rowCount) return null;
-  return mapDeployment(result.rows[0]);
+  const deployment = mapDeployment(result.rows[0]);
+  deployment.workstationPasswords = normalizeWorkstationPasswords(result.rows[0].workstation_passwords);
+  return deployment;
 };
 
 const countDeploymentsUsingBlueprint = async blueprintId => {
@@ -1282,7 +1316,7 @@ const updateDeploymentState = async ({ deploymentId, action, status, jobId = nul
   return fetchDeploymentById(result.rows[0].id);
 };
 
-const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, teacher = null }) => {
+const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, teacher = null, workstationPasswords = {} }) => {
   const baseVmid = computeBlueprintBaseVmid(deploymentId);
   const labName = sanitizeVmName(blueprint.name);
   const effectiveTeacher = teacher ?? blueprint.teacher;
@@ -1325,7 +1359,10 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         secondDiskConfigure: vm.config?.secondDiskConfigure !== false,
         subnetBase: `${subnetOctet1}.${subnetOctet2}.${subnetThirdOctet}.0`,
         subnetThirdOctet,
-        vlanTag
+        vlanTag,
+        windowsAdminPassword: blueprint.guestPasswordMode === 'per-workstation'
+          ? String(workstationPasswords[workstationNumber] ?? '').trim()
+          : String(blueprint.windowsAdminPassword ?? '').trim()
       });
     }
   }
@@ -1336,6 +1373,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
     classroomName: classroom.name,
     description: blueprint.description ?? '',
     windowsAdminPassword: blueprint.windowsAdminPassword ?? '',
+    guestPasswordMode: blueprint.guestPasswordMode ?? 'shared',
     linuxDefaultUsername: blueprint.linuxDefaultUsername ?? 'ubuntu',
     networkGateway: classroom.networkGateway,
     networkVlanMask: classroom.networkVlanMask,
@@ -1765,14 +1803,15 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
     await client.query('BEGIN');
     await lockBlueprintFiles(client, blueprintId);
     await client.query(
-      `INSERT INTO lab_blueprints (id, name, description, course_id, teacher_email, status, windows_admin_password, linux_default_username, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
+      `INSERT INTO lab_blueprints (id, name, description, course_id, teacher_email, status, windows_admin_password, guest_password_mode, linux_default_username, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
        ON CONFLICT (id)
        DO UPDATE SET
          name = EXCLUDED.name,
          description = EXCLUDED.description,
          course_id = EXCLUDED.course_id,
          windows_admin_password = EXCLUDED.windows_admin_password,
+         guest_password_mode = EXCLUDED.guest_password_mode,
          linux_default_username = EXCLUDED.linux_default_username,
          status = EXCLUDED.status,
          updated_at = NOW()`,
@@ -1784,6 +1823,7 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
         teacherEmail,
         payload.status,
         String(payload.windowsAdminPassword ?? '').trim(),
+        payload.guestPasswordMode,
         String(payload.linuxDefaultUsername ?? '').trim() || 'ubuntu'
       ]
     );
@@ -2267,7 +2307,13 @@ app.get(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = buildTerraformDeploymentPayload({
+      deploymentId: deployment.id,
+      blueprint,
+      classroom,
+      teacher: deployment.teacher,
+      workstationPasswords: deployment.workstationPasswords
+    });
 
     let resourceByVmid = null;
     try {
@@ -2344,6 +2390,65 @@ app.get(
         };
       })
     });
+  })
+);
+
+const csvCell = value => {
+  const text = String(value ?? '');
+  return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+};
+
+app.get(
+  '/api/lifecycle/deployments/:id/vms.csv',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
+  wrapAsync(async (req, res) => {
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) {
+      res.status(404).json({ error: 'deployment not found' });
+      return;
+    }
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const vmPlan = buildTerraformDeploymentPayload({
+      deploymentId: deployment.id,
+      blueprint,
+      classroom,
+      teacher: deployment.teacher,
+      workstationPasswords: deployment.workstationPasswords
+    });
+    let resourceByVmid = new Map();
+    try {
+      const resources = await fetchClusterVmResources({ context: `CSV export deployment ${deployment.id}` });
+      resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
+    } catch (error) {
+      console.error(`Unable to fetch Proxmox VM resources for CSV export ${deployment.id}`, error);
+    }
+    const rows = [
+      ['Deployment', 'Classroom', 'Workstation', 'VM name', 'VMID', 'OS', 'Username', 'Password', 'IP address', 'VLAN', 'Proxmox node'],
+      ...vmPlan.vms.map(vm => {
+        const resource = resourceByVmid.get(Number(vm.vmid));
+        return [
+          deployment.deploymentNumber,
+          deployment.classroom.name,
+          resolveWorkstationNumberFromVmId(vm.id),
+          vm.name,
+          vm.vmid,
+          vm.osType,
+          vm.windowsAdminUsername || (isWindowsOsType(vm.osType) ? getWindowsAdminUsername(vm.language) : blueprint.linuxDefaultUsername),
+          vm.windowsAdminPassword,
+          buildDeploymentVmIpAddress(vm),
+          vm.vlanTag,
+          resource?.node ?? ''
+        ];
+      })
+    ];
+    const csv = `\uFEFF${rows.map(row => row.map(csvCell).join(',')).join('\r\n')}\r\n`;
+    res.set({
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="lab-${deployment.deploymentNumber}-vms.csv"`,
+      'Cache-Control': 'no-store'
+    });
+    res.send(csv);
   })
 );
 
@@ -2500,7 +2605,13 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = buildTerraformDeploymentPayload({
+      deploymentId: deployment.id,
+      blueprint,
+      classroom,
+      teacher: deployment.teacher,
+      workstationPasswords: deployment.workstationPasswords
+    });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -2508,7 +2619,7 @@ app.post(
       return;
     }
 
-    const password = String(vmPlan.windowsAdminPassword ?? '').trim();
+    const password = String(targetVm.windowsAdminPassword ?? vmPlan.windowsAdminPassword ?? '').trim();
     if (!password) {
       res.status(400).json({ error: 'No admin password configured in blueprint' });
       return;
@@ -2750,7 +2861,14 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    await ensureDeploymentWorkstationPasswords(deployment, classroom, blueprint.guestPasswordMode);
+    const terraformBlueprintPayload = buildTerraformDeploymentPayload({
+      deploymentId: deployment.id,
+      blueprint,
+      classroom,
+      teacher: deployment.teacher,
+      workstationPasswords: deployment.workstationPasswords
+    });
 
     let resourceByVmid = null;
     try {
@@ -2861,6 +2979,9 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
+    if (action === 'deploy') {
+      await ensureDeploymentWorkstationPasswords(deployment, classroom, blueprint.guestPasswordMode);
+    }
     const runId = `deployment-${deployment.id}-${Date.now()}`;
     const jobName =
       action === 'deploy'
@@ -2868,7 +2989,13 @@ app.post(
         : action === 'destroy'
           ? 'destroy'
           : action;
-    const terraformBlueprintPayload = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const terraformBlueprintPayload = buildTerraformDeploymentPayload({
+      deploymentId: deployment.id,
+      blueprint,
+      classroom,
+      teacher: deployment.teacher,
+      workstationPasswords: deployment.workstationPasswords
+    });
     const updated = await updateDeploymentState({
       deploymentId: deployment.id,
       action,
@@ -3062,9 +3189,9 @@ app.put('/api/blueprints/:id/vms/:vmId/file', auth.requireRole(auth.ROLE_GROUPS.
   try {
     await client.query('BEGIN');
     await lockBlueprintFiles(client, req.params.id);
-    const blueprint = await client.query('SELECT id, windows_admin_password FROM lab_blueprints WHERE id = $1 FOR UPDATE', [req.params.id]);
+    const blueprint = await client.query('SELECT id, windows_admin_password, guest_password_mode FROM lab_blueprints WHERE id = $1 FOR UPDATE', [req.params.id]);
     if (!blueprint.rowCount) throw createErrorWithCode('Blueprint not found', 'VALIDATION');
-    if (!String(blueprint.rows[0].windows_admin_password || '').trim()) throw createErrorWithCode('A lab guest password is required for file upload customization', 'VALIDATION');
+    if (blueprint.rows[0].guest_password_mode !== 'per-workstation' && !String(blueprint.rows[0].windows_admin_password || '').trim()) throw createErrorWithCode('A lab guest password is required for file upload customization', 'VALIDATION');
     const locked = await client.query('SELECT id FROM lab_deployments WHERE blueprint_id = $1 LIMIT 1', [req.params.id]);
     if (locked.rowCount) {
       await client.query('ROLLBACK');

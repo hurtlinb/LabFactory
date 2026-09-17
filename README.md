@@ -11,6 +11,8 @@ The UI is served by the `dashboard` service, state is stored in PostgreSQL, and 
 
 Current version: `1.7.7`
 
+Blueprints can use one shared guest password or generate a different password for each workstation when a lab is deployed. Deployment details include a `Download VM CSV` action with the workstation, VM, IP, username, and password information for mail merge workflows.
+
 ## Authentication
 The dashboard can be protected with OpenID Connect through Keycloak.
 
