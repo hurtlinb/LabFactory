@@ -503,6 +503,17 @@ const extractTemplateFirmwareConfig = config => ({
   machine: String(config?.machine ?? '').trim() || null
 });
 
+const parsePositiveInteger = value => {
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
+};
+
+const extractTemplateHardwareConfig = config => ({
+  memory: parsePositiveInteger(config?.memory),
+  cores: parsePositiveInteger(config?.cores),
+  sockets: parsePositiveInteger(config?.sockets)
+});
+
 const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
   const resources = await fetchProxmoxVmResources(envSettings);
   const matches = [];
@@ -554,6 +565,7 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
     const diskConfig = extractTemplateDiskConfig(config);
     const cloudInitConfig = extractTemplateCloudInitConfig(config);
     const firmwareConfig = extractTemplateFirmwareConfig(config);
+    const hardwareConfig = extractTemplateHardwareConfig(config);
     return [
       ...acc,
       {
@@ -569,7 +581,10 @@ const resolveTemplateNamesByVmid = async (envSettings, blueprintVms) => {
         cloudinitSlot: cloudInitConfig.cloudinitSlot,
         cloudinitStorage: cloudInitConfig.cloudinitStorage,
         bios: firmwareConfig.bios,
-        machine: firmwareConfig.machine
+        machine: firmwareConfig.machine,
+        memory: hardwareConfig.memory,
+        cores: hardwareConfig.cores,
+        sockets: hardwareConfig.sockets
       }
     ];
   }, Promise.resolve([]));

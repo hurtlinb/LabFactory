@@ -81,6 +81,12 @@ resource "proxmox_vm_qemu" "lab_vm" {
   vmid        = each.value.vmid
   os_type     = "cloud-init"
 
+  cpu {
+    cores   = coalesce(try(each.value.cores, null), var.vm_cores)
+    sockets = coalesce(try(each.value.sockets, null), var.vm_sockets)
+  }
+
+  memory             = coalesce(try(each.value.memory, null), var.vm_memory)
   start_at_node_boot = var.vm_onboot
   pool               = var.vm_pool == "" ? null : var.vm_pool
 

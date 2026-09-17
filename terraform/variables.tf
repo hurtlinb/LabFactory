@@ -105,6 +105,9 @@ variable "vm_definitions" {
     windows_admin_username = optional(string)
     clone_source = string
     full_clone   = bool
+    memory       = optional(number)
+    cores        = optional(number)
+    sockets      = optional(number)
     ip_last_octet = optional(number)
     ipconfig0    = optional(string)
     disk_type    = optional(string)
