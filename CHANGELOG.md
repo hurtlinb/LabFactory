@@ -6,8 +6,10 @@ All notable changes to LabFactory are documented here.
 
 ### Corrections
 - Upload : vérification de l'espace disponible avant l'envoi et message explicite « Not enough storage space to upload this file. Contact your adminstrator. » en cas de capacité insuffisante ou de disque plein pendant l'écriture.
+- Préservation des réglages CPU et mémoire du template Proxmox lors du clonage Terraform.
 
 ### Ajouts
+- Choix, dans un blueprint, entre un mot de passe partagé et un mot de passe généré par poste de travail, avec export CSV des informations de chaque VM depuis les détails du déploiement.
 - Maintenance (admin) : inventaire des fichiers uploadés avec lien vers leur blueprint, taille individuelle, total des fichiers et espace disponible sur le volume de stockage.
 - Plusieurs customizations « Upload File » par VM, avec dossier cible, modification et suppression indépendants pour chaque fichier ; compatibilité avec les fichiers déjà configurés.
 - Customization « Upload File » pour Windows et Linux : création du dossier cible et copie du fichier lors du déploiement.

@@ -46,6 +46,7 @@ const blueprintNameInput = document.getElementById('blueprintName');
 const blueprintDescriptionInput = document.getElementById('blueprintDescription');
 const blueprintCourseIdInput = document.getElementById('blueprintCourseId');
 const blueprintWindowsAdminPasswordInput = document.getElementById('blueprintWindowsAdminPassword');
+const blueprintGuestPasswordModeInput = document.getElementById('blueprintGuestPasswordMode');
 const blueprintLinuxDefaultUsernameInput = document.getElementById('blueprintLinuxDefaultUsername');
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
 const newBlueprintButton = document.getElementById('newBlueprintButton');
@@ -69,6 +70,7 @@ const deploymentDetailsTitle = document.getElementById('deploymentDetailsTitle')
 const deploymentVmDetailsList = document.getElementById('deploymentVmDetailsList');
 const deploymentDetailsStatus = document.getElementById('deploymentDetailsStatus');
 const closeDeploymentDetailsButton = document.getElementById('closeDeploymentDetailsButton');
+const downloadDeploymentCsvButton = document.getElementById('downloadDeploymentCsvButton');
 const vmCustomizationDialog = document.getElementById('vmCustomizationDialog');
 const vmCustomizationTitle = document.getElementById('vmCustomizationTitle');
 const vmCustomizationForm = document.getElementById('vmCustomizationForm');
@@ -178,6 +180,7 @@ function createEmptyBlueprint() {
     status: 'draft',
     courseId: '',
     windowsAdminPassword: '',
+    guestPasswordMode: 'shared',
     linuxDefaultUsername: 'ubuntu',
     deploymentCount: 0,
     isLocked: false,
@@ -256,6 +259,9 @@ function syncBlueprintFields() {
   if (blueprintWindowsAdminPasswordInput) {
     blueprintWindowsAdminPasswordInput.value = state.currentBlueprint.windowsAdminPassword || '';
   }
+  if (blueprintGuestPasswordModeInput) {
+    blueprintGuestPasswordModeInput.value = state.currentBlueprint.guestPasswordMode || 'shared';
+  }
   if (blueprintLinuxDefaultUsernameInput) {
     blueprintLinuxDefaultUsernameInput.value = state.currentBlueprint.linuxDefaultUsername || 'ubuntu';
   }
@@ -265,6 +271,7 @@ function syncBlueprintFields() {
     blueprintDescriptionInput,
     blueprintCourseIdInput,
     blueprintWindowsAdminPasswordInput,
+    blueprintGuestPasswordModeInput,
     blueprintLinuxDefaultUsernameInput
   ].filter(Boolean).forEach(input => {
     input.disabled = locked;
@@ -1702,6 +1709,9 @@ function renderDeploymentVmDetails(payload) {
 async function openDeploymentDetails(deploymentId) {
   if (!deploymentDetailsDialog || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) return;
   state.activeDeploymentDetailsId = deploymentId;
+  if (downloadDeploymentCsvButton) {
+    downloadDeploymentCsvButton.href = `/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms.csv`;
+  }
   deploymentDetailsTitle.textContent = 'Deployment';
   deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs…</p>';
   deploymentDetailsStatus.hidden = true;
@@ -2546,6 +2556,7 @@ async function loadBlueprint(blueprintId) {
     status: blueprint.status,
     courseId: blueprint.course?.id || '',
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
+    guestPasswordMode: blueprint.guestPasswordMode || 'shared',
     linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
     deploymentCount: Number(blueprint.deploymentCount ?? 0),
     isLocked: Boolean(blueprint.isLocked),
@@ -2583,6 +2594,7 @@ async function saveBlueprint() {
   state.currentBlueprint.description = blueprintDescriptionInput.value.trim();
   state.currentBlueprint.courseId = blueprintCourseIdInput?.value || '';
   state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
+  state.currentBlueprint.guestPasswordMode = blueprintGuestPasswordModeInput?.value || 'shared';
   state.currentBlueprint.linuxDefaultUsername = blueprintLinuxDefaultUsernameInput?.value?.trim() || 'ubuntu';
   state.currentBlueprint.status = 'draft';
 
@@ -2602,6 +2614,7 @@ async function saveBlueprint() {
     status: state.currentBlueprint.status,
     courseId: state.currentBlueprint.courseId,
     windowsAdminPassword: state.currentBlueprint.windowsAdminPassword,
+    guestPasswordMode: state.currentBlueprint.guestPasswordMode,
     linuxDefaultUsername: state.currentBlueprint.linuxDefaultUsername,
     vms: state.currentBlueprint.vms.map(vm => ({
       id: state.currentBlueprint.id ? vm.id : undefined,
@@ -2639,6 +2652,7 @@ async function saveBlueprint() {
     status: blueprint.status,
     courseId: blueprint.course?.id || '',
     windowsAdminPassword: blueprint.windowsAdminPassword || '',
+    guestPasswordMode: blueprint.guestPasswordMode || 'shared',
     linuxDefaultUsername: blueprint.linuxDefaultUsername || 'ubuntu',
     deploymentCount: Number(blueprint.deploymentCount ?? 0),
     isLocked: Boolean(blueprint.isLocked),
@@ -3278,6 +3292,7 @@ closeDeploymentDetailsButton?.addEventListener('click', () => {
 
 deploymentDetailsDialog?.addEventListener('close', () => {
   state.activeDeploymentDetailsId = null;
+  if (downloadDeploymentCsvButton) downloadDeploymentCsvButton.removeAttribute('href');
 });
 
 deploymentDetailsDialog?.addEventListener('click', event => {

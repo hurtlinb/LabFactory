@@ -377,6 +377,13 @@
                   <input id="blueprintWindowsAdminPassword" type="password" name="windowsAdminPassword" placeholder="Used for Windows guest access and Linux SSH customization">
                 </label>
                 <label class="field">
+                  <span>Password mode</span>
+                  <select id="blueprintGuestPasswordMode" name="guestPasswordMode">
+                    <option value="shared">Same password for every VM</option>
+                    <option value="per-workstation">Generate a different password per workstation</option>
+                  </select>
+                </label>
+                <label class="field">
                   <span>Linux default username</span>
                   <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
                 </label>
@@ -508,6 +515,9 @@
                 <h3 id="deploymentDetailsTitle">Deployment</h3>
               </div>
               <button id="closeDeploymentDetailsButton" class="icon-btn" type="button" aria-label="Close deployment details">×</button>
+            </div>
+            <div class="inline-actions section-actions">
+              <a id="downloadDeploymentCsvButton" class="btn btn-secondary" href="#" download>Download VM CSV</a>
             </div>
             <div id="deploymentDetailsStatus" class="status-message" hidden></div>
             <div id="deploymentVmDetailsList" class="saved-list">

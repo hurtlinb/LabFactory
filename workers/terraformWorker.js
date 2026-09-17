@@ -1207,7 +1207,8 @@ const buildWindowsReadinessTargets = blueprintVms =>
       vmid: vm.vmid,
       name: vm.name,
       host: buildStaticVmIpAddress(vm),
-      user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language)
+      user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language),
+      password: String(vm.windowsAdminPassword ?? '').trim()
     }));
 
 const buildLinuxReadinessTargets = blueprintVms =>
@@ -1216,7 +1217,8 @@ const buildLinuxReadinessTargets = blueprintVms =>
     .map(vm => ({
       vmid: vm.vmid,
       name: vm.name,
-      host: buildStaticVmIpAddress(vm)
+      host: buildStaticVmIpAddress(vm),
+      password: String(vm.windowsAdminPassword ?? '').trim()
     }))
     .filter(target => target.host);
 
@@ -1255,7 +1257,7 @@ const waitForGuestReadiness = async ({
   }
 
   if (windowsReadinessTargets.length > 0) {
-    const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    const windowsPassword = String(windowsReadinessTargets[0]?.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
     if (!windowsPassword) {
       throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
     }
@@ -1272,7 +1274,7 @@ const waitForGuestReadiness = async ({
   }
 
   if (linuxReadinessTargets.length > 0) {
-    const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    const linuxPassword = String(linuxReadinessTargets[0]?.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
     if (!linuxPassword) {
       throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
     }
@@ -1281,7 +1283,7 @@ const waitForGuestReadiness = async ({
   const readinessTasks = [];
 
   if (windowsReadinessTargets.length > 0) {
-    const windowsPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    const windowsPassword = String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
     console.log(`Waiting for ${windowsReadinessTargets.length} Windows guest(s) to respond over WinRM during ${action}`);
     readinessTasks.push(
       ...windowsReadinessTargets.map(async target => {
@@ -1298,7 +1300,7 @@ const waitForGuestReadiness = async ({
 
   if (linuxReadinessTargets.length > 0) {
     const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
-    const linuxPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+    const linuxPassword = String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
     console.log(`Waiting for ${linuxReadinessTargets.length} Linux guest(s) to respond over SSH during ${action}`);
     readinessTasks.push(
       ...linuxReadinessTargets.map(async target => {
@@ -1466,6 +1468,7 @@ export function startTerraformWorker(connection) {
               os_type: vm.osType ?? 'other',
               language: String(vm.language ?? 'en').trim().toLowerCase() || 'en',
               windows_admin_username: String(vm.windowsAdminUsername ?? '').trim() || null,
+              windows_admin_password: String(vm.windowsAdminPassword ?? '').trim(),
               clone_source: String(vm.cloneSource),
               full_clone: Boolean(vm.fullClone),
               ip_last_octet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
@@ -1493,7 +1496,9 @@ export function startTerraformWorker(connection) {
           const hasWindowsVm = Array.isArray(merged.vm_definitions)
             && merged.vm_definitions.some(vm => isWindowsOsType(vm.os_type));
           merged.windows_admin_password = resolvedWindowsAdminPassword;
-          if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim()) {
+          const hasGuestPassword = Array.isArray(merged.vm_definitions)
+            && merged.vm_definitions.some(vm => String(vm.windows_admin_password ?? '').trim());
+          if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim() && !hasGuestPassword) {
             throw new Error(
               'windows_admin_password must be set on the blueprint before deploying a Windows template with Cloudbase-Init wait'
             );
@@ -1774,6 +1779,7 @@ export function startTerraformWorker(connection) {
                 hostname: String(vm.hostname ?? '').trim() || null,
                 language: String(vm.language ?? '').trim().toLowerCase() || 'en',
                 windowsAdminUsername: String(vm.windowsAdminUsername ?? '').trim() || null,
+                windowsAdminPassword: String(vm.windowsAdminPassword ?? '').trim(),
                 ipAddress:
                   vm.ipLastOctet != null && vm.subnetBase
                     ? `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
