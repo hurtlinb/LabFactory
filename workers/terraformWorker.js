@@ -1262,72 +1262,90 @@ const waitForGuestReadiness = async ({
   readinessReporter
 }) => {
   const windowsReadinessTargets = buildWindowsReadinessTargets(targets);
-  const windowsReadinessTargetsWithoutHost = windowsReadinessTargets.filter(target => !target.host);
-  if (windowsReadinessTargetsWithoutHost.length > 0) {
-    throw new Error(
-      `Unable to determine a static IPv4 address for Windows readiness checks: ${windowsReadinessTargetsWithoutHost
-        .map(target => target.name)
-        .join(', ')}`
-    );
-  }
-
-  if (windowsReadinessTargets.length > 0) {
-    if (windowsReadinessTargets.some(target => !String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim())) {
-      throw new Error('The blueprint windowsAdminPassword is required for Windows WinRM readiness checks');
-    }
-  }
-
   const linuxReadinessTargets = buildLinuxReadinessTargets(targets);
   const linuxReadinessTargetsWithoutHost = buildLinuxReadinessTargetsWithoutHost(targets, linuxReadinessTargets);
-  if (linuxReadinessTargetsWithoutHost.length > 0) {
-    throw new Error(
-      `Unable to determine a static IPv4 address for Linux readiness checks: ${linuxReadinessTargetsWithoutHost
-        .map(target => target.name)
-        .join(', ')}`
-    );
-  }
-
-  if (linuxReadinessTargets.length > 0) {
-    if (linuxReadinessTargets.some(target => !String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim())) {
-      throw new Error('The blueprint windowsAdminPassword is required for Linux guest readiness checks');
+  const allReadinessTargets = [
+    ...windowsReadinessTargets,
+    ...linuxReadinessTargetsWithoutHost.map(vm => ({
+      vmid: vm.vmid,
+      name: vm.name,
+      host: null,
+      password: String(vm.windowsAdminPassword ?? '').trim()
+    }))
+  ];
+  const fallbackPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
+  const failedTargets = new Map();
+  for (const target of allReadinessTargets) {
+    const password = String(target.password ?? fallbackPassword).trim();
+    const reason = !target.host
+      ? 'static IPv4 address is missing'
+      : !password
+        ? 'guest password is missing'
+        : null;
+    if (reason) {
+      failedTargets.set(Number(target.vmid), { target, reason });
+      await readinessReporter.markFailed(target.vmid);
+      console.warn(`Guest readiness skipped for VM ${target.vmid} (${target.name}): ${reason}`);
     }
   }
 
   const readinessTasks = [];
 
-  if (windowsReadinessTargets.length > 0) {
-    console.log(`Waiting for ${windowsReadinessTargets.length} Windows guest(s) to respond over WinRM during ${action}`);
+  const validWindowsTargets = windowsReadinessTargets.filter(target => !failedTargets.has(Number(target.vmid)));
+  if (validWindowsTargets.length > 0) {
+    console.log(`Waiting for ${validWindowsTargets.length} Windows guest(s) to respond over WinRM during ${action}`);
     readinessTasks.push(
-      ...windowsReadinessTargets.map(async target => {
-        await waitForWindowsHostReadiness({
-          target,
-          password: String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
-          signal: abortController.signal
-        });
-        await activateVmHaAfterReadiness({ action, merged, target });
-        await readinessReporter.markReady(target.vmid);
+      ...validWindowsTargets.map(async target => {
+        try {
+          await waitForWindowsHostReadiness({
+            target,
+            password: String(target.password ?? fallbackPassword).trim(),
+            signal: abortController.signal
+          });
+          await activateVmHaAfterReadiness({ action, merged, target });
+          await readinessReporter.markReady(target.vmid);
+        } catch (error) {
+          failedTargets.set(Number(target.vmid), { target, reason: error.message });
+          await readinessReporter.markFailed(target.vmid);
+          console.warn(`Guest readiness failed for VM ${target.vmid} (${target.name}): ${error.message}`);
+        }
       })
     );
   }
 
-  if (linuxReadinessTargets.length > 0) {
+  const validLinuxTargets = linuxReadinessTargets.filter(target => !failedTargets.has(Number(target.vmid)));
+  if (validLinuxTargets.length > 0) {
     const linuxUser = String(merged.linux_default_username ?? '').trim() || 'ubuntu';
-    console.log(`Waiting for ${linuxReadinessTargets.length} Linux guest(s) to respond over SSH during ${action}`);
+    console.log(`Waiting for ${validLinuxTargets.length} Linux guest(s) to respond over SSH during ${action}`);
     readinessTasks.push(
-      ...linuxReadinessTargets.map(async target => {
-        await waitForLinuxSshAndCloudInit({
-          host: target.host,
-          user: linuxUser,
-          password: String(target.password ?? job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
-          signal: abortController.signal
-        });
-        await activateVmHaAfterReadiness({ action, merged, target });
-        await readinessReporter.markReady(target.vmid);
+      ...validLinuxTargets.map(async target => {
+        try {
+          await waitForLinuxSshAndCloudInit({
+            host: target.host,
+            user: linuxUser,
+            password: String(target.password ?? fallbackPassword).trim(),
+            signal: abortController.signal
+          });
+          await activateVmHaAfterReadiness({ action, merged, target });
+          await readinessReporter.markReady(target.vmid);
+        } catch (error) {
+          failedTargets.set(Number(target.vmid), { target, reason: error.message });
+          await readinessReporter.markFailed(target.vmid);
+          console.warn(`Guest readiness failed for VM ${target.vmid} (${target.name}): ${error.message}`);
+        }
       })
     );
   }
 
   await Promise.all(readinessTasks);
+  return {
+    readyVmids: new Set(
+      [...windowsReadinessTargets, ...linuxReadinessTargets]
+        .map(target => Number(target.vmid))
+        .filter(vmid => !failedTargets.has(vmid))
+    ),
+    failedVmids: new Set(failedTargets.keys())
+  };
 };
 
 const createDeploymentReadinessReporter = job => {
@@ -1342,6 +1360,7 @@ const createDeploymentReadinessReporter = job => {
   const targetVmidSet = new Set(targetVmids);
   const startedVmids = new Set();
   const readyVmids = new Set();
+  const failedVmids = new Set();
 
   const publish = async () => {
     if (!job.data?.deploymentId) return;
@@ -1354,7 +1373,8 @@ const createDeploymentReadinessReporter = job => {
       readyCount: readyVmids.size,
       targetVmids,
       startedVmids: Array.from(startedVmids).sort((a, b) => a - b),
-      readyVmids: Array.from(readyVmids).sort((a, b) => a - b)
+      readyVmids: Array.from(readyVmids).sort((a, b) => a - b),
+      failedVmids: Array.from(failedVmids).sort((a, b) => a - b)
     });
   };
 
@@ -1378,6 +1398,14 @@ const createDeploymentReadinessReporter = job => {
       if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
         startedVmids.add(numericVmid);
         readyVmids.add(numericVmid);
+      }
+      await publish();
+    },
+    markFailed: async vmid => {
+      const numericVmid = Number(vmid);
+      if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
+        startedVmids.add(numericVmid);
+        failedVmids.add(numericVmid);
       }
       await publish();
     }
@@ -1759,9 +1787,13 @@ export function startTerraformWorker(connection) {
           }
         }
 
+        let guestReadiness = {
+          readyVmids: new Set(),
+          failedVmids: new Set()
+        };
         if (action === 'deploy') {
           await readinessReporter.markStartedAll();
-          await waitForGuestReadiness({
+          guestReadiness = await waitForGuestReadiness({
             action,
             targets: scopedBlueprintVms,
             merged,
@@ -1784,6 +1816,7 @@ export function startTerraformWorker(connection) {
                     vm.installDocker ||
                     (vm.secondDiskSizeGb && vm.secondDiskConfigure)
                   ) &&
+                  guestReadiness.readyVmids.has(Number(vm.vmid)) &&
                   [isWindowsOsType(vm.osType), isLinuxOsType(vm.osType)].some(Boolean)
               )
               .map(vm => ({
@@ -1825,7 +1858,8 @@ export function startTerraformWorker(connection) {
               },
               linuxDefaultUsername: String(job.data?.linuxDefaultUsername ?? merged.linux_default_username ?? '').trim() || 'ubuntu',
               windowsAdminPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
-              timezoneTargets: customizationTargets
+              timezoneTargets: customizationTargets,
+              readinessFailedVmids: Array.from(guestReadiness.failedVmids).sort((a, b) => a - b)
             },
             { attempts: 1 }
           );

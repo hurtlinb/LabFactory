@@ -1081,6 +1081,7 @@ const deriveDeploymentProgress = async ({
   resourceByVmid,
   readyVmids = new Set(),
   startedVmids = new Set(),
+  failedVmids = new Set(),
   operationTargetVmids = null
 }) => {
   const vmStates = await buildDeploymentVmRuntimeStates({
@@ -1089,6 +1090,7 @@ const deriveDeploymentProgress = async ({
     resourceByVmid,
     readyVmids,
     startedVmids,
+    failedVmids,
     operationTargetVmids
   });
   const progressVmStates =
@@ -1432,8 +1434,9 @@ const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request
   throw lastError;
 };
 
-const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted = false, guestReady = false }) => {
+const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted = false, guestReady = false, guestFailed = false }) => {
   if (!resource) {
+    if (guestFailed) return 'failed';
     if (['queued', 'deploying'].includes(deploymentStatus)) return 'cloning';
     if (deploymentStatus === 'destroying') return 'destroying';
     if (deploymentStatus === 'destroyed') return 'destroyed';
@@ -1445,6 +1448,9 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted 
   }
 
   if (resource.status === 'running') {
+    if (guestFailed) {
+      return 'failed';
+    }
     if (shouldUseGuestReadinessProgress(deploymentStatus) && vm.isTrackedGuestReadiness !== false) {
       if (guestReady) {
         return 'ready';
@@ -1534,6 +1540,7 @@ const emptyReadinessProgress = ({ jobState = null, hasActiveJob = false } = {}) 
   isComplete: false,
   readyVmids: new Set(),
   startedVmids: new Set(),
+  failedVmids: new Set(),
   targetVmids: null
 });
 
@@ -1554,6 +1561,7 @@ const fetchDeploymentReadinessProgress = async deployment => {
     const targetVmids = Array.isArray(progress?.targetVmids) ? parseVmidsToSet(progress.targetVmids) : null;
     const readyVmids = parseVmidsToSet(progress?.readyVmids);
     const startedVmids = parseVmidsToSet(progress?.startedVmids);
+    const failedVmids = parseVmidsToSet(progress?.failedVmids);
     for (const vmid of readyVmids) {
       startedVmids.add(vmid);
     }
@@ -1562,9 +1570,10 @@ const fetchDeploymentReadinessProgress = async deployment => {
       jobState,
       hasActiveJob,
       hasProgress,
-      isComplete: hasProgress && [...targetVmids].every(vmid => readyVmids.has(vmid)),
+      isComplete: hasProgress && [...targetVmids].every(vmid => readyVmids.has(vmid) || failedVmids.has(vmid)),
       readyVmids,
       startedVmids,
+      failedVmids,
       targetVmids
     };
   } catch (error) {
@@ -1591,6 +1600,7 @@ const fetchAnsibleCustomizationProgress = async deployment => {
     const progress = job?.progress;
     const targetVmids = Array.isArray(progress?.targetVmids) ? parseVmidsToSet(progress.targetVmids) : null;
     const reconnectedVmids = parseVmidsToSet(progress?.reconnectedVmids);
+    const failedVmids = parseVmidsToSet(job?.data?.readinessFailedVmids);
     const hasProgress = progress?.type === 'customization-reconnect' && targetVmids instanceof Set && targetVmids.size > 0;
     return {
       jobState,
@@ -1599,6 +1609,7 @@ const fetchAnsibleCustomizationProgress = async deployment => {
       isComplete: hasProgress && [...targetVmids].every(vmid => reconnectedVmids.has(vmid)),
       readyVmids: reconnectedVmids,
       startedVmids: reconnectedVmids,
+      failedVmids,
       targetVmids
     };
   } catch (error) {
@@ -1636,11 +1647,13 @@ const buildDeploymentVmRuntimeStates = async ({
   resourceByVmid,
   readyVmids = new Set(),
   startedVmids = new Set(),
+  failedVmids = new Set(),
   operationTargetVmids = null
 }) => {
   return vmPlan.vms.map(vm => {
     const resource = resourceByVmid.get(Number(vm.vmid)) ?? null;
     const isKnownReady = readyVmids.has(Number(vm.vmid));
+    const isKnownFailed = failedVmids.has(Number(vm.vmid));
     const isKnownStarted = isKnownReady || startedVmids.has(Number(vm.vmid));
     const isTrackedGuestReadiness =
       !usesPerVmProgressTracking(deployment.status)
@@ -1666,7 +1679,8 @@ const buildDeploymentVmRuntimeStates = async ({
       },
       resource,
       guestStarted,
-      guestReady: isKnownReady || isFinishedDeploymentReady
+      guestReady: isKnownReady || isFinishedDeploymentReady,
+      guestFailed: isKnownFailed
     };
   });
 };
@@ -2219,6 +2233,7 @@ app.get(
           resourceByVmid: resourceByVmid ?? new Map(),
           readyVmids: vmProgressSource.readyVmids,
           startedVmids: vmProgressSource.startedVmids,
+          failedVmids: vmProgressSource.failedVmids,
           operationTargetVmids: vmProgressSource.targetVmids
         }))
       });
@@ -2373,6 +2388,7 @@ app.get(
       resourceByVmid: resourceByVmid ?? new Map(),
       readyVmids: vmProgressSource.readyVmids,
       startedVmids: vmProgressSource.startedVmids,
+      failedVmids: vmProgressSource.failedVmids,
       operationTargetVmids: vmProgressSource.targetVmids
     });
     const activeWorkstationNumbers = deriveTargetWorkstationNumbers(vmPlan, vmProgressSource.targetVmids);
@@ -2391,7 +2407,7 @@ app.get(
         busy: deploymentBusyStatuses.has(effectiveDeploymentStatus),
         activeWorkstationNumbers
       },
-      vms: vmStates.map(({ vm, resource, guestStarted, guestReady }) => {
+      vms: vmStates.map(({ vm, resource, guestStarted, guestReady, guestFailed }) => {
         return {
           id: vm.id,
           name: vm.name,
@@ -2405,7 +2421,8 @@ app.get(
             vm,
             resource,
             guestStarted,
-            guestReady
+            guestReady,
+            guestFailed
           }),
           guestStarted,
           guestReady,
