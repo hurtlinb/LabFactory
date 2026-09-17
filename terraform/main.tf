@@ -81,12 +81,6 @@ resource "proxmox_vm_qemu" "lab_vm" {
   vmid        = each.value.vmid
   os_type     = "cloud-init"
 
-  cpu {
-    cores   = var.vm_cores
-    sockets = var.vm_sockets
-  }
-
-  memory             = var.vm_memory
   start_at_node_boot = var.vm_onboot
   pool               = var.vm_pool == "" ? null : var.vm_pool
 
