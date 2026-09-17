@@ -46,6 +46,7 @@ const blueprintNameInput = document.getElementById('blueprintName');
 const blueprintDescriptionInput = document.getElementById('blueprintDescription');
 const blueprintCourseIdInput = document.getElementById('blueprintCourseId');
 const blueprintWindowsAdminPasswordInput = document.getElementById('blueprintWindowsAdminPassword');
+const blueprintGuestPasswordField = document.getElementById('blueprintGuestPasswordField');
 const blueprintGuestPasswordModeInput = document.getElementById('blueprintGuestPasswordMode');
 const blueprintLinuxDefaultUsernameInput = document.getElementById('blueprintLinuxDefaultUsername');
 const saveBlueprintButton = document.getElementById('saveBlueprintButton');
@@ -260,7 +261,8 @@ function syncBlueprintFields() {
     blueprintWindowsAdminPasswordInput.value = state.currentBlueprint.windowsAdminPassword || '';
   }
   if (blueprintGuestPasswordModeInput) {
-    blueprintGuestPasswordModeInput.value = state.currentBlueprint.guestPasswordMode || 'shared';
+    blueprintGuestPasswordModeInput.checked = state.currentBlueprint.guestPasswordMode === 'per-workstation';
+    blueprintGuestPasswordField.hidden = blueprintGuestPasswordModeInput.checked;
   }
   if (blueprintLinuxDefaultUsernameInput) {
     blueprintLinuxDefaultUsernameInput.value = state.currentBlueprint.linuxDefaultUsername || 'ubuntu';
@@ -282,6 +284,11 @@ function syncBlueprintFields() {
     saveBlueprintButton.title = locked ? getBlueprintLockMessage() : '';
   }
 }
+
+blueprintGuestPasswordModeInput?.addEventListener('change', () => {
+  state.currentBlueprint.guestPasswordMode = blueprintGuestPasswordModeInput.checked ? 'per-workstation' : 'shared';
+  syncBlueprintFields();
+});
 
 function renderBlueprintWorkspace() {
   if (blueprintWorkspace) {
