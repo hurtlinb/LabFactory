@@ -996,7 +996,25 @@ const mapDeployment = row => ({
   totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
 });
 
-const generateGuestPassword = () => randomBytes(18).toString('base64url');
+const generateGuestPassword = () => {
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
+  const digits = '0123456789';
+  const alphabet = `${uppercase}${lowercase}${digits}`;
+  const randomCharacter = characters => characters[randomBytes(1)[0] % characters.length];
+  const password = [randomCharacter(uppercase), randomCharacter(lowercase), randomCharacter(digits)];
+
+  while (password.length < 18) {
+    password.push(randomCharacter(alphabet));
+  }
+
+  for (let index = password.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomBytes(1)[0] % (index + 1);
+    [password[index], password[swapIndex]] = [password[swapIndex], password[index]];
+  }
+
+  return password.join('');
+};
 
 const normalizeWorkstationPasswords = value => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
