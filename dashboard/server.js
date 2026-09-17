@@ -599,6 +599,17 @@ const fetchQemuConfigs = async (envSettings, resources) => {
   return configs;
 };
 
+const fetchProxmoxNodeNames = async envSettings => {
+  const payload = await requestProxmoxJson(
+    envSettings,
+    'nodes',
+    { timeoutMs: ORPHANED_DISK_CLEANUP_TIMEOUT_MS }
+  );
+  return (Array.isArray(payload?.data) ? payload.data : [])
+    .map(node => String(node?.node ?? '').trim())
+    .filter(Boolean);
+};
+
 const fetchStorageContent = async (envSettings, node, storage) => {
   const payload = await requestProxmoxJson(
     envSettings,
@@ -674,9 +685,13 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
   );
   const qemuConfigs = await fetchQemuConfigs(envSettings, resources);
   const configTexts = qemuConfigs.map(({ config }) => JSON.stringify(config));
+  const discoveredNodes = await fetchProxmoxNodeNames(envSettings);
+  const resourceNodes = resources
+    .map(resource => String(resource?.node ?? '').trim())
+    .filter(Boolean);
   const targetNodes = [...new Set([
-    ...fallbackNodes,
-    ...resources.map(resource => String(resource?.node ?? '').trim()).filter(Boolean)
+    ...(discoveredNodes.length ? discoveredNodes : fallbackNodes),
+    ...resourceNodes
   ])];
   const storageContentByNode = await Promise.all(
     targetNodes.map(async node => ({
