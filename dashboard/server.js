@@ -997,30 +997,24 @@ const mapDeployment = row => ({
 });
 
 const generateGuestPassword = () => {
-  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-  const lowercase = 'abcdefghijklmnopqrstuvwxyz';
-  const digits = '0123456789';
-  const alphabet = `${uppercase}${lowercase}${digits}`;
+  const uppercase = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lowercase = 'abcdefghjkmnpqrstuvwxyz';
+  const digits = '123456789';
   const randomCharacter = characters => characters[randomBytes(1)[0] % characters.length];
-  const password = [randomCharacter(uppercase), randomCharacter(lowercase), randomCharacter(digits)];
-
-  while (password.length < 18) {
-    password.push(randomCharacter(alphabet));
-  }
-
-  for (let index = password.length - 1; index > 0; index -= 1) {
-    const swapIndex = randomBytes(1)[0] % (index + 1);
-    [password[index], password[swapIndex]] = [password[swapIndex], password[index]];
-  }
-
-  return password.join('');
+  return [
+    ...Array.from({ length: 3 }, () => randomCharacter(lowercase)),
+    ...Array.from({ length: 3 }, () => randomCharacter(digits)),
+    ...Array.from({ length: 2 }, () => randomCharacter(uppercase))
+  ].join('');
 };
 
 const isGeneratedGuestPassword = password =>
-  /^[A-Za-z0-9]{18}$/.test(String(password ?? '')) &&
-  /[A-Z]/.test(password) &&
-  /[a-z]/.test(password) &&
-  /\d/.test(password);
+  (/^[a-z]{3}[1-9]{3}[A-Z]{2}$/.test(String(password ?? '')) &&
+    !/[iloIO]/.test(password)) ||
+  (/^[A-Za-z0-9]{18}$/.test(String(password ?? '')) &&
+    /[A-Z]/.test(password) &&
+    /[a-z]/.test(password) &&
+    /\d/.test(password));
 
 const normalizeWorkstationPasswords = value => {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
