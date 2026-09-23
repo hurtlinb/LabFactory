@@ -2,6 +2,14 @@
 
 All notable changes to LabFactory are documented here.
 
+## [1.7.9] — 2026-09-23
+
+### Corrections
+- Les mots de passe générés par poste de travail sont désormais plus courts : 3 minuscules, 3 chiffres de 1 à 9 et 2 majuscules.
+- Exclusion des caractères pouvant prêter à confusion (`0`, `I`, `i`, `l`, `O` et `o`) dans les mots de passe générés.
+
+---
+
 ## [1.7.8] — 2026-09-17
 
 ### Ajouts
