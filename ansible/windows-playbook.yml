@@ -6,17 +6,16 @@
   gather_facts: false
   tasks:
     - name: Display lab context
+      tags: [setup]
       ansible.builtin.debug:
         msg: "Customizing {{ lab_instance_id | default('lab-demo') }} deployment {{ deployment_id | default('') }} on {{ inventory_hostname }} (run {{ run_id | default('demo-run') }})"
-      ignore_unreachable: true
 
     - name: Set Windows hostname
+      tags: [setup]
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "if ((Get-CimInstance Win32_ComputerSystem).Name -ne '{{ target_hostname }}') { Rename-Computer -NewName '{{ target_hostname }}' -Force -PassThru | Out-Null; Write-Output 'changed' }"
       register: windows_hostname_result
       changed_when: "'changed' in (windows_hostname_result.stdout | default(''))"
-      ignore_errors: true
-      ignore_unreachable: true
       when:
         - target_hostname is defined
         - target_hostname is not none
@@ -24,11 +23,10 @@
         - target_hostname | string | lower != "null"
 
     - name: Set Windows timezone
+      tags: [setup]
       ansible.builtin.raw: |
         powershell -NoProfile -NonInteractive -Command "if ((Get-TimeZone).Id -ne '{{ target_timezone }}') { Set-TimeZone -Id '{{ target_timezone }}'; Write-Output 'changed' }"
       changed_when: "'changed' in (stdout | default(''))"
-      ignore_errors: true
-      ignore_unreachable: true
       when:
         - target_timezone is defined
         - target_timezone is not none
@@ -36,6 +34,7 @@
         - target_timezone | string | lower != "null"
 
     - name: Initialize and format second data disk
+      tags: [setup]
       ansible.windows.win_powershell:
         script: |
           $disk = Get-Disk | Where-Object PartitionStyle -eq 'RAW' | Select-Object -First 1
@@ -47,13 +46,12 @@
           }
       register: windows_second_disk_result
       changed_when: "'changed' in (windows_second_disk_result.output | default([]) | join(' '))"
-      ignore_errors: true
-      ignore_unreachable: true
       when:
         - second_disk_size_gb is defined
         - second_disk_configure | default(true) | bool
 
     - name: Create uploaded file destination directory
+      tags: [files]
       ansible.windows.win_file:
         path: "{{ item.directory }}"
         state: directory
@@ -62,14 +60,17 @@
         label: "{{ item.destination }}"
 
     - name: Copy blueprint file to guest
+      tags: [files]
       ansible.windows.win_copy:
         src: "{{ item.source }}"
         dest: "{{ item.destination }}"
+        force: true  # Compare checksums and retain already completed transfers.
       loop: "{{ file_uploads | default([]) }}"
       loop_control:
         label: "{{ item.destination }}"
 
     - name: Reboot (applique le nouveau nom d'ordinateur)
+      tags: [reboot]
       # Fire-and-forget: la reconnexion est suivie côté Node (waitForWindowsReconnect dans
       # ansibleWorker.js), VM par VM, pour ne pas bloquer tout le lot sur la plus lente.
       ansible.builtin.raw: |

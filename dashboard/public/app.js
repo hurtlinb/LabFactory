@@ -1112,6 +1112,10 @@ function renderLifecycleLabs() {
       const hasWarning = deployment.status === 'mixed';
       const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
       const totalVmCount = Number(deployment.totalVmCount ?? 0);
+      const customizationResults = deployment.customizationResults || [];
+      const customizationSummary = customizationResults.length
+        ? `${customizationResults.filter(vm => vm.status === 'succeeded').length} customized, ${customizationResults.filter(vm => vm.status === 'failed').length} failed, ${customizationResults.filter(vm => !['succeeded', 'failed'].includes(vm.status)).length} pending`
+        : '';
 
       const actionButtons = actions.busy
         ? `<span class="loading-spinner" aria-hidden="true"></span>`
@@ -1143,6 +1147,7 @@ function renderLifecycleLabs() {
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
               </p>
               <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready</p>
+              ${customizationSummary ? `<p class="deploy-meta">${escapeHtml(customizationSummary)}</p>` : ''}
             </div>
             <div class="inline-actions">
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
@@ -1153,6 +1158,7 @@ function renderLifecycleLabs() {
           ${renderLifecycleSteps(deployment.status)}
           <div class="lc-actions">
             ${actionButtons}
+            ${deployment.canResumeCustomization ? `<button class="btn lifecycle-action" type="button" data-action="resume-customization" data-deployment-id="${deployment.id}">Resume incomplete customizations</button>` : ''}
             ${deleteBtn ? `<span class="lc-actions-spacer"></span>${deleteBtn}` : ''}
           </div>
         </article>`;
@@ -1471,6 +1477,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
           <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
           <td class="vm-state-name-cell">
             <strong>${escapeHtml(vm.name)}</strong>
+            ${vm.customization ? `<span class="muted">Customization: ${escapeHtml(vm.customization.status)} · ${escapeHtml(vm.customization.step || '')}${vm.customization.attempt ? ` · attempt ${Number(vm.customization.attempt)}/4` : ''}</span>${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
             <span class="muted">${vm.node ? escapeHtml(vm.node) : ''}</span>
           </td>
           <td>${vm.vmid}</td>

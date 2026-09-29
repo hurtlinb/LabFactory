@@ -1598,8 +1598,10 @@ const fetchAnsibleCustomizationProgress = async deployment => {
       ...parseVmidsToSet(progress?.failedVmids),
       ...parseVmidsToSet(job?.data?.readinessFailedVmids)
     ]);
-    const hasProgress = progress?.type === 'customization-reconnect' && targetVmids instanceof Set && targetVmids.size > 0;
+    const hasProgress = ['customization-reconnect', 'customization-steps'].includes(progress?.type) && targetVmids instanceof Set && targetVmids.size > 0;
     return {
+      results: progress?.type === 'customization-steps' ? progress.results : null,
+      canResume: jobState === 'failed' && progress?.type === 'customization-steps' && job?.data?.runId === deployment.lastRunId,
       jobState,
       hasActiveJob,
       hasProgress,
@@ -2203,7 +2205,7 @@ app.get(
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
       const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
-      const customizationProgress = deployment.status === 'customizing'
+      const customizationProgress = (deployment.lastAction === 'customize' && ['customizing', 'failed', 'deployed', 'running', 'stopped', 'mixed'].includes(deployment.status))
         ? await fetchAnsibleCustomizationProgress(deployment)
         : null;
       const vmProgressSource = customizationProgress ?? readinessProgress;
@@ -2223,6 +2225,8 @@ app.get(
       };
       deployments.push({
         ...runtimeDeployment,
+        customizationResults: customizationProgress?.results ?? null,
+        canResumeCustomization: deployment.status === 'failed' && Boolean(customizationProgress?.canResume) && canManageDeployment(req, deployment),
         displayStatus: resolveDeploymentDisplayStatus(effectiveDeploymentStatus, readinessProgress),
         ...(await deriveDeploymentProgress({
           deployment: runtimeDeployment,
@@ -2360,7 +2364,7 @@ app.get(
     }
 
     const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
-    const customizationProgress = deployment.status === 'customizing'
+    const customizationProgress = (deployment.lastAction === 'customize' && ['customizing', 'failed', 'deployed', 'running', 'stopped', 'mixed'].includes(deployment.status))
       ? await fetchAnsibleCustomizationProgress(deployment)
       : null;
     const vmProgressSource = customizationProgress ?? readinessProgress;
@@ -2423,6 +2427,7 @@ app.get(
           }),
           guestStarted,
           guestReady,
+          customization: customizationProgress?.results?.find(result => Number(result.vmid) === Number(vm.vmid)) ?? null,
           proxmoxStatus: resource?.status ?? null,
           node: resource?.node ?? null
         };
@@ -2983,6 +2988,36 @@ app.post(
       jobId: job.id,
       runId
     });
+  })
+);
+
+app.post(
+  '/api/lifecycle/deployments/:id/resume-customization',
+  auth.requireRole(auth.ROLE_GROUPS.LABS),
+  wrapAsync(async (req, res) => {
+    const deployment = await fetchDeploymentById(req.params.id);
+    if (!deployment) return res.status(404).json({ error: 'deployment not found' });
+    if (!canManageDeployment(req, deployment)) return denyDeploymentManagement(res);
+    if (deployment.status !== 'failed' || deployment.lastAction !== 'customize') {
+      return res.status(409).json({ error: 'No failed customization to resume' });
+    }
+    const job = await queues.ansible.getJob(String(deployment.lastJobId));
+    if (!job || await job.getState() !== 'failed' || job.data.runId !== deployment.lastRunId || job.data.deploymentId !== deployment.id || !job.data.customizationResults) {
+      return res.status(409).json({ error: 'Customization checkpoints are unavailable; this job cannot be resumed' });
+    }
+    // Compare the original run and job too: a concurrent lifecycle action invalidates this resume.
+    const claim = await dbPool.query(
+      "UPDATE lab_deployments SET status = 'customizing', updated_at = NOW() WHERE id = $1 AND status = 'failed' AND last_action = 'customize' AND last_job_id = $2 AND last_run_id = $3 RETURNING id",
+      [deployment.id, String(job.id), deployment.lastRunId]
+    );
+    if (!claim.rowCount) return res.status(409).json({ error: 'Deployment changed; refresh before retrying' });
+    try {
+      await job.retry('failed');
+    } catch (error) {
+      await dbPool.query("UPDATE lab_deployments SET status = 'failed' WHERE id = $1 AND status = 'customizing' AND last_job_id = $2 AND last_run_id = $3", [deployment.id, String(job.id), deployment.lastRunId]);
+      throw error;
+    }
+    res.json({ ok: true, jobId: job.id, runId: deployment.lastRunId });
   })
 );
 

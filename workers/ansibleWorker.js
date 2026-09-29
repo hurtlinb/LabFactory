@@ -5,7 +5,10 @@ import { tmpdir } from 'node:os';
 import { Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { promises as fs } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { runCommand } from '../lib/runCommand.js';
+import { runCustomization } from '../lib/runCustomization.js';
+import { commandFailure, isTransientConnectionError } from '../lib/customizationRecovery.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ansibleDir = path.resolve(__dirname, '../ansible');
@@ -13,14 +16,9 @@ const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(Strin
 const isLinuxOsType = osType => !isWindowsOsType(osType);
 const getWindowsAdminUsername = language =>
   (String(language ?? '').trim().toLowerCase() === 'fr' ? 'Administrateur' : 'Administrator');
-const linuxPlaybookPath = path.join(ansibleDir, 'linux-playbook.yml');
-const windowsPlaybookPath = path.join(ansibleDir, 'windows-playbook.yml');
-const windowsDomainPlaybookPath = path.join(ansibleDir, 'windows-domain-playbook.yml');
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
 });
-
-const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const WINDOWS_RECONNECT_WAIT_TIMEOUT_MS = 30 * 60 * 1000;
 const WINDOWS_RECONNECT_ATTEMPT_TIMEOUT_SECONDS = 45;
@@ -82,7 +80,7 @@ const waitForWindowsHostReconnect = async ({ target, password, signal }) => {
     const playbookPath = path.join(attemptDir, 'playbook.yml');
 
     try {
-      await fs.writeFile(inventoryPath, buildWindowsReconnectInventory(target, password), 'utf8');
+      await fs.writeFile(inventoryPath, buildWindowsReconnectInventory(target, password), { encoding: 'utf8', mode: 0o600 });
       await fs.writeFile(playbookPath, windowsReconnectCheckPlaybook, 'utf8');
 
       await runCommand(
@@ -92,49 +90,19 @@ const waitForWindowsHostReconnect = async ({ target, password, signal }) => {
       );
       return;
     } catch (error) {
+      signal?.throwIfAborted();
+      if (error.code !== 124 && !isTransientConnectionError(commandFailure(error))) throw new Error(commandFailure(error));
       lastError = error;
     } finally {
       await fs.rm(attemptDir, { recursive: true, force: true });
     }
 
-    await sleep(computeReconnectRetryDelayMs(Date.now() - startedAt));
+    await delay(computeReconnectRetryDelayMs(Date.now() - startedAt), undefined, { signal });
   }
 
   throw new Error(
-    `Timed out waiting for Windows guest ${target.name} to reconnect after reboot${lastError ? `: ${lastError.message}` : ''}`
+    `Timed out waiting for Windows guest ${target.name} to reconnect after reboot${lastError ? `: ${commandFailure(lastError)}` : ''}`
   );
-};
-
-const createCustomizationReconnectReporter = (job, targetVmids) => {
-  const targetVmidSet = new Set(targetVmids.map(Number));
-  const reconnectedVmids = new Set();
-  const failedVmids = new Set();
-
-  const publish = async () => {
-    await job.updateProgress({
-      type: 'customization-reconnect',
-      targetVmids: Array.from(targetVmidSet).sort((a, b) => a - b),
-      reconnectedVmids: Array.from(reconnectedVmids).sort((a, b) => a - b),
-      failedVmids: Array.from(failedVmids).sort((a, b) => a - b)
-    });
-  };
-
-  return {
-    markReconnected: async vmid => {
-      const numericVmid = Number(vmid);
-      if (targetVmidSet.has(numericVmid)) {
-        reconnectedVmids.add(numericVmid);
-      }
-      await publish();
-    },
-    markFailed: async vmid => {
-      const numericVmid = Number(vmid);
-      if (targetVmidSet.has(numericVmid)) {
-        failedVmids.add(numericVmid);
-      }
-      await publish();
-    }
-  };
 };
 
 export const ansibleQueueName = 'ansible-workflows';
@@ -319,7 +287,7 @@ export function startAnsibleWorker(connection) {
             jobId: String(job.id),
             runId: job.data.runId
           });
-          return { status: 'ansible-skipped', extraVars };
+          return { status: 'ansible-skipped' };
         }
 
         fileStagingDirectory = await fs.mkdtemp(path.join(tmpdir(), 'labfactory-files-'));
@@ -368,7 +336,7 @@ export function startAnsibleWorker(connection) {
         await fs.writeFile(
           inventoryPath,
           `all:\n  children:\n${inventoryParts.join('\n')}\n`,
-          'utf8'
+          { encoding: 'utf8', mode: 0o600 }
         );
 
         const statusClaimed = await safeUpdateDeploymentStatus(job.data.deploymentId, 'customizing', {
@@ -379,71 +347,15 @@ export function startAnsibleWorker(connection) {
         if (!statusClaimed) {
           await fs.rm(inventoryPath, { force: true });
           console.log(`Skipping stale Ansible job ${job.id} for deployment ${deploymentLabel} (customize)`);
-          return { status: 'stale-job-skipped', extraVars };
+          return { status: 'stale-job-skipped' };
         }
 
-        try {
-          const commonArgs = ['--inventory', inventoryPath, '--extra-vars', JSON.stringify(extraVars)];
-
-          if (linuxTimezoneTargets.length) {
-            await runCommand(
-              'ansible-playbook',
-              [linuxPlaybookPath, ...commonArgs],
-              {
-                cwd: ansibleDir,
-                env: { ...process.env },
-                signal: abortController.signal
-              }
-            );
-          }
-
-          if (windowsTimezoneTargets.length) {
-            await runCommand(
-              'ansible-playbook',
-              [windowsPlaybookPath, ...commonArgs],
-              {
-                cwd: ansibleDir,
-                env: { ...process.env },
-                signal: abortController.signal
-              }
-            );
-
-            const reconnectReporter = createCustomizationReconnectReporter(
-              job,
-              windowsTimezoneTargets.map(target => target.vmid)
-            );
-            await Promise.all(
-              windowsTimezoneTargets.map(async target => {
-                try {
-                  await waitForWindowsHostReconnect({
-                    target,
-                    password: String(target.windowsAdminPassword ?? extraVars.windows_admin_password ?? '').trim(),
-                    signal: abortController.signal
-                  });
-                  await reconnectReporter.markReconnected(target.vmid);
-                } catch (error) {
-                  await reconnectReporter.markFailed(target.vmid);
-                  console.warn(`Ansible reconnect failed for VM ${target.vmid} (${target.name}): ${error.message}`);
-                }
-              })
-            );
-
-            const hasDomainTargets = windowsTimezoneTargets.some(t => t.domainRole);
-            if (hasDomainTargets) {
-              await runCommand(
-                'ansible-playbook',
-                [windowsDomainPlaybookPath, ...commonArgs],
-                {
-                  cwd: ansibleDir,
-                  env: { ...process.env },
-                  signal: abortController.signal
-                }
-              );
-            }
-          }
-        } finally {
-          await fs.rm(inventoryPath, { force: true });
-        }
+        await runCustomization({
+          job, windowsTargets: windowsTimezoneTargets, linuxTargets: linuxTimezoneTargets,
+          directory: fileStagingDirectory, inventoryPath, extraVars, ansibleDir, runCommand,
+          reconnect: waitForWindowsHostReconnect, buildProbeInventory: buildWindowsReconnectInventory,
+          probePlaybook: windowsReconnectCheckPlaybook, signal: abortController.signal
+        });
 
         await safeUpdateDeploymentStatus(job.data.deploymentId, 'deployed', {
           action: 'customize',
@@ -452,7 +364,7 @@ export function startAnsibleWorker(connection) {
         });
 
         console.log(`Ansible job ${job.id} finished for deployment ${deploymentLabel} (customize)`);
-        return { status: 'ansible-done', extraVars };
+        return { status: 'ansible-done' };
       } catch (error) {
         console.error(`Ansible job ${job.id} failed for deployment ${deploymentLabel} (customize)`, error);
         await safeUpdateDeploymentStatus(job.data.deploymentId, 'failed', {
