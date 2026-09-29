@@ -2,6 +2,25 @@
 
 All notable changes to LabFactory are documented here.
 
+## [1.7.10] — 2026-09-29
+
+### Ajouts
+- Suivi de la personnalisation par VM : nombre de réussites, d'échecs et de VM en attente, avec détail de l'étape ou du fichier concerné, de la tentative et de l'erreur.
+- Action « Resume incomplete customizations » pour reprendre les personnalisations incomplètes, en conservant les VM et les étapes Windows déjà réussies, sans relancer Terraform. Action réservée au propriétaire du lab et aux administrateurs.
+
+### Corrections
+- Les coupures temporaires WinRM pendant la configuration Windows ou la copie de fichiers déclenchent jusqu'à trois nouvelles tentatives, après 15, 30 et 60 secondes, avec vérification de WinRM avant chaque reprise. Les erreurs d'authentification, de permissions et de stockage ne sont pas réessayées automatiquement.
+- Conservation des points de reprise par VM et par fichier ; vérification du contenu par checksum pour éviter de retransférer un fichier déjà copié après une perte de connexion.
+- Une VM en échec n'interrompt plus la personnalisation des autres VM ; le traitement est limité à cinq VM simultanées.
+- Un échec de reconnexion Windows après redémarrage ne peut plus laisser le lab marqué comme déployé avec succès.
+- Les paramètres Ansible contenant les mots de passe sont transmis par un fichier temporaire à accès restreint plutôt que dans les arguments de commande.
+
+### Compatibilité
+- La reprise nécessite les points de contrôle enregistrés par cette version et conservés dans l'historique des jobs Redis. Elle n'est pas disponible pour les anciens jobs, notamment celui du lab #51, ni après suppression de cet historique.
+- Pour Linux, la reprise conserve les VM réussies et relance le playbook des VM incomplètes.
+
+---
+
 ## [1.7.9] — 2026-09-23
 
 ### Corrections
