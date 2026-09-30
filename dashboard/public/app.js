@@ -1182,6 +1182,7 @@ function renderLifecycleLabs() {
             <div class="inline-actions">
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               <span class="pill ${statusPillClass}">${escapeHtml(s)}</span>
+              ${['deployed', 'running', 'stopped', 'mixed'].includes(s) ? `<button class="btn btn-ghost refresh-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Refresh lab state" title="Refresh lab state"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg></button>` : ''}
               <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details →</button>
             </div>
           </div>
@@ -1226,6 +1227,31 @@ function renderLifecycleLabs() {
         showMessage(globalStatus, error.message, 'danger');
       } finally {
         button.disabled = false;
+      }
+    });
+  });
+
+  lifecycleList.querySelectorAll('.refresh-deployment-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      const icon = button.innerHTML;
+      button.innerHTML = '<span class="loading-spinner" aria-hidden="true"></span>';
+      try {
+        await fetchJson('/api/lifecycle/deployments/refresh-state', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deploymentId: button.dataset.deploymentId })
+        });
+        await refreshLifecycleLabs();
+        showMessage(globalStatus, 'Lab state refreshed.', 'success');
+      } catch (error) {
+        showMessage(globalStatus, error.message, 'danger');
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        button.innerHTML = icon;
       }
     });
   });

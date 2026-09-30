@@ -2276,9 +2276,18 @@ app.post(
   '/api/lifecycle/deployments/refresh-state',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
+    const deploymentId = req.body?.deploymentId;
+    let rows = await fetchDeploymentRows();
+    if (deploymentId !== undefined) {
+      if (typeof deploymentId !== 'string') return res.status(400).json({ error: 'Invalid deployment ID' });
+      rows = rows.filter(row => String(row.id) === deploymentId);
+      if (!rows.length) return res.status(404).json({ error: 'deployment not found' });
+      if (!['deployed', 'running', 'stopped', 'mixed'].includes(mapDeployment(rows[0]).status)) {
+        return res.status(409).json({ error: 'Only deployed labs can be refreshed individually' });
+      }
+    }
     const resources = await fetchClusterVmResources({ context: 'lifecycle deployments refresh-state' });
     const resourceByVmid = new Map(resources.map(resource => [Number(resource.vmid), resource]));
-    const rows = await fetchDeploymentRows();
     const refreshed = [];
 
     for (const row of rows) {
