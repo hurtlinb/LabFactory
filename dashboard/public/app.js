@@ -817,6 +817,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>Hostname: ${escapeHtml(vm.name.trim())}</span>
+            ${renderBlueprintPillAction({ action: 'edit-customization', customizationKey: 'name', label: 'Edit Hostname', icon: '✎' })}
             ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'name', label: 'Remove Hostname customization', icon: '×' })}
           </span>
         `);
@@ -826,6 +827,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>${escapeHtml(diskLabel)}</span>
+            ${renderBlueprintPillAction({ action: 'edit-customization', customizationKey: 'second-disk', label: 'Edit Second Disk', icon: '✎' })}
             ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'second-disk', label: 'Remove Second Disk customization', icon: '×' })}
           </span>
         `);
@@ -834,6 +836,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill">
             <span>Timezone: ${escapeHtml(String(vm.config.timezone).trim())}</span>
+            ${renderBlueprintPillAction({ action: 'edit-customization', customizationKey: 'timezone', label: 'Edit Timezone', icon: '✎' })}
             ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'timezone', label: 'Remove Timezone customization', icon: '×' })}
           </span>
         `);
@@ -842,6 +845,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill vm-domain-pill">
             <span>DC: ${escapeHtml(vm.config.domainName)}</span>
+            ${renderBlueprintPillAction({ action: 'edit-customization', customizationKey: 'domain-controller', label: 'Edit Domain Controller', icon: '✎' })}
             ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'domain-controller', label: 'Remove Domain Controller', icon: '×' })}
           </span>
         `);
@@ -850,6 +854,7 @@ function renderCanvas() {
         vmPills.push(`
           <span class="mini-pill vm-customization-pill vm-domain-pill">
             <span>Member: ${escapeHtml(vm.config.domainName)}</span>
+            ${renderBlueprintPillAction({ action: 'edit-customization', customizationKey: 'domain-member', label: 'Edit Domain Member', icon: '✎' })}
             ${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'domain-member', label: 'Remove Domain Member', icon: '×' })}
           </span>
         `);
@@ -949,6 +954,16 @@ function renderCanvas() {
           await promptDomainMember(vmId);
         }
       }
+    });
+    card.querySelectorAll('[data-action="edit-customization"]').forEach(button => {
+      button.addEventListener('click', event => {
+        event.stopPropagation();
+        const edit = {
+          name: promptVmName, timezone: promptVmTimezone, 'second-disk': promptSecondDiskSize,
+          'domain-controller': promptDomainController, 'domain-member': promptDomainMember
+        }[button.dataset.customizationKey];
+        if (edit) void edit(vmId);
+      });
     });
     card.querySelectorAll('[data-action="edit-ansible-tasks"]').forEach(button => {
       button.addEventListener('click', () => promptAnsibleTasks(vmId, button.dataset.fileId));

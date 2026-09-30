@@ -1,0 +1,23 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: labfactory-custom-tasks-ingress
+spec:
+  podSelector:
+    matchLabels:
+      labfactory.io/custom-tasks: 'true'
+  policyTypes: [Ingress]
+  ingress: []
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: labfactory-custom-tasks-validation
+spec:
+  podSelector:
+    matchLabels:
+      labfactory.io/custom-tasks: 'true'
+      labfactory.io/task-mode: validation
+  policyTypes: [Ingress, Egress]
+  ingress: []
+  egress: []

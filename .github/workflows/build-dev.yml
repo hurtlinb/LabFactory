@@ -16,6 +16,11 @@ jobs:
         id: sha
         run: echo "sha=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Test customizations
+        run: |
+          npm ci --ignore-scripts
+          node --test tests/kubernetesTasks.test.js tests/ansibleTasks.test.js tests/ansibleTasks.ui.test.js tests/customizationRecovery.test.js
+
       - name: Login to Docker Hub
         uses: docker/login-action@v3
         with:
@@ -46,6 +51,16 @@ jobs:
           cache-from: type=registry,ref=hurtlinb/labfactory:worker-buildcache
           cache-to: type=registry,ref=hurtlinb/labfactory:worker-buildcache,mode=max
 
+      - name: Build & push custom tasks runtime
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/custom-tasks/Dockerfile
+          push: true
+          tags: hurtlinb/labfactory:custom-tasks-${{ steps.sha.outputs.sha }}
+          cache-from: type=registry,ref=hurtlinb/labfactory:custom-tasks-buildcache
+          cache-to: type=registry,ref=hurtlinb/labfactory:custom-tasks-buildcache,mode=max
+
       - name: Update gitops repo (dev)
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
@@ -63,6 +78,18 @@ jobs:
           # Update runner images in ConfigMap
           sed -i "s|TERRAFORM_RUNNER_IMAGE:.*|TERRAFORM_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${SHA}\"|" configmap-patch.yaml
           sed -i "s|ANSIBLE_RUNNER_IMAGE:.*|ANSIBLE_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${SHA}\"|" configmap-patch.yaml
+
+          # Deploy the task runtime configuration and namespaced permissions atomically.
+          cp -R "$GITHUB_WORKSPACE/deploy/kubernetes/custom-tasks" ./
+          if ! grep -q 'custom-tasks' kustomization.yaml; then
+            kustomize edit add component ./custom-tasks
+          fi
+          if grep -q '^  ANSIBLE_TASKS_IMAGE:' configmap-patch.yaml; then
+            sed -i "s|^  ANSIBLE_TASKS_IMAGE:.*|  ANSIBLE_TASKS_IMAGE: \"hurtlinb/labfactory:custom-tasks-${SHA}\"|" configmap-patch.yaml
+          else
+            printf '\n  ANSIBLE_TASKS_IMAGE: "hurtlinb/labfactory:custom-tasks-%s"\n' "${SHA}" >> configmap-patch.yaml
+          fi
+          kubectl kustomize . > /dev/null
 
           cd ../..
           git config user.email "github-actions[bot]@users.noreply.github.com"

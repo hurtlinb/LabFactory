@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: labfactory-ansible-worker
+spec:
+  template:
+    spec:
+      serviceAccountName: labfactory-ansible-worker
+      containers:
+        - name: ansible-worker
+          env:
+            - name: ANSIBLE_TASKS_BACKEND
+              value: kubernetes
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: ANSIBLE_TASKS_IMAGE_PULL_SECRETS
+              value: dockerhub-pull-secret

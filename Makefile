@@ -2,8 +2,8 @@ REGISTRY := hurtlinb/labfactory
 VERSION  := $(shell node -p "require('./package.json').version" 2>/dev/null || echo latest)
 
 .PHONY: all build push login \
-        build-dashboard build-api build-worker \
-        push-dashboard  push-api  push-worker
+        build-dashboard build-api build-worker build-custom-tasks \
+        push-dashboard  push-api  push-worker push-custom-tasks
 
 all: build push
 
@@ -12,7 +12,7 @@ login:
 
 # ── Build ────────────────────────────────────────────────────────────────────
 
-build: build-dashboard build-api build-worker
+build: build-dashboard build-api build-worker build-custom-tasks
 
 build-dashboard:
 	docker build -f docker/dashboard/Dockerfile \
@@ -30,9 +30,14 @@ build-worker:
 	  -t $(REGISTRY):worker \
 	  -t $(REGISTRY):worker-$(VERSION) .
 
+build-custom-tasks:
+	docker build -f docker/custom-tasks/Dockerfile \
+	  -t $(REGISTRY):custom-tasks \
+	  -t $(REGISTRY):custom-tasks-$(VERSION) .
+
 # ── Push ─────────────────────────────────────────────────────────────────────
 
-push: push-dashboard push-api push-worker
+push: push-dashboard push-api push-worker push-custom-tasks
 
 push-dashboard:
 	docker push $(REGISTRY):dashboard
@@ -45,3 +50,7 @@ push-api:
 push-worker:
 	docker push $(REGISTRY):worker
 	docker push $(REGISTRY):worker-$(VERSION)
+
+push-custom-tasks:
+	docker push $(REGISTRY):custom-tasks
+	docker push $(REGISTRY):custom-tasks-$(VERSION)
