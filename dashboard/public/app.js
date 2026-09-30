@@ -3588,7 +3588,6 @@ function promptAnsibleTasks(vmId, blockId) {
   dialog.ansibleEditorSession = editorSession;
   const form = document.getElementById('ansibleTasksForm');
   const message = document.getElementById('ansibleTasksValidation');
-  const validate = document.getElementById('ansibleTasksValidate');
   const cancel = document.getElementById('ansibleTasksCancel');
   const field = name => form.elements.namedItem(name);
   form.reset();
@@ -3600,9 +3599,9 @@ function promptAnsibleTasks(vmId, blockId) {
   message.textContent = 'Syntax will also be checked before customization.';
   let revision = 0;
   let busy = false;
-  form.oninput = () => { revision++; message.textContent = 'Changed: validation must be repeated.'; };
+  form.oninput = () => { revision++; message.textContent = 'Changes will be checked when you apply.'; };
   cancel.onclick = () => dialog.close();
-  async function submit(checkSyntax) {
+  async function submit() {
     if (busy || !form.reportValidity() || isCurrentBlueprintLocked()) return;
     busy = true;
     const version = revision;
@@ -3610,29 +3609,21 @@ function promptAnsibleTasks(vmId, blockId) {
     const position = Number(field('position').value) - 1;
     const buttons = [...form.querySelectorAll('button')].filter(button => button !== cancel);
     buttons.forEach(button => { button.disabled = true; });
-    message.textContent = checkSyntax ? 'Waiting for the Ansible worker (up to 55 seconds)...' : 'Checking YAML...';
+    message.textContent = 'Checking YAML...';
     try {
       const result = await fetchJson('/api/ansible-tasks/validate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ block, variablesYaml: field('variables').value, checkSyntax })
+        body: JSON.stringify({ block, variablesYaml: field('variables').value, checkSyntax: false })
       });
       if (!dialog.open || dialog.ansibleEditorSession !== editorSession || version !== revision || isCurrentBlueprintLocked()) return;
-      if (checkSyntax) {
-        const collections = result.collections.map(name => {
-          const version = result.catalog?.find(item => item.name === name)?.version;
-          return version ? `${name} ${version}` : name;
-        });
-        message.textContent = result.message + '\nCollections: ' + collections.join(', ') + '\nEnvironment: ' + result.image;
-      } else {
-        block.variables = result.variables;
-        updateVm(vmId, next => {
-          const list = (next.config.ansibleTasks || []).filter(item => item.id !== id);
-          list.splice(Math.min(position, list.length), 0, block);
-          next.config.ansibleTasks = list;
-        });
-        renderCanvas();
-        dialog.close();
-      }
+      block.variables = result.variables;
+      updateVm(vmId, next => {
+        const list = (next.config.ansibleTasks || []).filter(item => item.id !== id);
+        list.splice(Math.min(position, list.length), 0, block);
+        next.config.ansibleTasks = list;
+      });
+      renderCanvas();
+      dialog.close();
     } catch (error) {
       if (dialog.open && dialog.ansibleEditorSession === editorSession && version === revision) message.textContent = error.message;
     } finally {
@@ -3640,8 +3631,7 @@ function promptAnsibleTasks(vmId, blockId) {
       if (dialog.ansibleEditorSession === editorSession) buttons.forEach(button => { button.disabled = false; });
     }
   }
-  form.onsubmit = event => { event.preventDefault(); void submit(false); };
-  validate.onclick = () => { void submit(true); };
+  form.onsubmit = event => { event.preventDefault(); void submit(); };
   form.querySelectorAll('button').forEach(button => { button.disabled = false; });
   dialog.showModal();
   field('blockName').focus();
