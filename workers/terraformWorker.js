@@ -1,3 +1,4 @@
+import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1813,6 +1814,7 @@ export function startTerraformWorker(connection) {
                     String(vm.hostname ?? '').trim() ||
                     String(vm.domainRole ?? '').trim() ||
                     getFileUploads(vm).length ||
+                    activeAnsibleTasks(vm).length ||
                     vm.installDocker ||
                     (vm.secondDiskSizeGb && vm.secondDiskConfigure)
                   ) &&
@@ -1835,6 +1837,7 @@ export function startTerraformWorker(connection) {
                 domainRole: String(vm.domainRole ?? '').trim() || null,
                 domainName: String(vm.domainName ?? '').trim() || null,
                 fileUploads: getFileUploads(vm),
+                ansibleTasks: getAnsibleTasks(vm),
                 installDocker: Boolean(vm.installDocker),
                 secondDiskSizeGb: vm.secondDiskSizeGb ?? null,
                 secondDiskConfigure: Boolean(vm.secondDiskConfigure),

@@ -51,19 +51,34 @@ services:
     image: lab-orchestrator-demo:latest
     restart: on-failure
     depends_on:
-      - redis
-      - postgres
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_started
+      custom-tasks-image:
+        condition: service_completed_successfully
     env_file:
       - .env
     volumes:
       - ./ansible:/usr/src/app/ansible:cached
       - blueprint-files:/usr/src/app/data/blueprint-files:ro
+      - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - DATABASE_URL=postgresql://labfactory:labfactory@postgres:5432/labfactory
+      - ANSIBLE_TASKS_IMAGE=${ANSIBLE_TASKS_IMAGE:-labfactory/custom-tasks:1}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD}
     command: npm run ansible-worker
+
+  # Built by `docker compose build`; worker launches short-lived isolated containers.
+  custom-tasks-image:
+    build:
+      context: .
+      dockerfile: docker/custom-tasks/Dockerfile
+    image: ${ANSIBLE_TASKS_IMAGE:-labfactory/custom-tasks:1}
+    network_mode: none
+    entrypoint: ["/bin/true"]
 
   dashboard:
     build: .

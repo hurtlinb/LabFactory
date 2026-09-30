@@ -546,6 +546,10 @@ function renderTemplates() {
   const custHtml = `
     <div class="vm-lib-group">
       <p class="vm-lib-group-label">Customization</p>
+      <article class="vm-lib-cust" draggable="true" data-customization-key="ansible-tasks">
+        <span class="vm-lib-cust-icon" aria-hidden="true">&gt;_</span>
+        <span class="vm-lib-cust-name">Ansible Tasks</span>
+      </article>
       <article class="vm-lib-cust" draggable="true" data-customization-key="file-upload">
         <span class="vm-lib-cust-icon" aria-hidden="true">&#8593;</span>
         <span class="vm-lib-cust-name">Upload File</span>
@@ -797,6 +801,9 @@ function renderCanvas() {
     .map(vm => {
       const template = state.templates.find(item => item.id === vm.templateId);
       const vmPills = [];
+      for (const [index, block] of (vm.config?.ansibleTasks || []).entries()) {
+        vmPills.push(`<span class="mini-pill vm-customization-pill"><span>Ansible ${index + 1}: ${escapeHtml(block.name)}${block.enabled === false ? ' (disabled)' : ''}</span>${renderBlueprintPillAction({ action: 'edit-ansible-tasks', fileId: block.id, label: 'Edit Ansible tasks', icon: 'Edit' })}${renderBlueprintPillAction({ action: 'remove-customization', customizationKey: 'ansible-tasks', fileId: block.id, label: 'Remove Ansible tasks', icon: '×' })}</span>`);
+      }
       for (const file of getVmFileUploads(vm.config)) {
         vmPills.push(`<span class="mini-pill vm-customization-pill"><span>File: ${escapeHtml(file.name)} &rarr; ${escapeHtml(file.directory)}</span>${renderBlueprintPillAction({ action: "edit-file-upload", fileId: file.id, label: "Edit uploaded file", icon: "Edit" })}${renderBlueprintPillAction({ action: "remove-customization", customizationKey: "file-upload", fileId: file.id, label: "Remove uploaded file", icon: "x" })}</span>`);
       }
@@ -905,6 +912,7 @@ function renderCanvas() {
           ? activeDragItem.value
           : event.dataTransfer.getData('application/x-labfactory-customization-key');
       if (customizationKey === 'file-upload') await promptFileUpload(vmId);
+      if (customizationKey === 'ansible-tasks') promptAnsibleTasks(vmId);
       if (customizationKey === 'name') {
         await promptVmName(vmId);
       }
@@ -942,12 +950,19 @@ function renderCanvas() {
         }
       }
     });
+    card.querySelectorAll('[data-action="edit-ansible-tasks"]').forEach(button => {
+      button.addEventListener('click', () => promptAnsibleTasks(vmId, button.dataset.fileId));
+    });
     card.querySelectorAll('[data-action="edit-file-upload"]').forEach(button => {
       button.addEventListener('click', () => promptFileUpload(vmId, button.dataset.fileId));
     });
     card.querySelectorAll('[data-action="remove-customization"]').forEach(button => {
       button.addEventListener('click', event => {
         event.stopPropagation();
+        if (button.dataset.customizationKey === 'ansible-tasks') {
+          updateVm(vmId, vm => { vm.config.ansibleTasks = (vm.config.ansibleTasks || []).filter(block => block.id !== button.dataset.fileId); });
+          renderCanvas();
+        }
         if (button.dataset.customizationKey === 'file-upload') {
           updateVm(vmId, vm => setVmFileUploads(vm, getVmFileUploads(vm.config).filter(file => file.id !== button.dataset.fileId)));
           renderCanvas();
@@ -1477,7 +1492,8 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
           <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
           <td class="vm-state-name-cell">
             <strong>${escapeHtml(vm.name)}</strong>
-            ${vm.customization ? `<span class="muted">Customization: ${escapeHtml(vm.customization.status)} · ${escapeHtml(vm.customization.step || '')}${vm.customization.attempt ? ` · attempt ${Number(vm.customization.attempt)}/4` : ''}</span>${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
+            ${vm.customization ? `<span class="muted">Customization: ${escapeHtml(vm.customization.status)} · ${escapeHtml(vm.customization.step || '')}${vm.customization.attempt ? ` · attempt ${Number(vm.customization.attempt)}/${Number(vm.customization.maxAttempts || 4)}` : ''}</span>${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
+            ${Object.values(vm.customization?.taskResults || {}).map(result => `<details class="muted"><summary>Ansible: ${escapeHtml(result.name)} — ${escapeHtml(result.status)}${result.durationMs != null ? ` (${(result.durationMs / 1000).toFixed(1)}s)` : ''}</summary><pre>${escapeHtml(result.error || result.output || 'Running...')}</pre></details>`).join('')}
             <span class="muted">${vm.node ? escapeHtml(vm.node) : ''}</span>
           </td>
           <td>${vm.vmid}</td>
@@ -3553,4 +3569,80 @@ async function promptFileUpload(vmId, fileId = null) {
     dialog.querySelector('.file-limit').textContent = 'Windows and Linux - maximum ' + Math.round(maxBytes / 1024 / 1024) + ' MiB per file.';
     submit.disabled = false;
   } catch (error) { status.textContent = error.message; }
+}
+
+
+function promptAnsibleTasks(vmId, blockId) {
+  if (isCurrentBlueprintLocked()) return;
+  const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
+  if (!vm) return;
+  const blocks = vm.config?.ansibleTasks || [];
+  if (!blockId && blocks.length >= 20) {
+    showMessage(globalStatus, 'A VM supports at most 20 Ansible task blocks.', 'danger', 4000);
+    return;
+  }
+  const existing = blocks.find(block => block.id === blockId);
+  const id = existing?.id || crypto.randomUUID();
+  const dialog = document.getElementById('ansibleTasksDialog');
+  const editorSession = Symbol('ansible-editor');
+  dialog.ansibleEditorSession = editorSession;
+  const form = document.getElementById('ansibleTasksForm');
+  const message = document.getElementById('ansibleTasksValidation');
+  const validate = document.getElementById('ansibleTasksValidate');
+  const cancel = document.getElementById('ansibleTasksCancel');
+  const field = name => form.elements.namedItem(name);
+  form.reset();
+  field('blockName').value = existing?.name || '';
+  field('yaml').value = existing?.yaml || 'tasks:\n  - name: Example\n    ansible.builtin.debug:\n      msg: Hello\n';
+  field('variables').value = JSON.stringify(existing?.variables || {}, null, 2);
+  field('enabled').checked = existing?.enabled !== false;
+  field('position').value = existing ? blocks.indexOf(existing) + 1 : blocks.length + 1;
+  message.textContent = 'Syntax will also be checked before customization.';
+  let revision = 0;
+  let busy = false;
+  form.oninput = () => { revision++; message.textContent = 'Changed: validation must be repeated.'; };
+  cancel.onclick = () => dialog.close();
+  async function submit(checkSyntax) {
+    if (busy || !form.reportValidity() || isCurrentBlueprintLocked()) return;
+    busy = true;
+    const version = revision;
+    const block = { id, name: field('blockName').value.trim(), yaml: field('yaml').value, enabled: field('enabled').checked };
+    const position = Number(field('position').value) - 1;
+    const buttons = [...form.querySelectorAll('button')].filter(button => button !== cancel);
+    buttons.forEach(button => { button.disabled = true; });
+    message.textContent = checkSyntax ? 'Waiting for the Ansible worker (up to 55 seconds)...' : 'Checking YAML...';
+    try {
+      const result = await fetchJson('/api/ansible-tasks/validate', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ block, variablesYaml: field('variables').value, checkSyntax })
+      });
+      if (!dialog.open || dialog.ansibleEditorSession !== editorSession || version !== revision || isCurrentBlueprintLocked()) return;
+      if (checkSyntax) {
+        const collections = result.collections.map(name => {
+          const version = result.catalog?.find(item => item.name === name)?.version;
+          return version ? `${name} ${version}` : name;
+        });
+        message.textContent = result.message + '\nCollections: ' + collections.join(', ') + '\nEnvironment: ' + result.image;
+      } else {
+        block.variables = result.variables;
+        updateVm(vmId, next => {
+          const list = (next.config.ansibleTasks || []).filter(item => item.id !== id);
+          list.splice(Math.min(position, list.length), 0, block);
+          next.config.ansibleTasks = list;
+        });
+        renderCanvas();
+        dialog.close();
+      }
+    } catch (error) {
+      if (dialog.open && dialog.ansibleEditorSession === editorSession && version === revision) message.textContent = error.message;
+    } finally {
+      busy = false;
+      if (dialog.ansibleEditorSession === editorSession) buttons.forEach(button => { button.disabled = false; });
+    }
+  }
+  form.onsubmit = event => { event.preventDefault(); void submit(false); };
+  validate.onclick = () => { void submit(true); };
+  form.querySelectorAll('button').forEach(button => { button.disabled = false; });
+  dialog.showModal();
+  field('blockName').focus();
 }

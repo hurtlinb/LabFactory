@@ -846,6 +846,26 @@
     </form>
   </dialog>
 
+  <dialog id="ansibleTasksDialog" class="modal-dialog ansible-tasks-dialog">
+    <form id="ansibleTasksForm" class="modal-card">
+      <h3>Ansible Tasks</h3>
+      <p class="muted modal-help">Runs after all standard customizations and domain joins have succeeded. Blocks run in order on this VM; no order is guaranteed between VMs.</p>
+      <label class="field"><span>Name</span><input name="blockName" required maxlength="120"></label>
+      <div class="inline-actions">
+        <label><input name="enabled" type="checkbox" checked> Enabled</label>
+        <label>Position <input name="position" type="number" min="1" max="20" required></label>
+      </div>
+      <label class="field"><span>Tasks (YAML)</span><textarea name="yaml" rows="14" required maxlength="65536" spellcheck="false" placeholder="tasks:&#10;  - name: Example&#10;    ansible.builtin.debug:&#10;      msg: Hello"></textarea></label>
+      <label class="field"><span>Variables (YAML mapping)</span><textarea name="variables" rows="4" maxlength="16384" spellcheck="false" placeholder="share_root: 'C:\Shares'"></textarea></label>
+      <p class="muted modal-help">Use fully qualified module names. Variables are saved in the blueprint: do not enter passwords here. Includes, roles, delegation and asynchronous tasks are not supported.</p>
+      <p id="ansibleTasksValidation" class="modal-help" role="status" aria-live="polite">Syntax will also be checked before customization.</p>
+      <div class="inline-actions">
+        <button id="ansibleTasksCancel" class="btn btn-ghost" type="button">Cancel</button>
+        <button id="ansibleTasksValidate" class="btn" type="button">Validate with Ansible</button>
+        <button class="btn btn-primary" type="submit">Apply</button>
+      </div>
+    </form>
+  </dialog>
   <script type="module" src="/app.js"></script>
 </body>
 </html>

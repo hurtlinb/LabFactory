@@ -354,6 +354,46 @@ docker compose down -v
   - `terraform/.terraform-vars.json`
   - any local `terraform.tfstate*` artifacts if present
 
+### Ansible Tasks customization
+
+Drag **Ansible Tasks** onto a VM to add an ordered block of YAML tasks. Each block has a name, an enabled checkbox, a position and a YAML mapping of variables. Add the customization again for another block; use its **Edit** button to change its position or content. **Apply** checks YAML and the supported structure; save the blueprint to persist it. Existing deployed-blueprint locks apply.
+
+Example Windows DNS fault (attach to the DNS server):
+
+```yaml
+tasks:
+  - name: Deliberately point files at a misspelled hostname
+    ansible.windows.win_dns_record:
+      zone: alpinatech.local
+      name: files
+      type: CNAME
+      value: srv1.alpintech.local
+      state: present
+```
+
+Use fully qualified module names. Supply custom values such as `share_root: 'C:\Shares'` in **Variables**; quote Windows paths with single quotes. Variables are ordinary blueprint configuration, not a secret store. Guest credentials are supplied by LabFactory. A list of tasks or a mapping with a single `tasks` key is accepted. Conditions, loops, registered variables and `block`/`rescue`/`always` are supported. Full playbooks, external includes/roles, delegation, asynchronous tasks and overrides of connection variables are not supported. Limits: 20 blocks per VM, 64 KiB YAML and 16 KiB variables per block.
+
+**Validate with Ansible** submits a syntax check to the Ansible worker (up to 55 seconds; a busy or paused worker may require trying again). It does not connect to guests or apply tasks. Syntax is checked again in the same execution image before customization; syntax validation does not verify guest prerequisites or all runtime expressions. There is no automatic check-mode run or lint requirement. Changes invalidate the editor's displayed validation result.
+
+All enabled blocks run automatically at the very end of customization, after Linux/Windows setup, uploaded files, reboots and domain creation/join have succeeded across the lab. A failed standard step or failed guest readiness blocks the custom phase. Blocks execute sequentially within a VM; up to five VMs execute concurrently, with no ordering guarantee between VMs. There is no on-demand execution action. A successfully injected fault counts as success even if the affected service is now broken.
+
+Each successful block has a content-based checkpoint. **Resume incomplete customizations** preserves completed standard steps and blocks. A failed block is not automatically retried; an explicit resume reruns that whole block, including tasks that may already have taken effect. Design blocks accordingly. VM details show block status, duration and bounded output. `no_log: true` should be used for tasks handling sensitive output. A block has a 30-minute timeout.
+
+Collections are pinned centrally in `ansible/collections.json` (JSON is also valid Ansible requirements YAML). The image includes `ansible.windows` 2.6.0 with `win_dns_record`, and `community.docker` 3.13.3; there is no runtime Galaxy installation. To use `docker_container`, configure Docker on the Linux VM first (the Docker CE customization also installs `python3-requests`). Modules can require additional guest packages or services.
+
+Build and restart the Compose services after upgrading:
+
+```sh
+docker compose build
+docker compose up -d
+```
+
+Compose builds `labfactory/custom-tasks:1` from `docker/custom-tasks/Dockerfile`. The Ansible worker needs the Docker CLI and Docker socket; the dashboard does not. Each validation/execution gets its own container, a read-only root filesystem, a temporary workspace volume and `/tmp`, limited CPU/memory/PIDs, no Linux capabilities and no application secrets or host mounts. Execution receives only that VM's connection credentials. Validation has networking disabled; execution uses the `bridge` network by default, which must reach the lab guests. Containers and their temporary volumes are removed on success, failure and cancellation. If Docker becomes unavailable during cleanup, the worker logs the container name for administrator cleanup.
+
+Outside Compose, build the same image with `docker build -f docker/custom-tasks/Dockerfile -t labfactory/custom-tasks:1 .` and configure `ANSIBLE_TASKS_IMAGE` and optionally `ANSIBLE_TASKS_NETWORK` on the worker. This feature uses the Docker-backed customization worker; the separate Kubernetes execution-runner scaffold is unchanged. Only trusted administrators should have access to the worker's Docker socket. Container networking does not restrict tasks to a particular subnet; use host/network policies if that isolation is required.
+
+Tests: `node --test tests/ansibleTasks.test.js tests/ansibleTasks.ui.test.js tests/customizationRecovery.test.js`. With the execution image built and Docker running, enable the real container checks with `ANSIBLE_TASKS_DOCKER_TEST=1` when running `tests/ansibleTasks.docker.test.js`. The HTTP integration test (`tests/ansibleTasks.http.test.js`, enabled by `ANSIBLE_TASKS_HTTP_DOCKER_TEST=1`) creates and removes isolated PostgreSQL, Redis, dashboard and worker containers; first build the application as `labfactory/implementation-check:local` or set `ANSIBLE_TASKS_TEST_APP_IMAGE`.
+
 ### Upload File customization
 
 Drag **Upload File** onto a Windows or Linux VM, choose a file and an absolute destination directory (for example `C:\LabFiles` or `/opt/lab/files`). **Save and upload** saves the blueprint and streams the file to application storage with upload progress. The lab guest password must be set. Add the customization again to attach another file to the same VM. Each file has its own destination, edit button and remove button. Existing single-file configurations remain supported. Removing the customization takes effect when the blueprint is saved.

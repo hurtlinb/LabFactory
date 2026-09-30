@@ -1,13 +1,19 @@
-FROM node:20-bullseye
+FROM node:20-bookworm
+
+COPY --from=docker:27.5.1-cli /usr/local/bin/docker /usr/local/bin/docker
+ENV PATH="/opt/ansible/bin:${PATH}"
+
+COPY ansible/collections.json /opt/ansible-collections.json
 
 # Install Terraform and Ansible so the demo runner has the binaries available.
 RUN apt-get update \
-  && apt-get install -y wget unzip python3-pip sshpass \
+  && apt-get install -y wget unzip python3-venv sshpass \
   && wget -q -O /tmp/terraform.zip https://releases.hashicorp.com/terraform/1.5.4/terraform_1.5.4_linux_amd64.zip \
   && unzip /tmp/terraform.zip -d /usr/local/bin \
+  && python3 -m venv /opt/ansible \
   && pip3 install --no-cache-dir --upgrade pip setuptools wheel \
-  && pip3 install --no-cache-dir "ansible-core>=2.15,<2.16" pywinrm \
-  && ansible-galaxy collection install "ansible.windows:==2.3.0" "community.general:==8.5.0" "microsoft.ad:==1.7.1" "ansible.posix:==1.5.4" \
+  && pip3 install --no-cache-dir "ansible-core==2.15.13" pywinrm \
+  && ansible-galaxy collection install -r /opt/ansible-collections.json \
   && rm /tmp/terraform.zip \
   && apt-get clean \
   && rm -rf /var/lib/apt/lists/*

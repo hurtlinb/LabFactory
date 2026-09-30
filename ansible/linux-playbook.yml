@@ -72,6 +72,7 @@
           - containerd.io
           - docker-buildx-plugin
           - docker-compose-plugin
+          - python3-requests
         state: present
         update_cache: true
       when: install_docker | default(false) | bool

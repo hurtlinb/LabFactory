@@ -1,3 +1,5 @@
+import { activeAnsibleTasks } from '../lib/ansibleTasks.js';
+import { runAnsibleTaskBlock } from '../lib/runAnsibleTasks.js';
 import { getFileUploads, resolveFileUpload } from '../lib/blueprintFiles.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -263,6 +265,11 @@ export function startAnsibleWorker(connection) {
 
       let fileStagingDirectory;
       try {
+        if (job.name === 'validate-ansible-tasks') {
+          if (Date.now() > job.data.expiresAt) throw new Error('Validation expired; please validate again');
+          const result = await runAnsibleTaskBlock({ block: job.data.block, syntaxOnly: true, signal: abortController.signal });
+          return { valid: true, image: result.image, message: 'Ansible syntax valid. Runtime prerequisites are not checked.' };
+        }
         console.log(`Ansible job ${job.id} started for deployment ${deploymentLabel} (customize)`);
         if (extraVars.windows_admin_password !== blueprintWindowsAdminPassword) {
           throw new Error('Ansible customization password does not match blueprint windowsAdminPassword');
@@ -271,14 +278,14 @@ export function startAnsibleWorker(connection) {
           target =>
             target &&
             target.ipAddress &&
-            (getFileUploads(target).length || target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
+            (activeAnsibleTasks(target).length || getFileUploads(target).length || target.timezone || target.hostname || target.domainRole || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             ['windows11', 'windows-server'].includes(String(target.osType ?? ''))
         );
         const linuxTimezoneTargets = extraVars.timezone_targets.filter(
           target =>
             target &&
             target.ipAddress &&
-            (getFileUploads(target).length || target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
+            (activeAnsibleTasks(target).length || getFileUploads(target).length || target.timezone || target.hostname || target.installDocker || (target.secondDiskSizeGb && target.secondDiskConfigure)) &&
             isLinuxOsType(target.osType)
         );
         if (!windowsTimezoneTargets.length && !linuxTimezoneTargets.length) {
@@ -367,18 +374,20 @@ export function startAnsibleWorker(connection) {
         return { status: 'ansible-done' };
       } catch (error) {
         console.error(`Ansible job ${job.id} failed for deployment ${deploymentLabel} (customize)`, error);
-        await safeUpdateDeploymentStatus(job.data.deploymentId, 'failed', {
+        if (job.data.deploymentId) await safeUpdateDeploymentStatus(job.data.deploymentId, 'failed', {
           action: 'customize',
           jobId: String(job.id),
           runId: job.data.runId
         });
+        if (job.name === 'validate-ansible-tasks') throw new Error(commandFailure(error));
         throw error;
       } finally {
         if (fileStagingDirectory) await fs.rm(fileStagingDirectory, { recursive: true, force: true });
         activeAbortControllers.delete(String(job.id));
       }
     },
-    { connection, concurrency: 1 }
+    // Arbitrary task blocks must not be replayed automatically after a lost worker lock.
+    { connection, concurrency: 1, maxStalledCount: 0 }
   );
 
   worker.on('stalled', async (jobId) => {
@@ -411,7 +420,7 @@ export async function resetStalledAnsibleDeployments() {
   try {
     const result = await dbPool.query(
       `UPDATE lab_deployments
-         SET status = 'failed', last_action = 'worker-restarted', updated_at = NOW()
+         SET status = 'failed', last_action = 'customize', updated_at = NOW()
        WHERE status = 'customizing'`
     );
     if (result.rowCount > 0) {

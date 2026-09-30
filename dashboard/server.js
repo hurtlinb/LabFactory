@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
 import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
 import express from 'express';
 import { createRequire } from 'node:module';
@@ -24,7 +25,7 @@ import {
 } from '../lib/terraformSettings.js';
 
 const require = createRequire(import.meta.url);
-const { Queue } = require('bullmq');
+const { Queue, QueueEvents } = require('bullmq');
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const packageJson = require(path.resolve(__dirname, '../package.json'));
 
@@ -206,6 +207,9 @@ const blueprintVmSchema = z
     config: z.record(z.string(), z.unknown()).optional().default({})
   })
   .superRefine((vm, ctx) => {
+    try { getAnsibleTasks(vm.config); } catch (error) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['config', 'ansibleTasks'], message: error.message });
+    }
     try {
       const files = getFileUploads(vm.config);
       for (const file of files) validateFileUpload(file);
@@ -415,7 +419,7 @@ const validateBlueprintGuestPassword = async payload => {
     if (!isLinuxOsType(osType)) {
       return false;
     }
-    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall || getFileUploads(vm.config).length);
+    return Boolean(resolveVmCustomHostname(vm) || String(vm.config?.timezone ?? '').trim() || vm.config?.dockerInstall || getFileUploads(vm.config).length || activeAnsibleTasks(vm.config).length);
   });
 
   if (payload.guestPasswordMode !== 'per-workstation' && (hasWindowsVm || hasLinuxCustomization) && !String(payload.windowsAdminPassword ?? '').trim()) {
@@ -1238,6 +1242,7 @@ const buildTerraformBlueprintPayload = blueprint => {
         customNameEnabled: isVmCustomNameEnabled(vm),
         timezone: String(vm.config?.timezone ?? '').trim() || null,
         fileUploads: getFileUploads(vm.config),
+        ansibleTasks: getAnsibleTasks(vm.config),
         installDocker: Boolean(vm.config?.dockerInstall)
       };
     })
@@ -1374,6 +1379,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         domainRole: String(vm.config?.domainRole ?? '').trim() || null,
         domainName: String(vm.config?.domainName ?? '').trim() || null,
         fileUploads: getFileUploads(vm.config),
+        ansibleTasks: getAnsibleTasks(vm.config),
         installDocker: Boolean(vm.config?.dockerInstall),
         secondDiskSizeGb: vm.config?.secondDiskSizeGb ? Number(vm.config.secondDiskSizeGb) : null,
         secondDiskConfigure: vm.config?.secondDiskConfigure !== false,
@@ -1921,7 +1927,7 @@ const denyDeploymentManagement = res => {
 };
 
 app.use(auth.attachUser);
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 app.use(auth.requireAuth);
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -2007,6 +2013,28 @@ app.get(
     res.json({ windows, linux });
   })
 );
+
+app.post('/api/ansible-tasks/validate', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(async (req, res) => {
+  const block = req.body?.block;
+  if (block && typeof block === 'object' && !Array.isArray(block) && req.body.variablesYaml !== undefined) block.variables = parseTaskYaml(req.body.variablesYaml || '{}');
+  const parsed = validateTaskBlock(block);
+  const details = { collections: parsed.collections, catalog: collectionCatalog.collections, variables: parsed.variables };
+  if (req.body.checkSyntax === false) return res.json({ valid: true, ...details });
+  const events = new QueueEvents(queueNames.ansible, { connection });
+  let job;
+  try {
+    await events.waitUntilReady();
+    job = await queues.ansible.add('validate-ansible-tasks', {
+      block, expiresAt: Date.now() + 60000
+    }, { attempts: 1, removeOnComplete: 50, removeOnFail: 50 });
+    const result = await job.waitUntilFinished(events, 55000);
+    res.json({ ...result, ...details });
+  } catch (error) {
+    // A waiting validation must not start much later after the editor has timed out.
+    if (job) await job.remove().catch(() => {});
+    res.status(422).json({ error: error.message });
+  } finally { await events.close(); }
+}));
 
 app.get(
   '/api/classrooms',
