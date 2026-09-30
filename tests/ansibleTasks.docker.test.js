@@ -1,9 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { runAnsibleTaskBlock } from '../lib/runAnsibleTasks.js';
 
 const enabled = process.env.ANSIBLE_TASKS_DOCKER_TEST === '1';
 const makeBlock = yaml => ({ id: 'docker-test', name: 'Container integration test', yaml });
+
+test('SSH initializes under the Kubernetes non-root UID on a read-only filesystem', { skip: !enabled }, async () => {
+  const { stdout } = await promisify(execFile)('docker', [
+    'run', '--rm', '--user', '1000:1000', '--read-only', '--tmpfs', '/tmp', '--network', 'none',
+    '--entrypoint', 'ssh', process.env.ANSIBLE_TASKS_IMAGE || 'labfactory/custom-tasks:1',
+    '-G', 'target'
+  ]);
+  assert.match(stdout, /^user ansible$/m);
+  assert.match(stdout, /^hostname target$/m);
+});
 
 test('real image resolves Windows DNS/ACL and Docker modules without contacting guests', { skip: !enabled }, async () => {
   const result = await runAnsibleTaskBlock({ syntaxOnly: true, block: makeBlock(`tasks:

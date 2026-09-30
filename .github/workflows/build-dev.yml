@@ -61,6 +61,13 @@ jobs:
           cache-from: type=registry,ref=hurtlinb/labfactory:custom-tasks-buildcache
           cache-to: type=registry,ref=hurtlinb/labfactory:custom-tasks-buildcache,mode=max
 
+      - name: Test custom tasks runtime
+        env:
+          ANSIBLE_TASKS_DOCKER_TEST: '1'
+          ANSIBLE_TASKS_BACKEND: docker
+          ANSIBLE_TASKS_IMAGE: hurtlinb/labfactory:custom-tasks-${{ steps.sha.outputs.sha }}
+        run: node --test tests/ansibleTasks.docker.test.js
+
       - name: Update gitops repo (dev)
         env:
           GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}
