@@ -2,6 +2,31 @@
 
 All notable changes to LabFactory are documented here.
 
+## [1.8.0] — 2026-09-30
+
+### Ajouts
+- Customization « Ansible Tasks » en Beta : blocs de tâches YAML par VM, avec nom, variables, activation et ordre d'exécution, pour appliquer des configurations ou provoquer volontairement des pannes.
+- Exécution des blocs en dernier dans l'étape de personnalisation, après les configurations standard, les redémarrages et les copies de fichiers ; aucune exécution à la demande.
+- Validation du YAML et de la structure à l'enregistrement du bloc, puis vérification de syntaxe avec Ansible avant les personnalisations. Collections disponibles dans un catalogue avec versions fixes, notamment Windows, Active Directory et Docker.
+- Suivi des résultats et points de reprise par bloc : les blocs réussis sont conservés lors d'une reprise et les tâches en échec ne sont pas réessayées automatiquement.
+- Exécution isolée dans des Jobs Kubernetes temporaires sur le cluster, ou dans des conteneurs Docker hors Kubernetes, avec limites de ressources et de durée, collecte des logs et nettoyage automatique.
+
+### Interface
+- Modification des customizations existantes depuis leur bouton d'édition : hostname, timezone, second disque, contrôleur de domaine et jonction au domaine, en complément des fichiers et des tâches Ansible. Le verrouillage des blueprints déployés reste applicable.
+- Bandeau « Beta » dans l'éditeur Ansible et validation intégrée au parcours, sans bouton « Validate with Ansible ».
+
+### Corrections
+- Attente du redémarrage Windows effectif avant de poursuivre les personnalisations : une réponse WinRM reçue avant l'arrêt ne peut plus déclencher prématurément les tâches Ansible.
+- Inclusion du catalogue des collections dans l'image du dashboard pour éviter un échec au démarrage.
+- Compatibilité des tâches personnalisées avec les clusters Kubernetes sans daemon Docker dans le worker ; publication de l'image dédiée et configuration des permissions via GitOps.
+- Création de l'utilisateur non privilégié utilisé par les pods Ansible pour permettre les connexions SSH, et correction des permissions des fichiers transmis aux conteneurs Docker sous Linux.
+- Tests d'intégration de l'image Ansible dans les pipelines avant la mise à jour GitOps, avec diagnostics détaillés en cas d'échec.
+
+### Compatibilité
+- Les tâches s'exécutent sur la VM ciblée : leurs prérequis doivent y être installés. Pour lancer un conteneur avec `community.docker.docker_container`, activer la customization « Docker CE » ou fournir une VM disposant déjà d'un moteur Docker opérationnel.
+
+---
+
 ## [1.7.10] — 2026-09-29
 
 ### Ajouts
