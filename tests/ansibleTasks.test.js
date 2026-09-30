@@ -125,7 +125,7 @@ test('container receives only target credentials; no mounts or application envir
       assert.equal(command, 'docker'); assert.equal(options.quiet, true);
       assert.equal(options.env, undefined);
       if (args[0] === 'cp') {
-        copiedDirectory = args[1].slice(0, -2);
+        copiedDirectory = path.dirname(args[1]);
         const inventory = JSON.parse(await fs.readFile(path.join(copiedDirectory, 'inventory.json'), 'utf8'));
         assert.deepEqual(Object.keys(inventory.all.hosts), ['target']);
         assert.equal(inventory.all.hosts.target.ansible_host, '192.0.2.5');
@@ -146,7 +146,7 @@ test('syntax validation has no network or guest password and failed containers a
     calls.push(args);
     if (args[0] === 'create') { assert(args.includes('none')); assert(args.includes('--syntax-check')); }
     if (args[0] === 'cp') {
-      const inventory = await fs.readFile(path.join(args[1], 'inventory.json'), 'utf8');
+      const inventory = await fs.readFile(path.join(path.dirname(args[1]), 'inventory.json'), 'utf8');
       assert(!inventory.includes('secret'));
     }
     if (args[0] === 'start') throw Error('syntax error');
