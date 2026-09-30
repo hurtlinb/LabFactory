@@ -11,7 +11,9 @@ COPY --from=deps /usr/src/app/package*.json ./
 COPY dashboard ./dashboard
 COPY config ./config
 COPY lib ./lib
+COPY ansible/collections.json ./ansible/collections.json
 COPY db ./db
+RUN node --input-type=module -e "await import('./lib/ansibleTasks.js')"
 COPY CHANGELOG.md ./
 ARG BUILD_TAG
 ENV NODE_ENV=production
