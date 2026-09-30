@@ -2,7 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { runAnsibleTaskBlock } from '../lib/runAnsibleTasks.js';
+import { runAnsibleTaskBlock as executeTaskBlock } from '../lib/runAnsibleTasks.js';
+
+async function runAnsibleTaskBlock(options) {
+  try { return await executeTaskBlock(options); }
+  catch (error) {
+    error.message += `\n${error.stdout || ''}\n${error.stderr || ''}`;
+    throw error;
+  }
+}
 
 const enabled = process.env.ANSIBLE_TASKS_DOCKER_TEST === '1';
 const makeBlock = yaml => ({ id: 'docker-test', name: 'Container integration test', yaml });
