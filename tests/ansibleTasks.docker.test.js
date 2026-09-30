@@ -47,7 +47,8 @@ test('real image resolves Windows DNS/ACL and Docker modules without contacting 
 });
 
 test('real image rejects an unknown module', { skip: !enabled }, async () => {
-  await assert.rejects(runAnsibleTaskBlock({ syntaxOnly: true, block: makeBlock('- ansible.windows.nonexistent_module: {}') }));
+  await assert.rejects(runAnsibleTaskBlock({ syntaxOnly: true, block: makeBlock('- ansible.windows.nonexistent_module: {}') }),
+    error => /couldn't resolve module\/action.*ansible.windows.nonexistent_module/.test(error.stderr));
 });
 
 test('real execution uses task variables and register within one block without exposing application environment', { skip: !enabled }, async () => {
