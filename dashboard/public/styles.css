@@ -1431,6 +1431,7 @@ input:focus, textarea:focus, select:focus {
 .ansible-tasks-dialog { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
 .ansible-tasks-dialog textarea { width: 100%; resize: vertical; font-family: monospace; tab-size: 2; }
 .ansible-tasks-dialog input[type="number"] { width: 5em; }
+.ansible-beta-banner { display: flex; align-items: center; gap: 8px; margin: 0; padding: 8px 12px; border-radius: var(--r-sm); background: var(--warning-soft); color: var(--warning); font-size: 12px; }
 #ansibleTasksValidation { white-space: pre-wrap; overflow-wrap: anywhere; }
 .vm-state-name-cell details pre { max-width: 70ch; max-height: 16rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
 
