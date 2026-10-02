@@ -1,4 +1,27 @@
-﻿const state = {
+import { labStatusLabel, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
+
+const UI_ICONS = {
+  "close": "<path d=\"m6 6 12 12M6 18 18 6\"/>",
+  "delete": "<path d=\"M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7\"/>",
+  "edit": "<path d=\"m16 3 5 5L8 21H3v-5ZM14 5l5 5\"/>",
+  "refresh": "<path d=\"M20 7v5h-5M4 17v-5h5M6 7a7 7 0 0 1 12-1l2 3M4 15l2 3a7 7 0 0 0 12-1\"/>",
+  "start": "<path d=\"m7 4 14 8-14 8Z\"/>",
+  "stop": "<rect x=\"5\" y=\"5\" width=\"14\" height=\"14\" rx=\"1\"/>",
+  "upload": "<path d=\"M12 16V3m-5 5 5-5 5 5M4 16v5h16v-5\"/>",
+  "check": "<path d=\"m5 12 4 4L19 6\"/>",
+  "warning": "<path d=\"m12 3 10 18H2ZM12 9v4M12 17h.01\"/>",
+  "clock": "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M12 7v5l3 2\"/>",
+  "disk": "<rect x=\"3\" y=\"5\" width=\"18\" height=\"14\" rx=\"2\"/><path d=\"M3 13h18M7 16h.01M11 16h.01\"/>",
+  "name": "<path d=\"M4 5h16M12 5v14M8 19h8\"/>",
+  "arrow": "<path d=\"M4 12h16m-6-6 6 6-6 6\"/>",
+  "terminal": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"m7 8 4 4-4 4M14 16h3\"/>"
+};
+
+function uiIcon(name) {
+  return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${UI_ICONS[name] || UI_ICONS.warning}</svg>`;
+}
+
+const state = {
   classrooms: [],
   templates: [],
   blueprints: [],
@@ -200,33 +223,35 @@ function getBlueprintLockMessage(blueprint = state.currentBlueprint) {
 }
 
 function showMessage(target, message, status = 'success', timeout = 3200) {
-  if (target === globalStatus && timeout === 3200) {
-    timeout = 3000;
-  }
-  target.textContent = message;
+  clearTimeout(statusTimers.get(target));
+  target.replaceChildren();
   target.dataset.state = status;
+  target.setAttribute('role', status === 'danger' ? 'alert' : 'status');
+  const text = document.createElement('span');
+  text.textContent = message;
+  target.append(text);
+  const close = document.createElement('button');
+  close.type = 'button'; close.className = 'icon-btn'; close.setAttribute('aria-label', 'Dismiss message');
+  close.innerHTML = uiIcon('close'); close.onclick = () => { target.hidden = true; };
+  target.append(close);
   target.hidden = false;
   target.classList.toggle('toast-message', target === globalStatus);
-  const existingTimer = statusTimers.get(target);
-  if (existingTimer) {
-    clearTimeout(existingTimer);
-  }
-  const timer = window.setTimeout(() => {
-    target.hidden = true;
-    if (target === globalStatus) {
-      target.classList.remove('toast-message');
-    }
-  }, timeout);
-  statusTimers.set(target, timer);
+  if (status !== 'danger' && timeout > 0) statusTimers.set(target, setTimeout(() => { target.hidden = true; }, timeout));
 }
 
-function setActiveView(view) {
+async function setActiveView(view, { fromRoute = false } = {}) {
+  if (!PAGE_TITLES[view]) view = 'dashboard';
+  if (activeView === 'blueprint' && view !== 'blueprint' && !await guardBlueprintChanges()) return false;
+  activeView = view;
+  state.activeDeploymentDetailsId = null;
   const targetPage = pages.find(page => page.dataset.view === view);
   if (targetPage?.dataset.roleGroup === 'admin' && !state.isAdmin) {
-    return;
+    activeView = 'dashboard';
+    return false;
   }
   navButtons.forEach(button => {
     button.classList.toggle('active', button.dataset.view === view);
+    if (button.dataset.view === view) button.setAttribute('aria-current', 'page'); else button.removeAttribute('aria-current');
   });
   pages.forEach(page => {
     page.hidden = page.dataset.view !== view;
@@ -238,6 +263,10 @@ function setActiveView(view) {
     if (titleEl) titleEl.textContent = info.title;
     if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
   }
+  if (!fromRoute) writeRoute(view);
+  document.body.classList.remove('nav-open');
+  document.getElementById('menuToggle')?.setAttribute('aria-expanded', 'false');
+  document.getElementById('pageTitle')?.focus({ preventScroll: true });
   if (view === 'admin-settings') void loadUploadedFiles();
   if (view !== 'blueprint') {
     state.isBlueprintWorkspaceVisible = false;
@@ -294,6 +323,13 @@ blueprintGuestPasswordModeInput?.addEventListener('change', () => {
 });
 
 function renderBlueprintWorkspace() {
+  const library = document.getElementById('blueprintLibrary');
+  if (library) library.hidden = state.isBlueprintWorkspaceVisible;
+  const duplicate = document.getElementById('duplicateBlueprint');
+  if (duplicate) duplicate.hidden = !state.currentBlueprint.id;
+  const lockInfo = document.getElementById('blueprintLockInfo');
+  if (lockInfo) lockInfo.innerHTML = isCurrentBlueprintLocked() ? 'Read only. Used by ' + state.deployments.filter(d => d.blueprint.id === state.currentBlueprint.id).map(d => `<a href="#/lifecycle/${encodeURIComponent(d.id)}">Lab #${escapeHtml(String(d.deploymentNumber))}</a>`).join(', ') + '. Duplicate this blueprint to make changes.' : '';
+
   if (blueprintWorkspace) {
     blueprintWorkspace.hidden = !state.isBlueprintWorkspaceVisible;
     blueprintWorkspace.classList.toggle('blueprint-locked', isCurrentBlueprintLocked());
@@ -314,6 +350,7 @@ function renderTemplateEditor() {
 }
 
 function renderClassroomEditor() {
+  updateClassroomPreview();
   if (classroomEditorPanel) {
     classroomEditorPanel.hidden = !state.isClassroomEditorVisible;
   }
@@ -321,11 +358,12 @@ function renderClassroomEditor() {
 
 function renderBlueprintList() {
   if (!state.blueprints.length) {
-    blueprintList.innerHTML = '<p class="placeholder">No blueprints yet.</p>';
+    blueprintList.innerHTML = '<p class="placeholder">No blueprints yet. Use New to create your first reusable lab.</p>';
     return;
   }
 
   blueprintList.innerHTML = state.blueprints
+    .filter(b => matchesSearch(filterValue('blueprintSearch'), b.name, b.description, b.course?.courseNumber, b.teacherEmail) && (!filterValue('blueprintCourseFilter') || b.course?.id === filterValue('blueprintCourseFilter')))
     .map(
       blueprint => {
         const locked = Boolean(blueprint.isLocked);
@@ -340,9 +378,9 @@ function renderBlueprintList() {
             <div class="inline-actions">
               ${locked ? `<span class="mini-pill lock-pill" title="${escapeHtmlAttr(lockTitle)}">Locked</span>` : ''}
               ${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}
-              <span class="mini-pill">${new Date(blueprint.updatedAt).toLocaleString()}</span>
+              <span class="mini-pill" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
               <span class="pill">${blueprint.vmCount} VM</span>
-              <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle)}" ${locked ? 'disabled' : ''}>×</button>
+              <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle)}" ${locked ? 'disabled' : ''}>${uiIcon('delete')}</button>
             </div>
           </div>
         </article>
@@ -351,7 +389,8 @@ function renderBlueprintList() {
     )
     .join('');
 
-  blueprintList.querySelectorAll('[data-blueprint-id]').forEach(node => {
+  if (!blueprintList.children.length) blueprintList.innerHTML = '<p class="placeholder">No blueprints match these filters. Clear the search or choose another course.</p>';
+  blueprintList.querySelectorAll('article[data-blueprint-id]').forEach(node => {
     node.addEventListener('click', async () => {
       await loadBlueprint(node.dataset.blueprintId);
     });
@@ -360,6 +399,8 @@ function renderBlueprintList() {
   blueprintList.querySelectorAll('.delete-blueprint-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const resource = state.blueprints.find(item => item.id === button.dataset.blueprintId);
+      if (!await confirmAction('Delete blueprint?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'blueprint') + '? This cannot be undone. Its uploaded files will also be deleted.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/blueprints/${button.dataset.blueprintId}`, { method: 'DELETE' });
@@ -466,7 +507,7 @@ function renderTeachers() {
             <div class="inline-actions">
               ${renderRoleBadge(teacher)}
               ${renderTeacherBadge(teacher)}
-              <span class="mini-pill">${new Date(teacher.updatedAt).toLocaleString()}</span>
+              <span class="mini-pill">Last activity: ${new Date(teacher.updatedAt).toLocaleString()}</span>
             </div>
           </div>
         </article>
@@ -489,11 +530,11 @@ function renderCourses() {
           <div class="panel-head">
             <div>
               <strong>Course ${escapeHtml(String(course.courseNumber))}</strong>
-              <p class="muted">${escapeHtml(course.description || 'No description')}</p>
+              <p class="muted">${escapeHtml(course.description || 'No description')}</p><p class="muted">${state.blueprints.filter(b => b.course?.id === course.id).map(b => `<a href="#/blueprint/${encodeURIComponent(b.id)}">${escapeHtml(b.name)}</a>`).join(', ') || 'No linked blueprints'}</p>
             </div>
             <div class="inline-actions">
               <span class="mini-pill">${new Date(course.updatedAt).toLocaleString()}</span>
-              <button class="icon-btn delete-course-button" type="button" data-course-id="${course.id}" aria-label="Delete course">×</button>
+              <button class="icon-btn edit-course-button" type="button" data-course-id="${course.id}" aria-label="Edit course">${uiIcon('edit')}</button><button class="icon-btn delete-course-button" type="button" data-course-id="${course.id}" aria-label="Delete course">${uiIcon('delete')}</button>
             </div>
           </div>
         </article>
@@ -501,9 +542,16 @@ function renderCourses() {
     )
     .join('');
 
+  courseList.querySelectorAll('.edit-course-button').forEach(button => button.addEventListener('click', () => {
+    const course = state.courses.find(c => c.id === button.dataset.courseId);
+    editingCourseId = course.id; courseForm.elements.courseNumber.value = course.courseNumber; courseForm.elements.description.value = course.description;
+    courseSubmitButton.textContent = 'Save course'; document.getElementById('cancelCourseEdit').hidden = false; courseForm.elements.courseNumber.focus();
+  }));
   courseList.querySelectorAll('.delete-course-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const resource = state.courses.find(item => item.id === button.dataset.courseId);
+      if (!await confirmAction('Delete course?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'course') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/courses/${button.dataset.courseId}`, { method: 'DELETE' });
@@ -533,13 +581,14 @@ function getOsDotClass(osType) {
 function renderTemplates() {
   renderModelList();
 
-  const groupsHtml = state.templates.length ? `
+  const paletteTemplates = state.templates.filter(t => matchesSearch(filterValue('paletteSearch'), t.name, getOsLabel(t.osType)) && (!filterValue('paletteOs') || t.osType === filterValue('paletteOs')));
+  const groupsHtml = paletteTemplates.length ? `
     <div class="vm-lib-group">
       <p class="vm-lib-group-label">VMs</p>
-      ${state.templates.map(t => `
+      ${paletteTemplates.map(t => `
         <article class="vm-lib-item" draggable="true" data-template-id="${t.id}">
           <span class="vm-lib-name">${escapeHtml(t.name)}</span>
-          <span class="vm-lib-vmid">${t.proxmoxTemplateVmid}</span>
+          <span class="vm-lib-vmid">${escapeHtml(getOsLabel(t.osType))}</span>
         </article>`).join('')}
     </div>` : '';
 
@@ -547,11 +596,11 @@ function renderTemplates() {
     <div class="vm-lib-group">
       <p class="vm-lib-group-label">Customization</p>
       <article class="vm-lib-cust" draggable="true" data-customization-key="ansible-tasks">
-        <span class="vm-lib-cust-icon" aria-hidden="true">&gt;_</span>
+        <span class="vm-lib-cust-icon" aria-hidden="true">${uiIcon('terminal')}</span>
         <span class="vm-lib-cust-name">Ansible Tasks</span>
       </article>
       <article class="vm-lib-cust" draggable="true" data-customization-key="file-upload">
-        <span class="vm-lib-cust-icon" aria-hidden="true">&#8593;</span>
+        <span class="vm-lib-cust-icon" aria-hidden="true">${uiIcon('upload')}</span>
         <span class="vm-lib-cust-name">Upload File</span>
       </article>
       <article class="vm-lib-cust" draggable="true" data-customization-key="name">
@@ -585,7 +634,7 @@ function renderTemplates() {
         <span class="vm-lib-cust-name">Domain Member</span>
       </article>
     </div>
-    <p class="vm-lib-hint">→ Drag to canvas</p>`;
+    <p class="vm-lib-hint">Drag models to the canvas; drag customizations onto a VM.</p>`;
 
   templatePalette.innerHTML = `
     <div class="vm-lib-section">
@@ -654,7 +703,7 @@ function renderModelList() {
             <div class="template-meta">
               <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
             </div>
-            <button class="icon-btn delete-model-button" type="button" data-template-id="${template.id}" aria-label="Delete VM model">×</button>
+            <button class="icon-btn delete-model-button" type="button" data-template-id="${template.id}" aria-label="Delete VM model">${uiIcon('delete')}</button>
           </div>
         </article>
       `
@@ -664,6 +713,8 @@ function renderModelList() {
   modelList.querySelectorAll('.delete-model-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const resource = state.templates.find(item => item.id === button.dataset.templateId);
+      if (!await confirmAction('Delete VM model?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'VM model') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/templates/${button.dataset.templateId}`, { method: 'DELETE' });
@@ -686,7 +737,7 @@ function renderModelList() {
     });
   });
 
-  modelList.querySelectorAll('[data-template-id]').forEach(card => {
+  modelList.querySelectorAll('article[data-template-id]').forEach(card => {
     card.addEventListener('click', () => {
       const template = state.templates.find(item => item.id === card.dataset.templateId);
       if (!template) return;
@@ -711,7 +762,7 @@ function renderClassrooms() {
               <strong>${escapeHtml(classroom.name)}</strong>
               <p class="muted">${classroom.workstationCount} workstation(s)</p>
             </div>
-            <button class="icon-btn delete-classroom-button" type="button" data-classroom-id="${classroom.id}" aria-label="Delete classroom">×</button>
+            <button class="icon-btn delete-classroom-button" type="button" data-classroom-id="${classroom.id}" aria-label="Delete classroom">${uiIcon('delete')}</button>
           </div>
           <div class="template-meta">
             <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
@@ -743,6 +794,8 @@ function renderClassrooms() {
   classroomList.querySelectorAll('.delete-classroom-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const resource = state.classrooms.find(item => item.id === button.dataset.classroomId);
+      if (!await confirmAction('Delete classroom?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'classroom') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/classrooms/${button.dataset.classroomId}`, { method: 'DELETE' });
@@ -759,7 +812,7 @@ function renderClassrooms() {
     });
   });
 
-  classroomList.querySelectorAll('[data-classroom-id]').forEach(card => {
+  classroomList.querySelectorAll('article[data-classroom-id]').forEach(card => {
     card.addEventListener('click', () => {
       const classroom = state.classrooms.find(item => item.id === card.dataset.classroomId);
       if (!classroom) return;
@@ -783,7 +836,7 @@ function renderBlueprintPillAction({ action, customizationKey = '', fileId = '',
   if (isCurrentBlueprintLocked()) return '';
   const fileAttr = fileId ? ` data-file-id="${escapeHtmlAttr(fileId)}"` : "";
   const customizationAttr = customizationKey ? ` data-customization-key="${escapeHtmlAttr(customizationKey)}"` : '';
-  return `<button class="pill-action-button" type="button" data-action="${escapeHtmlAttr(action)}"${customizationAttr}${fileAttr} aria-label="${escapeHtmlAttr(label)}" title="${escapeHtmlAttr(label)}">${escapeHtml(icon)}</button>`;
+  return `<button class="pill-action-button" type="button" data-action="${escapeHtmlAttr(action)}"${customizationAttr}${fileAttr} aria-label="${escapeHtmlAttr(label)}" title="${escapeHtmlAttr(label)}">${uiIcon(action.startsWith('edit') ? 'edit' : 'close')}</button>`;
 }
 
 function renderCanvas() {
@@ -882,7 +935,7 @@ function renderCanvas() {
           <div class="vm-controls">
             <div class="vm-pills">${vmPills.join('')}</div>
             <div class="vm-actions">
-              ${locked ? '' : '<button class="icon-btn" type="button" data-action="remove" aria-label="Remove VM">×</button>'}
+              ${locked ? '' : `<button class="icon-btn" type="button" data-action="remove" aria-label="Remove VM">${uiIcon('delete')}</button>`}
             </div>
           </div>
         </article>
@@ -1047,7 +1100,7 @@ function renderLifecycleSteps(status) {
     queued:      { label: 'Queued',            cls: 'op-busy',    icon: '↻' },
     deploying:   { label: 'Deploying…',        cls: 'op-busy',    icon: '↻' },
     customizing: { label: 'Configuring…',      cls: 'op-busy',    icon: '↻' },
-    deployed:    { label: 'Ready to start',    cls: 'op-stopped', icon: '▶' },
+    deployed:    { label: 'Ready',    cls: 'op-stopped', icon: '▶' },
     starting:    { label: 'Starting…',         cls: 'op-busy',    icon: '↻' },
     running:     { label: 'Running',           cls: 'op-running', icon: '▶' },
     mixed:       { label: 'Partially running', cls: 'op-warning', icon: '▶' },
@@ -1073,7 +1126,7 @@ function renderLifecycleSteps(status) {
     {
       state: prepareState,
       icon: prepareState === 'done' ? '✓' : '↑',
-      label: 'Prepare',
+      label: 'Deploy',
       sub: 'Clone + init',
       circleClass: '',
     },
@@ -1095,7 +1148,7 @@ function renderLifecycleSteps(status) {
 
   return `<div class="lc-steps">${phases.map(p => `
     <div class="lc-step ${p.state}">
-      <div class="lc-circle ${p.circleClass}">${p.icon}</div>
+      <div class="lc-circle ${p.circleClass}">${uiIcon(({'✓': 'check', '↑': 'upload', '↺': 'refresh', '↻': 'refresh', '▶': 'start', '■': 'stop', '✕': 'delete', '!': 'warning'})[p.icon] || 'warning')}</div>
       <div class="lc-label">${p.label}</div>
       <div class="lc-sub">${p.sub}</div>
     </div>`).join('')}</div>`;
@@ -1106,13 +1159,15 @@ function syncLabVisibilityToggle() {
     showOnlyMyLabsToggle.checked = state.showOnlyMyLabs;
   }
   if (showOnlyMyLabsLabel) {
-    showOnlyMyLabsLabel.textContent = state.showOnlyMyLabs ? 'Show only my labs' : 'Show all labs';
+    showOnlyMyLabsLabel.textContent = 'Only my labs';
   }
 }
 
 function getVisibleLifecycleDeployments() {
-  if (!state.showOnlyMyLabs) return state.deployments;
-  return state.deployments.filter(deployment => isDeploymentOwnedByCurrentUser(deployment));
+  return state.deployments.filter(d => (!state.showOnlyMyLabs || isDeploymentOwnedByCurrentUser(d)) &&
+    matchesSearch(filterValue('labSearch'), d.blueprint.name, d.blueprint.course?.courseNumber, d.classroom.name, d.teacherEmail, d.deploymentNumber) &&
+    (!filterValue('labStatusFilter') || d.status === filterValue('labStatusFilter')) &&
+    (!filterValue('labClassroomFilter') || d.classroom.id === filterValue('labClassroomFilter')));
 }
 
 function renderLifecycleLabs() {
@@ -1120,7 +1175,7 @@ function renderLifecycleLabs() {
   syncLabVisibilityToggle();
 
   if (!state.deployments.length) {
-    lifecycleList.innerHTML = '<p class="placeholder">No deployments yet.</p>';
+    lifecycleList.innerHTML = '<p class="placeholder">No labs yet. Create a lab from a blueprint and a classroom.</p>';
     return;
   }
 
@@ -1150,11 +1205,11 @@ function renderLifecycleLabs() {
       const actionButtons = actions.busy
         ? `<span class="loading-spinner" aria-hidden="true"></span>`
         : visibleActions
-            .map(a => `<button class="btn lifecycle-action" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${a.icon} ${a.label}</button>`)
+            .map(a => `<button class="btn lifecycle-action ${a.action === 'destroy' ? 'btn-danger' : ''}" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${uiIcon(({deploy: 'upload', start: 'start', stop: 'stop', destroy: 'delete'})[a.action])} ${a.label}</button>`)
             .join('');
 
       const deleteBtn = canDeleteDeployment
-        ? `<button class="btn btn-ghost delete-deployment-button" type="button" data-deployment-id="${deployment.id}">✕ Delete</button>`
+        ? `<button class="btn btn-ghost delete-deployment-button" type="button" data-deployment-id="${deployment.id}">${uiIcon('delete')} Delete record</button>`
         : '';
 
       const s = deployment.status || 'idle';
@@ -1181,12 +1236,13 @@ function renderLifecycleLabs() {
             </div>
             <div class="inline-actions">
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
-              <span class="pill ${statusPillClass}">${escapeHtml(s)}</span>
+              <span class="pill ${statusPillClass}">${escapeHtml(labStatusLabel(s))}</span>
               ${['deployed', 'running', 'stopped', 'mixed'].includes(s) ? `<button class="btn btn-ghost refresh-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Refresh lab state" title="Refresh lab state"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg></button>` : ''}
-              <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details →</button>
+              <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details ${uiIcon('arrow')}</button>
             </div>
           </div>
           ${renderLifecycleSteps(deployment.status)}
+          ${actions.busy ? `<p class="deployment-progress" role="status">Created: ${Number(deployment.createdCount || 0)}/${totalVmCount} · Started: ${Number(deployment.startedCount || 0)}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}. ${escapeHtml(labStatusLabel(deployment.status))}.</p>` : ''}
           <div class="lc-actions">
             ${actionButtons}
             ${deployment.canResumeCustomization ? `<button class="btn lifecycle-action" type="button" data-action="resume-customization" data-deployment-id="${deployment.id}">Resume incomplete customizations</button>` : ''}
@@ -1200,6 +1256,8 @@ function renderLifecycleLabs() {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       const action = button.dataset.action;
+      const target = state.deployments.find(d => d.id === button.dataset.deploymentId);
+      if (['destroy', 'stop', 'deploy'].includes(action) && !await confirmLabAction(target, action)) return;
       if (action === 'deploy' || action === 'start') {
         const thisDeployment = state.deployments.find(d => d.id === button.dataset.deploymentId);
         const conflicting = state.deployments.find(
@@ -1259,6 +1317,8 @@ function renderLifecycleLabs() {
   lifecycleList.querySelectorAll('.delete-deployment-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
+      const resource = state.deployments.find(item => item.id === button.dataset.deploymentId);
+      if (!await confirmAction('Delete lab record?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'lab record') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, { method: 'DELETE' });
@@ -1282,18 +1342,20 @@ function renderLifecycleLabs() {
 }
 
 function renderDashboard() {
+  renderAttentionLabs();
+  const dashboardDeployments = state.deployments.filter(d => state.isAdmin || isDeploymentOwnedByCurrentUser(d));
   // Metrics
-  const active = state.deployments.filter(d =>
+  const active = dashboardDeployments.filter(d =>
     ['running', 'deployed', 'mixed', 'starting'].includes(d.status)
   );
-  const totalVms = state.deployments.reduce((s, d) => s + Number(d.totalVmCount ?? 0), 0);
+  const totalVms = dashboardDeployments.filter(d => !['idle', 'destroyed'].includes(d.status)).reduce((s, d) => s + Number(d.totalVmCount ?? 0), 0);
 
   const elById = id => document.getElementById(id);
 
   const labsCount = elById('dashLabsCount');
   const labsSub   = elById('dashLabsSub');
   if (labsCount) labsCount.textContent = active.length;
-  if (labsSub)   labsSub.textContent   = `${state.deployments.length} deployment${state.deployments.length !== 1 ? 's' : ''} total`;
+  if (labsSub)   labsSub.textContent   = `${dashboardDeployments.length} deployment${dashboardDeployments.length !== 1 ? 's' : ''} total`;
 
   const vmsCount = elById('dashVmsCount');
   const vmsSub   = elById('dashVmsSub');
@@ -1314,17 +1376,17 @@ function renderDashboard() {
   // Recent labs
   const labsList = elById('dashRecentLabsList');
   if (labsList) {
-    if (!state.deployments.length) {
+    if (!dashboardDeployments.length) {
       labsList.innerHTML = '<p class="placeholder">No deployments yet.</p>';
     } else {
-      labsList.innerHTML = state.deployments.slice(0, 5).map(d => {
+      labsList.innerHTML = dashboardDeployments.slice(0, 5).map(d => {
         const badgeClass =
-          ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
+          d.status === 'mixed' ? 'dash-badge-preparing' : ['running', 'deployed'].includes(d.status) ? 'dash-badge-running' :
           ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
           d.status === 'stopped' ? 'dash-badge-stopped' :
           d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
         const badgeText =
-          ['running', 'deployed', 'mixed'].includes(d.status) ? 'Active' :
+          d.status === 'mixed' ? 'Partially running' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
           ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
           d.status === 'stopped' ? 'Stopped' :
           d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
@@ -1334,7 +1396,7 @@ function renderDashboard() {
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
             </div>
             <div class="dash-row-info">
-              <p class="dash-row-name">${escapeHtml(d.blueprint.name)} — ${escapeHtml(d.classroom.name)}</p>
+              <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)} — ${escapeHtml(d.classroom.name)}</a>
               <p class="dash-row-meta">${d.totalVmCount} VMs · Lab #${d.deploymentNumber}</p>
             </div>
             <span class="dash-badge ${badgeClass}">${badgeText}</span>
@@ -1350,23 +1412,23 @@ function renderDashboard() {
       classroomsGrid.innerHTML = '<p class="placeholder">No classrooms yet.</p>';
     } else {
       classroomsGrid.innerHTML = state.classrooms.map(classroom => {
-        const labs = state.deployments.filter(d => d.classroom.id === classroom.id);
+        const labs = dashboardDeployments.filter(d => d.classroom.id === classroom.id);
         const labsHtml = labs.length
           ? labs.map(d => {
               const badgeClass =
-                ['running', 'deployed', 'mixed'].includes(d.status) ? 'dash-badge-running' :
+                d.status === 'mixed' ? 'dash-badge-preparing' : ['running', 'deployed'].includes(d.status) ? 'dash-badge-running' :
                 ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
                 d.status === 'stopped' ? 'dash-badge-stopped' :
                 d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
               const badgeText =
-                ['running', 'deployed', 'mixed'].includes(d.status) ? 'Active' :
+                d.status === 'mixed' ? 'Partially running' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
                 ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
                 d.status === 'stopped' ? 'Stopped' :
                 d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
               return `
                 <div class="dash-classroom-lab">
                   <div class="dash-row-info">
-                    <p class="dash-row-name">${escapeHtml(d.blueprint.name)}</p>
+                    <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
                     <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''} · ${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</p>
                   </div>
                   <span class="dash-badge ${badgeClass}">${badgeText}</span>
@@ -1378,7 +1440,7 @@ function renderDashboard() {
           <div class="dash-classroom-card">
             <div class="dash-classroom-header">
               <strong>${escapeHtml(classroom.name)}</strong>
-              <span class="muted">${classroom.workstationCount} poste${classroom.workstationCount !== 1 ? 's' : ''}</span>
+              <span class="muted">${classroom.workstationCount} workstation${classroom.workstationCount !== 1 ? 's' : ''}</span>
             </div>
             <div class="dash-classroom-labs">${labsHtml}</div>
           </div>`;
@@ -1552,6 +1614,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
 }
 
 async function redeployDeploymentWorkstation(deploymentId, workstationNumber, button) {
+  if (!await confirmAction('Redeploy workstation?', `Recreate the VMs for workstation ${workstationNumber}? Existing VM data will be lost.`, 'Redeploy')) return;
   if (!deploymentDetailsStatus) return;
   button.disabled = true;
   try {
@@ -1560,7 +1623,7 @@ async function redeployDeploymentWorkstation(deploymentId, workstationNumber, bu
       headers: { 'Content-Type': 'application/json' }
     });
     await Promise.all([refreshLifecycleLabs(), refreshOpenDeploymentDetails()]);
-    showMessage(deploymentDetailsStatus, `Workplace ${workstationNumber} redeploy queued.`, 'success', 5000);
+    showMessage(deploymentDetailsStatus, `Workstation ${workstationNumber} redeploy queued.`, 'success', 5000);
   } catch (error) {
     showMessage(deploymentDetailsStatus, error.message, 'danger', 5000);
   } finally {
@@ -1696,7 +1759,7 @@ function renderDeploymentVmDetails(payload) {
             <section class="workstation-detail-card">
               <div class="panel-head workstation-detail-head">
                 <div class="workstation-detail-summary">
-                  <strong>Workplace ${escapeHtml(workstationNumber)}</strong>
+                  <strong>Workstation ${escapeHtml(workstationNumber)}</strong>
                   <p class="muted">${workstationVms.length} VM</p>
                 </div>
                 ${actionMarkup}
@@ -1782,6 +1845,7 @@ function renderDeploymentVmDetails(payload) {
 
 async function openDeploymentDetails(deploymentId) {
   if (!deploymentDetailsDialog || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) return;
+  if (await setActiveView('lifecycle', { fromRoute: true }) === false) return;
   state.activeDeploymentDetailsId = deploymentId;
   if (downloadDeploymentCsvButton) {
     downloadDeploymentCsvButton.href = `/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms.csv`;
@@ -1789,24 +1853,25 @@ async function openDeploymentDetails(deploymentId) {
   deploymentDetailsTitle.textContent = 'Deployment';
   deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs…</p>';
   deploymentDetailsStatus.hidden = true;
-  if (!deploymentDetailsDialog.open) {
-    deploymentDetailsDialog.showModal();
-  }
+  document.querySelector('.page[data-view="lifecycle"]').hidden = true;
+  deploymentDetailsDialog.hidden = false;
+  deploymentDetailsTitle.focus();
+  writeRoute('lifecycle', deploymentId);
 
   await refreshOpenDeploymentDetails({ replaceOnError: true });
 }
 
 async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
   const deploymentId = state.activeDeploymentDetailsId;
-  if (!deploymentId || !deploymentDetailsDialog?.open || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) {
+  if (!deploymentId || deploymentDetailsDialog?.hidden || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) {
     return;
   }
 
   try {
     const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
-    if (state.activeDeploymentDetailsId !== deploymentId || !deploymentDetailsDialog.open) return;
+    if (state.activeDeploymentDetailsId !== deploymentId || deploymentDetailsDialog.hidden) return;
     deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
-    renderDeploymentVmDetails(payload);
+    if (!getDeploymentVmSelection(deploymentId).running) preserveDetailView(() => renderDeploymentVmDetails(payload));
     deploymentDetailsStatus.hidden = true;
   } catch (error) {
     if (replaceOnError) {
@@ -1849,7 +1914,7 @@ function resolveLifecycleActions(status) {
       busy: false,
       items: [
         { action: 'start', icon: '▶', label: 'Start lab' },
-        { action: 'destroy', icon: '✕', label: 'Destroy deployment' }
+        { action: 'destroy', icon: '✕', label: 'Delete lab VMs' }
       ]
     };
   }
@@ -2098,7 +2163,7 @@ async function promptDomainMember(vmId) {
 }
 
 const DEPLOY_CONFLICT_PHRASE = 'deploy';
-const DEPLOY_ACTIVE_STATUSES = ['deploying', 'customizing', 'starting', 'deployed', 'running', 'mixed'];
+const DEPLOY_ACTIVE_STATUSES = ['queued', 'deploying', 'customizing', 'starting', 'stopping', 'deployed', 'running', 'mixed'];
 
 function promptDeploymentConflict(existingDeployment) {
   const dialog = document.getElementById('deploymentConflictDialog');
@@ -2106,7 +2171,9 @@ function promptDeploymentConflict(existingDeployment) {
   const messageEl = document.getElementById('deploymentConflictMessage');
   const input = document.getElementById('deploymentConflictConfirmInput');
   const cancelBtn = document.getElementById('deploymentConflictCancelButton');
+  const errorEl = document.getElementById('deploymentConflictError');
   if (!dialog || !form || !messageEl || !input || !cancelBtn) return Promise.resolve(false);
+  if (dialog.open) return Promise.resolve(false);
 
   const teacher = existingDeployment.teacher || { email: existingDeployment.teacherEmail };
   const ownerName = escapeHtml(teacher.displayName || teacher.email || 'Unknown owner');
@@ -2121,29 +2188,50 @@ function promptDeploymentConflict(existingDeployment) {
 
   input.value = '';
   input.setCustomValidity('');
+  input.removeAttribute('aria-invalid');
+  errorEl.hidden = true;
 
   return new Promise(resolve => {
+    let settled = false;
+    const finish = confirmed => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      if (dialog.open) dialog.close();
+      resolve(confirmed);
+    };
+    const onInput = () => {
+      // A stale custom validity error can prevent the next submit event entirely.
+      input.setCustomValidity('');
+      input.removeAttribute('aria-invalid');
+      errorEl.hidden = true;
+    };
     const onSubmit = event => {
       event.preventDefault();
       if (input.value.trim().toLowerCase() !== DEPLOY_CONFLICT_PHRASE) {
-        input.setCustomValidity(`Type exactly « ${DEPLOY_CONFLICT_PHRASE} »`);
-        input.reportValidity();
+        input.setAttribute('aria-invalid', 'true');
+        errorEl.textContent = `Type “${DEPLOY_CONFLICT_PHRASE}” to confirm, or choose Cancel.`;
+        errorEl.hidden = false;
+        input.focus();
         return;
       }
-      input.setCustomValidity('');
-      cleanup();
-      dialog.close();
-      resolve(true);
+      finish(true);
     };
-    const onCancel = () => { cleanup(); dialog.close(); resolve(false); };
+    const onCancel = () => finish(false);
     const cleanup = () => {
       form.removeEventListener('submit', onSubmit);
       cancelBtn.removeEventListener('click', onCancel);
+      input.removeEventListener('input', onInput);
+      dialog.removeEventListener('cancel', onCancel);
+      dialog.removeEventListener('close', onCancel);
     };
     form.addEventListener('submit', onSubmit);
-    cancelBtn.addEventListener('click', onCancel, { once: true });
+    cancelBtn.addEventListener('click', onCancel);
+    input.addEventListener('input', onInput);
+    dialog.addEventListener('cancel', onCancel);
+    dialog.addEventListener('close', onCancel);
     dialog.showModal();
-    window.setTimeout(() => input.focus(), 0);
+    window.setTimeout(() => { if (dialog.open) input.focus(); }, 0);
   });
 }
 
@@ -2573,6 +2661,7 @@ async function loadConnectionStatuses() {
 async function loadClassrooms() {
   state.classrooms = await fetchJson('/api/classrooms');
   renderClassrooms();
+  syncFilterOptions();
   renderDashboard();
 }
 
@@ -2580,6 +2669,7 @@ async function loadBlueprints() {
   state.blueprints = await fetchJson('/api/blueprints');
   syncCurrentBlueprintLockStateFromSummaries();
   renderBlueprintList();
+  renderCourses();
   renderDeploymentSelectors();
   renderDashboard();
 }
@@ -2593,6 +2683,7 @@ async function loadCourses() {
   state.courses = await fetchJson('/api/courses');
   renderCourses();
   renderBlueprintCourseOptions();
+  syncFilterOptions();
 }
 
 async function refreshLifecycleLabs() {
@@ -2622,6 +2713,10 @@ async function refreshLifecycleLabs() {
 }
 
 async function loadBlueprint(blueprintId) {
+  if (!await guardBlueprintChanges()) {
+    history.replaceState(null, '', '#/blueprint' + (state.currentBlueprint.id ? '/' + encodeURIComponent(state.currentBlueprint.id) : ''));
+    return;
+  }
   const blueprint = await fetchJson(`/api/blueprints/${blueprintId}`);
   state.currentBlueprint = {
     id: blueprint.id,
@@ -2647,11 +2742,13 @@ async function loadBlueprint(blueprintId) {
   renderBlueprintWorkspace();
   renderCanvas();
   renderBlueprintList();
-  showMessage(globalStatus, 'Blueprint loaded.', 'success');
+  markBlueprintSaved();
+  writeRoute('blueprint', blueprintId);
 }
 
 function resetBlueprintEditor({ keepVisible = false } = {}) {
   state.currentBlueprint = createEmptyBlueprint();
+  markBlueprintSaved();
   state.isBlueprintWorkspaceVisible = keepVisible;
   syncBlueprintFields();
   renderBlueprintWorkspace();
@@ -2660,6 +2757,9 @@ function resetBlueprintEditor({ keepVisible = false } = {}) {
 }
 
 async function saveBlueprint() {
+  if (savingBlueprint) throw new Error('Blueprint save already in progress.');
+  savingBlueprint = true;
+  try {
   if (isCurrentBlueprintLocked()) {
     throw new Error('Blueprint is locked because it is used by an existing deployment');
   }
@@ -2673,12 +2773,14 @@ async function saveBlueprint() {
   state.currentBlueprint.status = 'draft';
 
   if (!state.currentBlueprint.name) {
+    blueprintNameInput.setCustomValidity('Enter a blueprint name.'); blueprintNameInput.reportValidity(); blueprintNameInput.setCustomValidity('');
     throw new Error('Blueprint name is required');
   }
   if (!state.currentBlueprint.vms.length) {
     throw new Error('A lab must contain at least one VM');
   }
   if (!state.currentBlueprint.courseId) {
+    blueprintCourseIdInput.reportValidity();
     throw new Error('A course must be selected');
   }
 
@@ -2701,10 +2803,10 @@ async function saveBlueprint() {
 
   payload.vms.forEach(vm => {
     if (vm.config.customNameEnabled && !vm.name) {
-      throw new Error('Each VM with custom naming enabled must have a name');
+      throw new Error(`VM ${payload.vms.indexOf(vm) + 1}: enter a hostname.`);
     }
     if (vm.ipLastOctet != null && (vm.ipLastOctet < 1 || vm.ipLastOctet > 254)) {
-      throw new Error('IP last octet must be between 1 and 254');
+      throw new Error(`VM ${vm.name || payload.vms.indexOf(vm) + 1}: IP last octet must be between 1 and 254.`);
     }
   });
 
@@ -2713,6 +2815,7 @@ async function saveBlueprint() {
     : '/api/blueprints';
   const method = state.currentBlueprint.id ? 'PUT' : 'POST';
 
+  blueprintWorkspace.inert = true;
   const blueprint = await fetchJson(url, {
     method,
     headers: { 'Content-Type': 'application/json' },
@@ -2739,6 +2842,7 @@ async function saveBlueprint() {
     }))
   };
 
+  markBlueprintSaved();
   syncBlueprintFields();
   renderCanvas();
   await loadBlueprints();
@@ -2748,6 +2852,7 @@ async function saveBlueprint() {
     console.error('Unable to refresh lifecycle labs after saving blueprint', error);
   }
   showMessage(globalStatus, 'Blueprint saved.', 'success');
+  } finally { savingBlueprint = false; blueprintWorkspace.inert = false; updateSaveStatus(); }
 }
 
 function sanitizeConfig(config) {
@@ -2784,6 +2889,9 @@ function getOsLogo(osType) {
 }
 
 function getCustomizationIcon(key) {
+  if (key === 'timezone') return uiIcon('clock');
+  if (key === 'second-disk') return uiIcon('disk');
+  if (key === 'name') return uiIcon('name');
   if (key === 'domain-controller') {
     return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
@@ -2795,13 +2903,6 @@ function getCustomizationIcon(key) {
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
     </svg>`;
   }
-  if (key === 'name') {
-    return `
-      <svg viewBox="0 0 24 24" focusable="false">
-        <path d="M5 18 9.5 6h1.8L16 18h-1.9l-1.1-3.1H8L6.9 18H5Zm3.6-4.7h3.8L10.5 8 8.6 13.3Z"></path>
-      </svg>
-    `;
-  }
   if (key === 'docker-install') {
     return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
       <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
@@ -2809,18 +2910,7 @@ function getCustomizationIcon(key) {
       <line x1="12" y1="22.08" x2="12" y2="12"/>
     </svg>`;
   }
-  if (key === 'second-disk') {
-    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <ellipse cx="12" cy="5" rx="9" ry="3"/>
-      <path d="M3 5v6c0 1.66 4.03 3 9 3s9-1.34 9-3V5"/>
-      <path d="M3 11v6c0 1.66 4.03 3 9 3s9-1.34 9-3v-6"/>
-    </svg>`;
-  }
-  return `
-    <svg viewBox="0 0 24 24" focusable="false">
-      <path d="M12 7a1 1 0 0 1 1 1v.4a4.6 4.6 0 0 1 2.6 2.6H16a1 1 0 1 1 0 2h-.4a4.6 4.6 0 0 1-2.6 2.6V16a1 1 0 1 1-2 0v-.4a4.6 4.6 0 0 1-2.6-2.6H8a1 1 0 1 1 0-2h.4A4.6 4.6 0 0 1 11 8.4V8a1 1 0 0 1 1-1Zm0 3.2a1.8 1.8 0 1 0 0 3.6 1.8 1.8 0 0 0 0-3.6ZM19 4a1 1 0 0 1 1 1v2a1 1 0 1 1-2 0V6h-1a1 1 0 1 1 0-2h2Zm-14 0a1 1 0 1 1 0 2H4v1a1 1 0 1 1-2 0V5a1 1 0 0 1 1-1h2Zm14 14a1 1 0 1 1 2 0v2a1 1 0 0 1-1 1h-2a1 1 0 1 1 0-2h1v-1ZM4 18a1 1 0 1 1-2 0v2a1 1 0 0 0 1 1h2a1 1 0 1 0 0-2H4v-1Z"></path>
-    </svg>
-  `;
+  return uiIcon('warning');
 }
 
 function escapeHtml(value) {
@@ -3040,21 +3130,33 @@ async function refreshJobs() {
     }
 
     jobsTableBody.innerHTML = jobs
+      .filter(job => matchesSearch(filterValue('jobSearch'), job.id, job.associatedLab, job.failedReason) && (!filterValue('jobStatusFilter') || job.state === filterValue('jobStatusFilter')) && (!filterValue('jobActionFilter') || job.action === filterValue('jobActionFilter')))
       .map(
         job => `
           <tr>
             <td>#${escapeHtml(job.id)}</td>
             <td>${escapeHtml(job.queue)}</td>
             <td>${escapeHtml(job.state ?? 'unknown')}</td>
-            <td>${escapeHtml(formatAssociatedLab(job))}</td>
+            <td>${job.deploymentId ? `<a href="#/lifecycle/${encodeURIComponent(job.deploymentId)}">${escapeHtml(formatAssociatedLab(job))}</a>` : escapeHtml(formatAssociatedLab(job))}</td>
             <td>${escapeHtml(job.action ?? job.name ?? 'n/a')}</td>
             <td>${escapeHtml(formatDuration(job.durationMs))}</td>
             <td>${escapeHtml(job.createdAt ? new Date(job.createdAt).toLocaleString() : 'n/a')}</td>
-            <td title="${escapeHtmlAttr(formatJobDetail(job))}">${escapeHtml(formatJobDetail(job))}</td>
+            <td><button class="btn btn-ghost job-details" type="button" data-job-id="${escapeHtmlAttr(job.id)}" data-queue="${escapeHtmlAttr(job.queue)}">View details</button></td>
           </tr>
         `
       )
       .join('');
+    if (!jobsTableBody.children.length) jobsTableBody.innerHTML = '<tr><td colspan="8">No jobs match these filters.</td></tr>';
+    jobsTableBody.querySelectorAll('.job-details').forEach(button => button.addEventListener('click', () => {
+      const job = jobs.find(j => j.id === button.dataset.jobId && j.queue === button.dataset.queue);
+      const dialog = document.createElement('dialog'); dialog.className = 'modal-dialog job-dialog'; dialog.setAttribute('aria-label', 'Job details');
+      const card = document.createElement('div'); card.className = 'modal-card';
+      const heading = document.createElement('h2'); heading.textContent = 'Job #' + job.id + ' · ' + job.state;
+      const output = document.createElement('pre'); output.tabIndex = 0; output.textContent = [formatAssociatedLab(job), job.action, job.createdAt, job.failedReason || formatJobDetail(job)].join('\n');
+      const copy = document.createElement('button'); copy.className = 'btn'; copy.textContent = 'Copy details'; copy.onclick = async () => { try { await navigator.clipboard.writeText(output.textContent); copy.textContent = 'Copied'; } catch { copy.textContent = 'Select and copy the text above'; } };
+      const close = document.createElement('button'); close.className = 'btn'; close.textContent = 'Close'; close.onclick = () => dialog.close();
+      card.append(heading, output, copy, close); dialog.append(card); document.body.append(dialog); dialog.addEventListener('close', () => dialog.remove()); dialog.showModal();
+    }));
   } catch {
     jobsTableBody.innerHTML = '<tr><td colspan="8">Unable to load jobs.</td></tr>';
   }
@@ -3092,13 +3194,16 @@ showOnlyMyLabsToggle?.addEventListener('change', () => {
     state.currentBlueprint.windowsAdminPassword = blueprintWindowsAdminPasswordInput?.value ?? '';
     state.currentBlueprint.linuxDefaultUsername = blueprintLinuxDefaultUsernameInput?.value?.trim() || 'ubuntu';
     state.currentBlueprint.status = 'draft';
-    syncBlueprintFields();
     renderBlueprintList();
   });
 });
 
 templateForm.addEventListener('submit', async event => {
   event.preventDefault();
+  if (templateForm.dataset.busy) return;
+  templateForm.dataset.busy = 'true';
+  const submitButton = templateForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true');
   const form = new FormData(templateForm);
   const editingTemplateId = state.editingTemplateId;
   const payload = {
@@ -3121,7 +3226,7 @@ templateForm.addEventListener('submit', async event => {
     showMessage(globalStatus, editingTemplateId ? 'VM model updated.' : 'VM model created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
-  }
+  } finally { delete templateForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
 });
 
 cancelTemplateEditButton?.addEventListener('click', () => {
@@ -3154,6 +3259,10 @@ cancelClassroomEditButton?.addEventListener('click', () => {
 
 classroomForm?.addEventListener('submit', async event => {
   event.preventDefault();
+  if (classroomForm.dataset.busy) return;
+  classroomForm.dataset.busy = 'true';
+  const submitButton = classroomForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true');
   const form = new FormData(classroomForm);
   const editingClassroomId = state.editingClassroomId;
   const payload = {
@@ -3177,7 +3286,7 @@ classroomForm?.addEventListener('submit', async event => {
     showMessage(globalStatus, editingClassroomId ? 'Classroom updated.' : 'Classroom created.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
-  }
+  } finally { delete classroomForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
 });
 
 courseForm?.addEventListener('submit', async event => {
@@ -3193,14 +3302,15 @@ courseForm?.addEventListener('submit', async event => {
   }
 
   try {
-    await fetchJson('/api/courses', {
-      method: 'POST',
+    await fetchJson(editingCourseId ? `/api/courses/${editingCourseId}` : '/api/courses', {
+      method: editingCourseId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
     courseForm.reset();
-    await loadCourses();
-    showMessage(globalStatus, 'Course created.', 'success');
+    editingCourseId = null; courseSubmitButton.textContent = 'Add course'; document.getElementById('cancelCourseEdit').hidden = true;
+    await Promise.all([loadCourses(), loadBlueprints(), refreshLifecycleLabs()]);
+    showMessage(globalStatus, 'Course saved.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   } finally {
@@ -3212,6 +3322,10 @@ courseForm?.addEventListener('submit', async event => {
 
 deploymentForm?.addEventListener('submit', async event => {
   event.preventDefault();
+  if (deploymentForm.dataset.busy) return;
+  deploymentForm.dataset.busy = 'true';
+  const submitButton = deploymentForm.querySelector('button[type="submit"]');
+  submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true');
   const form = new FormData(deploymentForm);
   const payload = {
     blueprintId: String(form.get('blueprintId') || ''),
@@ -3229,13 +3343,15 @@ deploymentForm?.addEventListener('submit', async event => {
     }
     await refreshLifecycleLabs();
     await loadBlueprints();
-    showMessage(globalStatus, 'Deployment prepared.', 'success');
+    showMessage(globalStatus, 'Lab record created. Choose Deploy lab to create its VMs.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
-  }
+  } finally { delete deploymentForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
 });
 
-newBlueprintButton.addEventListener('click', () => {
+newBlueprintButton.addEventListener('click', async () => {
+  if (!await guardBlueprintChanges()) return;
+  writeRoute('blueprint');
   resetBlueprintEditor({ keepVisible: true });
 });
 
@@ -3314,6 +3430,7 @@ refreshLabsStateButton?.addEventListener('click', async () => {
 });
 
 clearJobHistoryButton?.addEventListener('click', async () => {
+  if (!await confirmAction('Clear finished job history?', 'Completed and failed jobs will be deleted. Their customization checkpoints will no longer be available for resume. Active and queued jobs are preserved.', 'Clear history')) return;
   clearJobHistoryButton.disabled = true;
   try {
     await fetchJson('/api/jobs/clear-history', {
@@ -3321,7 +3438,7 @@ clearJobHistoryButton?.addEventListener('click', async () => {
       headers: { 'Content-Type': 'application/json' }
     });
     await Promise.all([refreshQueues(), refreshJobs()]);
-    showMessage(globalStatus, 'Jobs in progress stopped and job history cleared.', 'success');
+    showMessage(globalStatus, 'Finished job history cleared.', 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   } finally {
@@ -3331,9 +3448,7 @@ clearJobHistoryButton?.addEventListener('click', async () => {
 
 cleanOrphanedDisksButton?.addEventListener('click', async () => {
   const targetStatus = dangerZoneStatus || globalStatus;
-  const confirmed = window.confirm(
-    'Clean orphaned disks from the configured Ceph pool? This deletes RBD images that are not referenced by VM configs.'
-  );
+  const confirmed = await confirmAction('Clean orphaned disks?', 'This permanently deletes unreferenced disks from the configured Ceph pool.', 'Delete orphaned disks');
   if (!confirmed) return;
 
   cleanOrphanedDisksButton.disabled = true;
@@ -3361,24 +3476,9 @@ cleanOrphanedDisksButton?.addEventListener('click', async () => {
 });
 
 closeDeploymentDetailsButton?.addEventListener('click', () => {
-  deploymentDetailsDialog?.close();
-});
-
-deploymentDetailsDialog?.addEventListener('close', () => {
   state.activeDeploymentDetailsId = null;
-  if (downloadDeploymentCsvButton) downloadDeploymentCsvButton.removeAttribute('href');
-});
-
-deploymentDetailsDialog?.addEventListener('click', event => {
-  const rect = deploymentDetailsDialog.getBoundingClientRect();
-  const isOutside =
-    event.clientX < rect.left
-    || event.clientX > rect.right
-    || event.clientY < rect.top
-    || event.clientY > rect.bottom;
-  if (isOutside) {
-    deploymentDetailsDialog.close();
-  }
+  downloadDeploymentCsvButton?.removeAttribute('href');
+  void setActiveView('lifecycle');
 });
 
 vmCustomizationForm?.addEventListener('submit', event => {
@@ -3478,6 +3578,199 @@ vmTimezoneDialog?.addEventListener('close', () => {
   pendingVmTimezonePrompt = null;
 });
 
+let activeView = 'dashboard';
+let savedBlueprintFingerprint = blueprintFingerprint(state.currentBlueprint);
+let routeReady = false;
+let routeBusy = false;
+let savingBlueprint = false;
+let editingCourseId = null;
+
+function filterValue(id) { return document.getElementById(id)?.value || ''; }
+function isBlueprintDirty() { return blueprintFingerprint(state.currentBlueprint) !== savedBlueprintFingerprint; }
+function markBlueprintSaved() {
+  savedBlueprintFingerprint = blueprintFingerprint(state.currentBlueprint);
+  updateSaveStatus();
+}
+function updateSaveStatus() {
+  const el = document.getElementById('blueprintSaveStatus');
+  if (el) el.textContent = isBlueprintDirty() ? 'Unsaved changes' : 'All changes saved';
+}
+
+function chooseAction(title, message, choices) {
+  if (document.querySelector('.confirmation-dialog')) return Promise.resolve('cancel');
+  return new Promise(resolve => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'modal-dialog confirmation-dialog';
+    dialog.setAttribute('aria-labelledby', 'confirmationTitle');
+    dialog.setAttribute('aria-describedby', 'confirmationMessage');
+    dialog.innerHTML = '<form method="dialog" class="modal-card"><h2 id="confirmationTitle"></h2><p id="confirmationMessage"></p><div class="inline-actions"></div></form>';
+    dialog.querySelector('h2').textContent = title;
+    dialog.querySelector('p').textContent = message;
+    for (const [value, label, style] of choices) {
+      const button = document.createElement('button');
+      button.type = 'submit'; button.value = value; button.textContent = label;
+      button.className = `btn ${style || 'btn-secondary'}`;
+      dialog.querySelector('.inline-actions').append(button);
+    }
+    dialog.addEventListener('close', () => { const result = dialog.returnValue; dialog.remove(); resolve(result); }, { once: true });
+    document.body.append(dialog); dialog.showModal();
+  });
+}
+async function confirmAction(title, message, label = 'Continue') {
+  return await chooseAction(title, message, [['cancel', 'Cancel'], ['confirm', label, 'btn-danger']]) === 'confirm';
+}
+async function guardBlueprintChanges() {
+  if (savingBlueprint) return false;
+  if (!isBlueprintDirty()) return true;
+  const choice = await chooseAction('Unsaved blueprint changes', 'Save your changes before leaving this blueprint?', [
+    ['cancel', 'Stay here'], ['discard', 'Discard changes', 'btn-danger'], ['save', 'Save changes', 'btn-primary']
+  ]);
+  if (choice === 'discard') { resetBlueprintEditor(); return true; }
+  if (choice !== 'save') return false;
+  try { await saveBlueprint(); return true; }
+  catch (error) { showMessage(globalStatus, error.message, 'danger'); return false; }
+}
+async function confirmLabAction(deployment, action) {
+  if (!deployment) return false;
+  const context = `${deployment.blueprint.name} — ${deployment.classroom.name}, lab #${deployment.deploymentNumber}, ${deployment.totalVmCount} VMs.`;
+  if (action === 'destroy') return confirmAction('Delete lab VMs?', `${context} All VM data will be permanently deleted. The blueprint is preserved.`, 'Delete VMs');
+  if (action === 'stop') return confirmAction('Stop lab?', `${context} Running sessions will be interrupted.`, 'Stop lab');
+  return await chooseAction('Deploy lab', `${context} The blueprint will be replicated for every workstation.`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
+}
+
+function writeRoute(view, id = '') {
+  if (!routeReady || routeBusy) return;
+  const hash = `#/${view}${id ? '/' + encodeURIComponent(id) : ''}`;
+  if (location.hash !== hash) history.pushState(null, '', hash);
+}
+async function readRoute() {
+  if (routeBusy) return;
+  routeBusy = true;
+  const oldView = activeView;
+  const oldId = state.activeDeploymentDetailsId || (state.isBlueprintWorkspaceVisible ? state.currentBlueprint.id : '');
+  try {
+    const [view = 'dashboard', encodedId] = location.hash.replace(/^#\/?/, '').split('/');
+    const id = encodedId ? decodeURIComponent(encodedId) : '';
+    if (await setActiveView(view, { fromRoute: true }) === false) {
+      history.replaceState(null, '', `#/${oldView}${oldId ? '/' + encodeURIComponent(oldId) : ''}`); return;
+    }
+    if (view === 'lifecycle' && id) await openDeploymentDetails(id);
+    else { deploymentDetailsDialog.hidden = true; state.activeDeploymentDetailsId = null; }
+    if (view === 'blueprint' && id && (state.currentBlueprint.id !== id || !state.isBlueprintWorkspaceVisible)) await loadBlueprint(id);
+  } catch (error) { showMessage(globalStatus, error.message, 'danger'); }
+  finally { routeBusy = false; }
+}
+
+function preserveDetailView(render) {
+  const root = deploymentVmDetailsList;
+  const key = el => el.closest('tr')?.querySelector('.vm-select')?.dataset.vmid || '';
+  const open = new Set([...root.querySelectorAll('details[open]')].map(el => key(el) + ':' + el.querySelector('summary')?.textContent.split(' — ')[0]));
+  const focused = root.contains(document.activeElement) ? document.activeElement : null;
+  const focusKey = focused && { vm: key(focused), cls: [...focused.classList][0], bulk: focused.dataset.vmBulkAction, tag: focused.tagName };
+  const scrolls = [deploymentDetailsDialog.scrollTop, ...[...root.querySelectorAll('.table-wrap')].map(el => el.scrollLeft)];
+  render();
+  root.querySelectorAll('details').forEach(el => { el.open = open.has(key(el) + ':' + el.querySelector('summary')?.textContent.split(' — ')[0]); });
+  if (focusKey) {
+    const candidates = [...root.querySelectorAll('button, input, summary')];
+    candidates.find(el => key(el) === focusKey.vm && el.tagName === focusKey.tag && [...el.classList][0] === focusKey.cls && el.dataset.vmBulkAction === focusKey.bulk)?.focus({ preventScroll: true });
+  }
+  deploymentDetailsDialog.scrollTop = scrolls[0];
+  root.querySelectorAll('.table-wrap').forEach((el, i) => { el.scrollLeft = scrolls[i + 1] || 0; });
+}
+
+function syncFilterOptions() {
+  const fill = (id, entries, label) => {
+    const el = document.getElementById(id); if (!el) return;
+    const previous = el.value;
+    el.replaceChildren(new Option(label, ''), ...entries.map(([value, text]) => new Option(text, value)));
+    el.value = previous;
+  };
+  fill('blueprintCourseFilter', state.courses.map(c => [c.id, `Course ${c.courseNumber}`]), 'All courses');
+  fill('labClassroomFilter', state.classrooms.map(c => [c.id, c.name]), 'All classrooms');
+}
+
+function renderAttentionLabs() {
+  const el = document.getElementById('attentionLabs'); if (!el) return;
+  const labs = state.deployments.filter(d => (state.isAdmin || isDeploymentOwnedByCurrentUser(d)) && (['failed', 'mixed'].includes(d.status) || d.canResumeCustomization));
+  el.innerHTML = labs.length ? labs.map(d => `<a class="attention-item" href="#/lifecycle/${encodeURIComponent(d.id)}">${uiIcon('warning')} <strong>${escapeHtml(d.blueprint.name)}</strong> · ${escapeHtml(d.classroom.name)} · ${escapeHtml(labStatusLabel(d.status))}</a>`).join('') : '<p class="muted">No labs need attention.</p>';
+}
+
+function updateDeploymentPreview() {
+  const blueprint = state.blueprints.find(b => b.id === deploymentBlueprintSelect.value);
+  const classroom = state.classrooms.find(c => c.id === deploymentClassroomSelect.value);
+  const el = document.getElementById('deploymentPreview'); if (!el) return;
+  el.textContent = blueprint && classroom ? `${classroom.workstationCount} workstations × ${blueprint.vmCount} VMs = ${classroom.workstationCount * blueprint.vmCount} VMs planned. Creating the lab record does not deploy VMs. Passwords: ${blueprint.guestPasswordMode === 'per-workstation' ? 'generated per workstation' : 'shared across the lab'}.` : 'Choose a blueprint and classroom to preview the deployment.';
+  if (classroom && state.deployments.some(d => d.classroom.id === classroom.id && DEPLOY_ACTIVE_STATUSES.includes(d.status))) el.textContent += ' This classroom already has an active lab.';
+}
+
+function updateClassroomPreview() {
+  const data = Object.fromEntries(new FormData(classroomForm));
+  const rows = classroomPreview(data); const el = document.getElementById('classroomPreview');
+  if (el) el.textContent = rows ? rows.map(row => `Workstation ${row.workstation}: VLAN ${row.vlan}, subnet ${row.subnet}, gateway ${row.gateway}`).join('\n') : 'Enter valid network settings to preview the first and last workstation.';
+}
+
+function initUx() {
+  routeReady = true;
+  document.getElementById('paletteToggle')?.addEventListener('click', event => {
+    const collapsed = blueprintWorkspace.classList.toggle('palette-collapsed');
+    event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
+  });
+  document.getElementById('cancelCourseEdit')?.addEventListener('click', () => { editingCourseId = null; courseForm.reset(); courseSubmitButton.textContent = 'Add course'; document.getElementById('cancelCourseEdit').hidden = true; });
+  markBlueprintSaved();
+  document.getElementById('blueprintForm')?.addEventListener('input', updateSaveStatus);
+  new MutationObserver(updateSaveStatus).observe(canvasVmList, { childList: true, subtree: true });
+  blueprintGuestPasswordModeInput?.addEventListener('change', updateSaveStatus);
+  window.addEventListener('beforeunload', event => { if (isBlueprintDirty() || savingBlueprint) { event.preventDefault(); event.returnValue = ''; } });
+  window.addEventListener('hashchange', readRoute);
+  for (const [id, render] of Object.entries({ blueprintSearch: renderBlueprintList, blueprintCourseFilter: renderBlueprintList, labSearch: renderLifecycleLabs, labStatusFilter: renderLifecycleLabs, labClassroomFilter: renderLifecycleLabs, paletteSearch: renderTemplates, paletteOs: renderTemplates, jobSearch: refreshJobs, jobStatusFilter: refreshJobs, jobActionFilter: refreshJobs })) {
+    document.getElementById(id)?.addEventListener('input', render);
+  }
+  document.getElementById('menuToggle')?.addEventListener('click', event => {
+    const open = document.body.classList.toggle('nav-open'); event.currentTarget.setAttribute('aria-expanded', String(open));
+  });
+  document.getElementById('backToBlueprints')?.addEventListener('click', async () => {
+    if (!await guardBlueprintChanges()) return;
+    state.isBlueprintWorkspaceVisible = false; renderBlueprintWorkspace(); writeRoute('blueprint');
+  });
+  document.getElementById('duplicateBlueprint')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const originalId = state.currentBlueprint.id;
+    if (!await guardBlueprintChanges()) return;
+    const id = originalId; if (!id) return;
+    button.disabled = true;
+    try {
+      const copy = await fetchJson(`/api/blueprints/${id}/duplicate`, { method: 'POST' });
+      await loadBlueprints(); await loadBlueprint(copy.id);
+      showMessage(globalStatus, 'Blueprint duplicated. Review access settings before deploying.');
+    } catch (error) { showMessage(globalStatus, error.message, 'danger'); }
+    finally { document.getElementById('duplicateBlueprint').disabled = false; }
+  });
+  document.getElementById('cancelJobsButton')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    if (!await confirmAction('Cancel all jobs?', 'All active and queued jobs will be cancelled across all labs. Running deployments may be incomplete. Finished job history is preserved.', 'Cancel all jobs')) return;
+    button.disabled = true;
+    try { await fetchJson('/api/jobs/cancel-all', { method: 'POST' }); await Promise.all([refreshJobs(), refreshQueues(), refreshLifecycleLabs()]); showMessage(globalStatus, 'Job cancellation requested.'); }
+    catch (error) { showMessage(globalStatus, error.message, 'danger'); }
+    finally { button.disabled = false; }
+  });
+  deploymentForm.addEventListener('change', updateDeploymentPreview);
+  classroomForm.addEventListener('input', updateClassroomPreview);
+  syncFilterOptions(); updateDeploymentPreview(); updateClassroomPreview();
+  document.querySelectorAll('dialog').forEach(dialog => {
+    const heading = dialog.querySelector('h2, h3');
+    if (heading) { heading.id ||= `${dialog.id}Title`; dialog.setAttribute('aria-labelledby', heading.id); }
+  });
+  // Resource cards retain their existing click behavior and expose a named keyboard action.
+  const cards = () => document.querySelectorAll('#blueprintList article[data-blueprint-id], #modelList article[data-template-id], #classroomList article[data-classroom-id]').forEach(card => {
+    const title = card.querySelector('strong'); if (!title || title.querySelector('button')) return;
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = title.textContent;
+    button.addEventListener('click', event => { event.stopPropagation(); card.click(); }); title.replaceChildren(button);
+  });
+  cards(); new MutationObserver(cards).observe(document.querySelector('.main-content'), { childList: true, subtree: true });
+  renderDashboard(); renderLifecycleLabs();
+}
+
+
 async function bootstrap() {
   setActiveView('dashboard');
   syncBlueprintFields();
@@ -3503,10 +3796,14 @@ async function bootstrap() {
   if (state.isAdmin) {
     loaders.push(loadTeachers(), loadTerraformSettings(), refreshQueues(), refreshJobs(), refreshWorkers());
   }
-  await Promise.all(loaders);
+  const loaded = await Promise.allSettled(loaders);
+  if (loaded.some(result => result.status === 'rejected')) showMessage(globalStatus, 'Some data could not be loaded. Reload the page to retry; available sections remain usable.', 'danger');
+  state.showOnlyMyLabs = !state.isAdmin;
+  initUx();
+  await readRoute();
 
   setInterval(() => {
-    refreshLifecycleLabs();
+    refreshLifecycleLabs().catch(error => showMessage(globalStatus, error.message, 'danger'));
     refreshOpenDeploymentDetails();
     if (state.isAdmin) {
       refreshQueues();
@@ -3535,6 +3832,7 @@ async function promptFileUpload(vmId, fileId = null) {
   if (fileId && !current) return;
   const dialog = document.createElement('dialog');
   dialog.className = 'modal-dialog';
+  dialog.setAttribute('aria-label', 'Upload file');
   dialog.innerHTML = '<form class="modal-card"><h3>Upload File</h3><p class="file-limit">Loading upload limit...</p><label class="field"><span>File</span><input type="file" name="file"></label><p class="file-current"></p><label class="field"><span>Destination directory</span><input name="directory" type="text" required></label><p>The directory will be created if needed. An existing file with the same name will be replaced.</p><p>Uploading saves the current blueprint and attaches the file to this VM.</p><p class="file-error" role="status" aria-live="polite"></p><div class="inline-actions"><button class="btn btn-ghost" type="button" data-cancel>Cancel</button><button class="btn btn-primary" type="submit" disabled>Save and upload</button></div></form>';
   const form = dialog.querySelector('form');
   const submit = form.querySelector('[type="submit"]');
@@ -3595,6 +3893,7 @@ async function promptFileUpload(vmId, fileId = null) {
         const files = getVmFileUploads(next.config);
         setVmFileUploads(next, fileId ? files.map(item => item.id === fileId ? metadata : item) : [...files, metadata]);
       });
+      markBlueprintSaved();
       renderCanvas();
       showMessage(globalStatus, 'Blueprint and uploaded file saved.', 'success');
       dialog.close();

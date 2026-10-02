@@ -1707,3 +1707,85 @@ input:focus, textarea:focus, select:focus {
 .vm-bulk-results { padding: 10px; border: 1px solid var(--line); border-radius: var(--r); }
 .vm-bulk-results ul { max-height: 180px; overflow-y: auto; overflow-wrap: anywhere; padding-left: 22px; }
 .vm-state-table th:last-child, .vm-state-table td:last-child { width: 112px; }
+
+/* Shared action icons. */
+.ui-icon { width: 16px; height: 16px; flex: 0 0 16px; vertical-align: middle; }
+.pill-action-button { width: 28px; height: 28px; flex-basis: 28px; }
+.pill-action-button .ui-icon { width: 14px; height: 14px; }
+.lc-circle .ui-icon { width: 18px; height: 18px; }
+.icon-btn:focus-visible, .pill-action-button:focus-visible, .nav button:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+
+/* UI/UX: reading hierarchy, editor layout and narrow screens. */
+:root { --muted: #62615c; --topbar-h: 64px; }
+[hidden] { display: none !important; }
+h2 { font-size: 18px; font-weight: 600; }
+.page-title { font-size: 22px; font-weight: 600; }
+.nav button, .btn, .field > span, .vm-lib-name, .vm-lib-cust-name { font-size: 14px; }
+.btn { min-height: 36px; padding: 7px 12px; justify-content: center; }
+.icon-btn { width: 36px; height: 36px; flex-basis: 36px; }
+.muted, .deploy-meta, .dash-row-meta, .queue-table, .vm-lib-hint { font-size: 13px; }
+.eyebrow, .mini-pill, .nav-group-title { font-size: 12px; }
+.vm-lib-cust-icon svg { fill: none; width: 16px; height: 16px; }
+.filter-bar { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0 18px; align-items: end; }
+.filter-bar .field { flex: 1 1 170px; }
+.filter-bar .field:first-child { flex-grow: 2; }
+.editor-toolbar { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+#blueprintLockInfo { flex-basis: 100%; color: var(--warning); }
+#blueprintSaveStatus { margin-right: auto; color: var(--text-secondary); }
+#blueprintWorkspace > .panel-wide > .panel-head { position: sticky; top: -20px; z-index: 4; background: var(--surface); padding: 12px 0; border-bottom: 1px solid var(--line); }
+#blueprintForm { margin-bottom: 24px; }
+#blueprintForm h2 { margin-top: 10px; }
+#blueprintWorkspace .panel-wide { min-width: 0; }
+.preview-box { padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-soft); white-space: pre-line; }
+.status-message { display: flex; gap: 16px; align-items: start; justify-content: space-between; }
+.status-message > span { overflow-wrap: anywhere; }
+.toast-message { max-height: 40vh; overflow-y: auto; }
+.confirmation-dialog { width: min(560px, calc(100vw - 32px)); }
+.confirmation-dialog p { white-space: pre-line; }
+.job-dialog { width: min(800px, calc(100vw - 32px)); }
+.job-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55vh; overflow: auto; padding: 12px; background: var(--surface-soft); }
+.attention-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 0; color: var(--warning); }
+.text-button { font: inherit; color: inherit; text-align: left; border: 0; background: transparent; cursor: pointer; }
+.text-button:hover { text-decoration: underline; }
+a { color: var(--brand); }
+.text-button:focus-visible, a:focus-visible, summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
+.switch:has(input:focus-visible) .switch-track, .os-choice-card:has(input:focus-visible) { outline: 2px solid var(--brand); outline-offset: 3px; }
+.menu-toggle { display: none; }
+.jobs-table td:last-child { white-space: normal; }
+.deployment-card .lc-actions { flex-wrap: wrap; }
+.deployment-progress { margin: 8px 0; font-size: 13px; color: var(--text-secondary); }
+.vm-state-name-cell details pre { white-space: pre-wrap; }
+@media (max-width: 1024px) {
+  .menu-toggle { display: inline-flex; margin-right: 12px; }
+  .shell { display: block; }
+  .sidebar { display: none; position: fixed; inset: 64px auto 0 0; width: min(320px, 90vw); height: calc(100dvh - 64px); overflow-y: auto; background: var(--surface); z-index: 80; box-shadow: var(--shadow-lg); }
+  .nav-open .sidebar { display: flex; flex-direction: column; align-items: stretch; }
+  .sidebar .nav, .sidebar .nav-group { flex-direction: column; }
+  .sidebar .nav-group-title { display: block; }
+  .sidebar .sidebar-footer { flex-direction: column; align-items: stretch; }
+  .main { height: 100dvh; }
+  .app-topbar { padding: 0 12px; }
+  .page-title { font-size: 19px; }
+  .page-breadcrumb { display: none; }
+  #blueprintWorkspace > .panel:first-of-type { max-height: 300px; overflow: auto; }
+  #blueprintWorkspace > .panel-wide > .panel-head { top: -14px; }
+}
+@media (max-width: 720px) {
+  .panel-head, .deploy-head { flex-wrap: wrap; gap: 12px; }
+  .dev-banner-text { font-size: 11px; }
+  .dev-env .dev-banner { padding: 3px 6px; }
+  .details-dialog { width: calc(100vw - 16px); max-width: none; }
+  .modal-dialog { max-width: calc(100vw - 24px); }
+  .editor-toolbar .btn { flex: 1 1 auto; }
+  .filter-bar .field { flex-basis: 100%; }
+  .inline-actions { flex-wrap: wrap; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}
+
+.deployment-details-page .details-card { padding: 0; background: transparent; }
+.field-error { color: var(--danger); font-size: 14px; }
+
+.palette-toggle { display: none; }
+@media (max-width: 1024px) { .palette-toggle { display: inline-flex; } .palette-collapsed #paletteFilters, .palette-collapsed #templatePalette { display: none; } }

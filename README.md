@@ -11,6 +11,16 @@ The UI is served by the `dashboard` service, state is stored in PostgreSQL, and 
 
 Current version: `1.8.0`
 
+## Dashboard interaction updates
+
+The dashboard provides searchable blueprints, VM models in the editor, labs and jobs, with course, classroom, OS, status and action filters. Views and individual blueprints/labs have bookmarkable hash URLs. Lab details open as a dedicated page and preserve expanded task output and VM selection during refresh.
+
+Blueprint editing is separate from the library and protects unsaved changes when leaving or replacing a blueprint. Duplication creates an independent draft, including copies of uploaded files and the existing guest access settings. The editor keeps drag-and-drop creation; it does not add keyboard creation of VMs or customizations. Course records can be edited in place.
+
+Destructive operations show contextual confirmations. **Clear finished job history** removes only completed/failed jobs and their resume checkpoints; **Cancel all jobs** separately cancels active and pending work while preserving finished history. The classroom conflict confirmation accepts `deploy` after a corrected entry and resolves cancellation on Escape, Cancel or dialog closure.
+
+UI regression tests (Node 20.19+): `node --test tests/dashboardUx.test.js tests/dashboardUx.api.test.js tests/ansibleTasks.ui.test.js tests/vmBulkActions.test.cjs tests/fileStoragePanel.test.cjs`. DOM and mocked API tests do not replace browser or live infrastructure validation.
+
 Blueprints can use one shared guest password or generate a different password for each workstation when a lab is deployed. Deployment details include a `Download VM CSV` action with the workstation, VM, IP, username, and password information for mail merge workflows.
 
 ## Authentication

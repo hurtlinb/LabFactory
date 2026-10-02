@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
-import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes } from '../lib/blueprintFiles.js';
+import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes, blueprintFileDirectory } from '../lib/blueprintFiles.js';
 import express from 'express';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
@@ -2192,6 +2192,21 @@ app.post(
   })
 );
 
+app.put('/api/courses/:id', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(async (req, res) => {
+  const parsed = courseSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ errors: parsed.error.flatten().fieldErrors });
+  try {
+    const result = await dbPool.query(`UPDATE courses SET course_number = $2, description = $3, updated_at = NOW()
+      WHERE id = $1 RETURNING id, course_number, description, created_at, updated_at`,
+    [req.params.id, parsed.data.courseNumber, parsed.data.description]);
+    if (!result.rowCount) return res.status(404).json({ error: 'course not found' });
+    res.json(mapCourse(result.rows[0]));
+  } catch (error) {
+    if (error.code === '23505') return res.status(409).json({ error: 'course number already exists' });
+    throw error;
+  }
+}));
+
 app.delete(
   '/api/courses/:id',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
@@ -3347,6 +3362,7 @@ app.get(
          b.description,
          b.course_id,
          b.teacher_email,
+         b.guest_password_mode,
          b.status,
          b.created_at,
          b.updated_at,
@@ -3372,6 +3388,49 @@ app.get(
     res.json(result.rows.map(mapBlueprintSummary));
   })
 );
+
+app.post('/api/blueprints/:id/duplicate', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(async (req, res) => {
+  const id = uuidv4();
+  const teacherEmail = await upsertTeacher(req.session?.user);
+  const client = await dbPool.connect();
+  let committed = false;
+  try {
+    await client.query('BEGIN');
+    // Match the file mutation/cleanup locks so a concurrent upload or deletion cannot invalidate the copy.
+    await lockBlueprintFiles(client, req.params.id);
+    await lockBlueprintFiles(client, id);
+    const source = await client.query('SELECT id FROM lab_blueprints WHERE id = $1 FOR SHARE', [req.params.id]);
+    if (!source.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'blueprint not found' });
+    }
+    await client.query(`INSERT INTO lab_blueprints
+      (id, name, description, course_id, teacher_email, status, windows_admin_password, guest_password_mode, linux_default_username, created_at, updated_at)
+      SELECT $2, name || ' (copy)', description, course_id, $3, 'draft', windows_admin_password, guest_password_mode, linux_default_username, NOW(), NOW()
+      FROM lab_blueprints WHERE id = $1`, [req.params.id, id, teacherEmail]);
+    const machines = await client.query('SELECT * FROM lab_blueprint_vms WHERE blueprint_id = $1 ORDER BY vm_order', [req.params.id]);
+    const copied = new Set();
+    for (const machine of machines.rows) {
+      for (const file of getFileUploads(machine.config)) {
+        validateFileUpload(file);
+        if (copied.has(file.id)) continue;
+        await fs.mkdir(blueprintFileDirectory(id), { recursive: true, mode: 0o700 });
+        await fs.copyFile(path.join(blueprintFileDirectory(req.params.id), file.id), path.join(blueprintFileDirectory(id), file.id));
+        copied.add(file.id);
+      }
+      await client.query(`INSERT INTO lab_blueprint_vms (id, blueprint_id, template_id, name, vm_order, config, created_at, updated_at)
+        VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())`, [uuidv4(), id, machine.template_id, machine.name, machine.vm_order, machine.config]);
+    }
+    await client.query('COMMIT'); committed = true;
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+    if (!committed) await cleanupBlueprintFiles(dbPool, id);
+  }
+  res.status(201).json(await fetchBlueprintById(id));
+}));
 
 app.get(
   '/api/blueprints/:id',
@@ -3631,6 +3690,7 @@ app.get('/api/jobs', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, 
           action: job.data?.action ?? job.name,
           associatedLab,
           deploymentNumber: deploymentNumber == null ? null : Number(deploymentNumber),
+          deploymentId: job.data?.deploymentId ?? null,
           runId: job.data?.runId ?? null,
           createdAt,
           startedAt,
@@ -3650,8 +3710,28 @@ app.get('/api/jobs', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, 
   }
 });
 
-app.post('/api/jobs/clear-history', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
+app.post('/api/jobs/clear-history', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (_req, res) => {
+  const summary = {};
+  for (const [name, queue] of Object.entries(queues)) {
+    let removed = 0;
+    for (const status of ['completed', 'failed']) {
+      while (true) {
+        const deleted = await queue.clean(0, 1000, status);
+        removed += deleted.length;
+        if (!deleted.length) break;
+      }
+    }
+    summary[name] = { removed };
+  }
+  res.json({ ok: true, queues: summary });
+}));
+
+app.post('/api/jobs/cancel-all', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (req, res) => {
   try {
+    const pausedQueues = new Set();
+    for (const [name, queue] of Object.entries(queues)) {
+      if (await queue.isPaused()) pausedQueues.add(name);
+    }
     const workerStates = Object.fromEntries(
       await Promise.all(
         Object.keys(queueNames).map(async workerName => {
@@ -3696,14 +3776,6 @@ app.post('/api/jobs/clear-history', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY
           );
         }
 
-        for (const status of ['completed', 'failed']) {
-          while (true) {
-            const deleted = await queue.clean(0, 1000, status);
-            removed += deleted.length;
-            if (!deleted.length) break;
-          }
-        }
-
         summary[name] = { removed, stopped };
       }
 
@@ -3712,15 +3784,15 @@ app.post('/api/jobs/clear-history', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY
       res.json({ ok: true, queues: summary });
     } finally {
       for (const [workerName, queue] of Object.entries(queues)) {
-        await queue.resume();
+        if (!pausedQueues.has(workerName)) await queue.resume();
         if (workerStates[workerName] === 'running') {
           await redisClient.publish(`control:${workerName}`, 'resume');
         }
       }
     }
   } catch (err) {
-    console.error('Unable to clear job history', err);
-    res.status(500).json({ error: 'unable to clear job history' });
+    console.error('Unable to cancel jobs', err);
+    res.status(500).json({ error: 'unable to cancel jobs' });
   }
 });
 

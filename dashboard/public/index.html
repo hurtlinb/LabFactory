@@ -14,7 +14,7 @@
   <div class="shell">
 
     <!-- ── Sidebar navigation ────────────────────────────────── -->
-    <aside class="sidebar">
+    <aside class="sidebar" id="mainNavigation">
 
       <!-- Brand -->
       <div class="sidebar-brand">
@@ -155,7 +155,7 @@
       <div class="modal-card">
         <div class="panel-head">
           <h2 class="panel-title">Changelog</h2>
-          <button class="icon-btn" type="button" id="changelogClose" aria-label="Close">×</button>
+          <button class="icon-btn" type="button" id="changelogClose" aria-label="Close"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
         </div>
         <div id="changelogContent" class="changelog-content"></div>
       </div>
@@ -165,23 +165,24 @@
     <main class="main">
 
       <!-- Topbar -->
-      <div class="app-topbar">
+      <div class="app-topbar"><button id="menuToggle" class="btn btn-ghost menu-toggle" type="button" aria-expanded="false" aria-controls="mainNavigation">Menu</button>
         <div class="page-header">
           <p id="pageBreadcrumb" class="page-breadcrumb">Labs</p>
-          <h1 id="pageTitle" class="page-title">Blueprints</h1>
+          <h1 id="pageTitle" class="page-title" tabindex="-1">Blueprints</h1>
         </div>
         <div class="dev-banner" aria-label="Development instance">
-          <span class="dev-banner-icon">⚠️</span>
+          <span class="dev-banner-icon"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2ZM12 9v4M12 17h.01"/></svg></span>
           <span class="dev-banner-text">Development instance</span>
         </div>
       </div>
 
       <!-- Scrollable content -->
       <div class="main-content">
-        <div id="globalStatus" class="status-message" hidden></div>
+        <div id="globalStatus" class="status-message" role="status" aria-live="polite" hidden></div>
 
         <!-- ── Dashboard ─────────────────────────────────────── -->
         <section class="page" data-view="dashboard" hidden>
+          <div class="panel"><div class="panel-head"><h2>Needs attention</h2><a href="#/lifecycle" class="btn btn-primary">Create a lab</a></div><div id="attentionLabs"></div></div>
           <!-- Metrics row -->
           <div class="dash-metrics">
             <div class="dash-metric">
@@ -190,7 +191,7 @@
               <p class="dash-metric-sub" id="dashLabsSub">—</p>
             </div>
             <div class="dash-metric">
-              <p class="dash-metric-label">VMs deployed</p>
+              <p class="dash-metric-label">VMs tracked</p>
               <p class="dash-metric-value" id="dashVmsCount">—</p>
               <p class="dash-metric-sub" id="dashVmsSub">—</p>
             </div>
@@ -305,14 +306,14 @@
                   <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
                   <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
                 </div>
-              </form>
+              <p class="muted">Full clone: independent storage, longer creation. Linked clone: faster and smaller, dependent on the source template.</p></form>
             </article>
           </div>
         </section>
 
         <!-- ── Blueprints ─────────────────────────────────────── -->
         <section class="page" data-view="blueprint" hidden>
-          <div class="hero-grid">
+          <div class="hero-grid" id="blueprintLibrary">
             <article class="panel panel-full">
               <div class="panel-head">
                 <div>
@@ -320,20 +321,20 @@
                 </div>
                 <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
               </div>
-              <div id="blueprintList" class="saved-list">
+              <div class="filter-bar"><label class="field"><span>Search blueprints</span><input id="blueprintSearch" type="search" placeholder="Name, course or owner"></label><label class="field"><span>Course</span><select id="blueprintCourseFilter"><option value="">All courses</option></select></label></div><div id="blueprintList" class="saved-list">
                 <p class="placeholder">Loading blueprints…</p>
               </div>
             </article>
           </div>
 
-          <div id="blueprintWorkspace" class="builder-grid" hidden>
+          <div id="blueprintWorkspace" class="builder-grid" hidden><div class="editor-toolbar"><button id="backToBlueprints" class="btn btn-ghost" type="button">Back to blueprints</button><span id="blueprintSaveStatus" role="status">All changes saved</span><button id="duplicateBlueprint" class="btn btn-secondary" type="button">Duplicate blueprint</button><div id="blueprintLockInfo"></div></div>
             <article class="panel">
               <div class="panel-head">
                 <div>
-                  <p class="eyebrow">palette</p>
+                  <p class="eyebrow">VM models and customizations</p><button class="btn btn-ghost palette-toggle" id="paletteToggle" aria-expanded="true" aria-controls="templatePalette paletteFilters" type="button">Show / hide palette</button>
                 </div>
               </div>
-              <div id="templatePalette" class="template-palette">
+              <div class="stack" id="paletteFilters"><label class="field"><span>Find a VM model</span><input id="paletteSearch" type="search" placeholder="Model name"></label><label class="field"><span>Operating system</span><select id="paletteOs"><option value="">All systems</option><option value="ubuntu">Ubuntu</option><option value="windows11">Windows 11</option><option value="windows-server">Windows Server</option><option value="other">Other</option></select></label></div><div id="templatePalette" class="template-palette">
                 <p class="placeholder">No VM models yet.</p>
               </div>
             </article>
@@ -349,15 +350,7 @@
                 </div>
               </div>
 
-              <div id="dropzone" class="dropzone">
-                <div class="dropzone-copy">
-                  <p>Drop VM templates here</p>
-                  <span>Each drop creates a VM instance inside the lab blueprint.</span>
-                </div>
-                <div id="canvasVmList" class="canvas-vm-list"></div>
-              </div>
-
-              <form id="blueprintForm" class="stack">
+                            <form id="blueprintForm" class="stack"><h2>1. Blueprint details</h2>
                 <label class="field">
                   <span>Blueprint name</span>
                   <input id="blueprintName" type="text" name="name" placeholder="SOC analyst sandbox" required>
@@ -372,7 +365,7 @@
                     <option value="">Select a course</option>
                   </select>
                 </label>
-                <label class="switch blueprint-password-toggle">
+                <h2>2. Guest access</h2><p class="muted">Choose one shared password or generate a password for each workstation. Credentials are included in the VM CSV export.</p><label class="switch blueprint-password-toggle">
                   <input id="blueprintGuestPasswordMode" type="checkbox" name="guestPasswordMode" value="per-workstation">
                   <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
                   <span class="switch-label">Generate a different password for each workstation</span>
@@ -385,7 +378,15 @@
                   <span>Linux default username</span>
                   <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
                 </label>
-              </form>
+              </form><h2>3. Machines and customizations</h2><p class="muted">Drag VM models below, then drag customizations onto each VM. All edits are saved with Save blueprint. File uploads also save the blueprint.</p><div id="dropzone" class="dropzone">
+                <div class="dropzone-copy">
+                  <p>Drop VM templates here</p>
+                  <span>Each drop creates a VM instance inside the lab blueprint.</span>
+                </div>
+                <div id="canvasVmList" class="canvas-vm-list"></div>
+              </div>
+
+
             </article>
           </div>
         </section>
@@ -453,7 +454,7 @@
                   <button id="classroomSubmitButton" class="btn btn-primary" type="submit">Add classroom</button>
                   <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
                 </div>
-              </form>
+              <p id="classroomPreview" class="preview-box"></p></form>
             </article>
           </div>
         </section>
@@ -464,7 +465,7 @@
             <article class="panel">
               <div class="panel-head">
                 <div>
-                  <p class="eyebrow">Prepare a lab</p>
+                  <h2>Create a lab</h2>
                 </div>
               </div>
               <form id="deploymentForm" class="stack section-form">
@@ -482,7 +483,7 @@
                     </select>
                   </label>
                 </div>
-                <button class="btn btn-primary" type="submit">Prepare</button>
+                <p id="deploymentPreview" class="preview-box" role="status"></p><button class="btn btn-primary" type="submit">Create lab record</button>
               </form>
             </article>
 
@@ -494,10 +495,10 @@
                 <label class="switch lab-filter-toggle">
                   <input id="showOnlyMyLabsToggle" type="checkbox">
                   <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                  <span id="showOnlyMyLabsLabel" class="switch-label">Show all labs</span>
+                  <span id="showOnlyMyLabsLabel" class="switch-label">Only my labs</span>
                 </label>
               </div>
-              <div id="lifecycleList" class="saved-list">
+              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, course, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially running</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option></select></label></div><div id="lifecycleList" class="saved-list">
                 <p class="placeholder">Loading deployments…</p>
               </div>
             </article>
@@ -505,14 +506,14 @@
         </section>
 
         <!-- ── Deployment details dialog ─────────────────────── -->
-        <dialog id="deploymentDetailsDialog" class="details-dialog">
+        <section id="deploymentDetailsDialog" class="page deployment-details-page" data-view="lifecycle-details" aria-labelledby="deploymentDetailsTitle" hidden>
           <article class="details-card">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Deployment details</p>
-                <h3 id="deploymentDetailsTitle">Deployment</h3>
+                <h3 id="deploymentDetailsTitle" tabindex="-1">Deployment</h3>
               </div>
-              <button id="closeDeploymentDetailsButton" class="icon-btn" type="button" aria-label="Close deployment details">×</button>
+              <button id="closeDeploymentDetailsButton" class="btn btn-ghost" type="button">Back to labs</button>
             </div>
             <div class="inline-actions section-actions">
               <a id="downloadDeploymentCsvButton" class="btn btn-secondary" href="#" download>Download VM CSV</a>
@@ -522,7 +523,7 @@
               <p class="placeholder">Loading deployment VMs…</p>
             </div>
           </article>
-        </dialog>
+        </section>
 
         <!-- ── Maintenance ─────────────────────────────────────── -->
         <section class="page" data-view="admin-settings" data-role-group="admin" hidden>
@@ -559,10 +560,10 @@
           </article>
 
           <article class="panel danger-panel">
-            <p class="eyebrow danger-eyebrow">danger zone</p>
+            <h2 class="danger-eyebrow">Danger zone</h2><p class="muted">Clearing history removes customization checkpoints. Cancelling jobs can leave deployments incomplete.</p>
             <div class="inline-actions section-actions danger-actions">
-              <button type="button" id="clearJobHistoryButton" class="btn btn-secondary">Cancel all jobs and clear history</button>
-              <button type="button" id="cleanOrphanedDisksButton" class="btn btn-secondary">Clean orphaned disks</button>
+              <button type="button" id="clearJobHistoryButton" class="btn btn-danger">Clear finished job history</button><button type="button" id="cancelJobsButton" class="btn btn-danger">Cancel all jobs</button>
+              <button type="button" id="cleanOrphanedDisksButton" class="btn btn-danger">Clean orphaned disks</button>
               <div id="dangerZoneStatus" class="status-message" hidden></div>
             </div>
           </article>
@@ -574,7 +575,7 @@
             <div class="panel-head">
               <div>
                 <p class="eyebrow">users</p>
-                <h3>Synchronized teachers</h3>
+                <h3>Synchronized teachers</h3><p class="muted">Roles reflect the last recorded activity, not a live Keycloak lookup. Changes appear after the user next works with a blueprint or lab.</p>
               </div>
             </div>
             <div id="teacherList" class="saved-list">
@@ -613,7 +614,7 @@
                   <span>Description</span>
                   <textarea name="description" rows="3" placeholder="Optional description"></textarea>
                 </label>
-                <button id="courseSubmitButton" class="btn btn-primary" type="submit">Add course</button>
+                <button type="button" id="cancelCourseEdit" class="btn btn-ghost" hidden>Cancel edit</button><button id="courseSubmitButton" class="btn btn-primary" type="submit">Add course</button>
               </form>
             </article>
           </div>
@@ -662,7 +663,7 @@
                 <p class="eyebrow">jobs</p>
               </div>
             </div>
-            <div class="table-wrap">
+            <div class="filter-bar"><label class="field"><span>Search jobs</span><input id="jobSearch" type="search" placeholder="Job, lab or error"></label><label class="field"><span>Status</span><select id="jobStatusFilter"><option value="">All statuses</option><option value="active">Active</option><option value="waiting">Waiting</option><option value="completed">Completed</option><option value="failed">Failed</option><option value="delayed">Delayed</option></select></label><label class="field"><span>Action</span><select id="jobActionFilter"><option value="">All actions</option><option value="deploy">Deploy</option><option value="start">Start</option><option value="stop">Stop</option><option value="destroy">Delete VMs</option><option value="customize">Customize</option></select></label></div><p class="muted">Recent retained jobs. Open details to inspect and copy an error.</p><div class="table-wrap">
               <table class="queue-table jobs-table">
                 <thead>
                   <tr>
@@ -826,19 +827,20 @@
   </dialog>
 
   <!-- ── Deployment conflict dialog ──────────────────────── -->
-  <dialog id="deploymentConflictDialog" class="modal-dialog">
-    <form id="deploymentConflictForm" class="modal-card" method="dialog">
+  <dialog id="deploymentConflictDialog" class="modal-dialog" aria-labelledby="deploymentConflictTitle" aria-describedby="deploymentConflictMessage">
+    <form id="deploymentConflictForm" class="modal-card" novalidate>
       <div class="panel-head">
         <div>
-          <p class="eyebrow">⚠ Warning</p>
-          <h3>Classroom already in use</h3>
+          <p class="eyebrow"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2ZM12 9v4M12 17h.01"/></svg> Warning</p>
+          <h3 id="deploymentConflictTitle">Classroom already in use</h3>
         </div>
       </div>
       <p id="deploymentConflictMessage" class="modal-help"></p>
       <label class="field">
         <span>Type <strong>deploy</strong> to continue</span>
-        <input id="deploymentConflictConfirmInput" type="text" autocomplete="off" placeholder="deploy">
+        <input id="deploymentConflictConfirmInput" type="text" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="deploy" aria-describedby="deploymentConflictError">
       </label>
+      <p id="deploymentConflictError" class="field-error" role="alert" hidden></p>
       <div class="inline-actions">
         <button id="deploymentConflictCancelButton" class="btn btn-ghost" type="button">Cancel</button>
         <button class="btn btn-danger" type="submit">Deploy anyway</button>

@@ -136,7 +136,9 @@ test('lab card shows partial success and exposes resume only when eligible', asy
   const context = { lifecycleList: list, state: { deployments: [deployment] }, syncLabVisibilityToggle: () => {},
     getVisibleLifecycleDeployments: () => [deployment], resolveLifecycleActions: () => ({ items: [] }),
     canManageDeployment: () => true, isForeignDeployment: () => false, escapeHtml: String,
-    renderTeacherBadge: () => '', renderLifecycleSteps: () => '' };
+    renderTeacherBadge: () => '', renderLifecycleSteps: () => '',
+    labStatusLabel: value => value };
+  vm.runInNewContext(source.slice(source.indexOf('const UI_ICONS ='), source.indexOf('const state =')), context);
   vm.runInNewContext(code + '\nrenderLifecycleLabs();', context);
   assert.match(list.innerHTML, /21 customized, 1 failed, 0 pending/);
   assert.match(list.innerHTML, /data-action="resume-customization"/);
