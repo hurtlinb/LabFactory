@@ -244,6 +244,7 @@ async function setActiveView(view, { fromRoute = false } = {}) {
   if (activeView === 'blueprint' && view !== 'blueprint' && !await guardBlueprintChanges()) return false;
   activeView = view;
   state.activeDeploymentDetailsId = null;
+  if (deploymentDetailsDialog?.open) deploymentDetailsDialog.close();
   const targetPage = pages.find(page => page.dataset.view === view);
   if (targetPage?.dataset.roleGroup === 'admin' && !state.isAdmin) {
     activeView = 'dashboard';
@@ -1853,8 +1854,7 @@ async function openDeploymentDetails(deploymentId) {
   deploymentDetailsTitle.textContent = 'Deployment';
   deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs…</p>';
   deploymentDetailsStatus.hidden = true;
-  document.querySelector('.page[data-view="lifecycle"]').hidden = true;
-  deploymentDetailsDialog.hidden = false;
+  if (!deploymentDetailsDialog.open) deploymentDetailsDialog.showModal();
   deploymentDetailsTitle.focus();
   writeRoute('lifecycle', deploymentId);
 
@@ -1863,13 +1863,13 @@ async function openDeploymentDetails(deploymentId) {
 
 async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
   const deploymentId = state.activeDeploymentDetailsId;
-  if (!deploymentId || deploymentDetailsDialog?.hidden || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) {
+  if (!deploymentId || !deploymentDetailsDialog?.open || !deploymentVmDetailsList || !deploymentDetailsTitle || !deploymentDetailsStatus) {
     return;
   }
 
   try {
     const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
-    if (state.activeDeploymentDetailsId !== deploymentId || deploymentDetailsDialog.hidden) return;
+    if (state.activeDeploymentDetailsId !== deploymentId || !deploymentDetailsDialog.open) return;
     deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
     if (!getDeploymentVmSelection(deploymentId).running) preserveDetailView(() => renderDeploymentVmDetails(payload));
     deploymentDetailsStatus.hidden = true;
@@ -3476,9 +3476,21 @@ cleanOrphanedDisksButton?.addEventListener('click', async () => {
 });
 
 closeDeploymentDetailsButton?.addEventListener('click', () => {
+  deploymentDetailsDialog.close();
+});
+
+deploymentDetailsDialog?.addEventListener('cancel', event => {
+  event.preventDefault();
+  deploymentDetailsDialog.close();
+});
+
+deploymentDetailsDialog?.addEventListener('close', () => {
+  // A queued close event from navigation must not clear a newly opened lab.
+  if (deploymentDetailsDialog.open) return;
+  const wasShowingLab = Boolean(state.activeDeploymentDetailsId);
   state.activeDeploymentDetailsId = null;
   downloadDeploymentCsvButton?.removeAttribute('href');
-  void setActiveView('lifecycle');
+  if (wasShowingLab && activeView === 'lifecycle') writeRoute('lifecycle');
 });
 
 vmCustomizationForm?.addEventListener('submit', event => {
@@ -3655,7 +3667,7 @@ async function readRoute() {
       history.replaceState(null, '', `#/${oldView}${oldId ? '/' + encodeURIComponent(oldId) : ''}`); return;
     }
     if (view === 'lifecycle' && id) await openDeploymentDetails(id);
-    else { deploymentDetailsDialog.hidden = true; state.activeDeploymentDetailsId = null; }
+    else { if (deploymentDetailsDialog.open) deploymentDetailsDialog.close(); state.activeDeploymentDetailsId = null; }
     if (view === 'blueprint' && id && (state.currentBlueprint.id !== id || !state.isBlueprintWorkspaceVisible)) await loadBlueprint(id);
   } catch (error) { showMessage(globalStatus, error.message, 'danger'); }
   finally { routeBusy = false; }
@@ -3693,14 +3705,6 @@ function renderAttentionLabs() {
   const el = document.getElementById('attentionLabs'); if (!el) return;
   const labs = state.deployments.filter(d => (state.isAdmin || isDeploymentOwnedByCurrentUser(d)) && (['failed', 'mixed'].includes(d.status) || d.canResumeCustomization));
   el.innerHTML = labs.length ? labs.map(d => `<a class="attention-item" href="#/lifecycle/${encodeURIComponent(d.id)}">${uiIcon('warning')} <strong>${escapeHtml(d.blueprint.name)}</strong> · ${escapeHtml(d.classroom.name)} · ${escapeHtml(labStatusLabel(d.status))}</a>`).join('') : '<p class="muted">No labs need attention.</p>';
-}
-
-function updateDeploymentPreview() {
-  const blueprint = state.blueprints.find(b => b.id === deploymentBlueprintSelect.value);
-  const classroom = state.classrooms.find(c => c.id === deploymentClassroomSelect.value);
-  const el = document.getElementById('deploymentPreview'); if (!el) return;
-  el.textContent = blueprint && classroom ? `${classroom.workstationCount} workstations × ${blueprint.vmCount} VMs = ${classroom.workstationCount * blueprint.vmCount} VMs planned. Creating the lab record does not deploy VMs. Passwords: ${blueprint.guestPasswordMode === 'per-workstation' ? 'generated per workstation' : 'shared across the lab'}.` : 'Choose a blueprint and classroom to preview the deployment.';
-  if (classroom && state.deployments.some(d => d.classroom.id === classroom.id && DEPLOY_ACTIVE_STATUSES.includes(d.status))) el.textContent += ' This classroom already has an active lab.';
 }
 
 function updateClassroomPreview() {
@@ -3753,9 +3757,8 @@ function initUx() {
     catch (error) { showMessage(globalStatus, error.message, 'danger'); }
     finally { button.disabled = false; }
   });
-  deploymentForm.addEventListener('change', updateDeploymentPreview);
   classroomForm.addEventListener('input', updateClassroomPreview);
-  syncFilterOptions(); updateDeploymentPreview(); updateClassroomPreview();
+  syncFilterOptions(); updateClassroomPreview();
   document.querySelectorAll('dialog').forEach(dialog => {
     const heading = dialog.querySelector('h2, h3');
     if (heading) { heading.id ||= `${dialog.id}Title`; dialog.setAttribute('aria-labelledby', heading.id); }

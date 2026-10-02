@@ -129,7 +129,7 @@ test('deploy confirmation resolves false on Escape, close and Cancel, and can re
   }
 });
 
-test('saving clears the dirty state and a lab deep link opens a dedicated page', async t => {
+test('saving clears the dirty state and a lab deep link opens a modal over the labs page', async t => {
   const { api, document, w } = setup(t); await api.bootstrap();
   await api.setActiveView('blueprint'); await api.loadBlueprint('bp');
   api.state.currentBlueprint.name = 'Edited';
@@ -139,9 +139,31 @@ test('saving clears the dirty state and a lab deep link opens a dedicated page',
   assert.equal(document.getElementById('blueprintWorkspace').inert, false);
   await api.openDeploymentDetails('lab');
   assert.equal(w.location.hash, '#/lifecycle/lab');
-  assert.equal(document.getElementById('deploymentDetailsDialog').tagName, 'SECTION');
-  assert.equal(document.getElementById('deploymentDetailsDialog').hidden, false);
+  assert.equal(document.getElementById('deploymentDetailsDialog').tagName, 'DIALOG');
+  assert.equal(document.getElementById('deploymentDetailsDialog').open, true);
+  assert.equal(document.querySelector('.page[data-view="lifecycle"]').hidden, false);
   document.getElementById('closeDeploymentDetailsButton').click(); await tick();
   assert.equal(w.location.hash, '#/lifecycle');
-  assert.equal(document.getElementById('deploymentDetailsDialog').hidden, true);
+  assert.equal(document.getElementById('deploymentDetailsDialog').open, false);
+});
+
+test('lab modal closes on Escape and navigation without overwriting the destination URL', async t => {
+  const { api, document, w } = setup(t); await api.bootstrap();
+  const dialog = document.getElementById('deploymentDetailsDialog');
+  await api.openDeploymentDetails('lab');
+  dialog.dispatchEvent(new w.Event('cancel', { cancelable: true }));
+  assert.equal(dialog.open, false);
+  assert.equal(api.state.activeDeploymentDetailsId, null);
+  assert.equal(w.location.hash, '#/lifecycle');
+  await api.openDeploymentDetails('lab');
+  await api.setActiveView('dashboard');
+  assert.equal(dialog.open, false);
+  assert.equal(w.location.hash, '#/dashboard');
+  // Native browsers deliver the close event asynchronously.
+  dialog.dispatchEvent(new w.Event('close'));
+  assert.equal(w.location.hash, '#/dashboard');
+  await api.openDeploymentDetails('other');
+  dialog.dispatchEvent(new w.Event('close'));
+  assert.equal(api.state.activeDeploymentDetailsId, 'other');
+  assert.equal(dialog.open, true);
 });

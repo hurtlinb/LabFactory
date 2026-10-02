@@ -13,7 +13,7 @@ Current version: `1.8.0`
 
 ## Dashboard interaction updates
 
-The dashboard provides searchable blueprints, VM models in the editor, labs and jobs, with course, classroom, OS, status and action filters. Views and individual blueprints/labs have bookmarkable hash URLs. Lab details open as a dedicated page and preserve expanded task output and VM selection during refresh.
+The dashboard provides searchable blueprints, VM models in the editor, labs and jobs, with course, classroom, OS, status and action filters. Views and individual blueprints/labs have bookmarkable hash URLs. Lab details open in a scrollable modal over the labs page and preserve expanded task output and VM selection during refresh.
 
 Blueprint editing is separate from the library and protects unsaved changes when leaving or replacing a blueprint. Duplication creates an independent draft, including copies of uploaded files and the existing guest access settings. The editor keeps drag-and-drop creation; it does not add keyboard creation of VMs or customizations. Course records can be edited in place.
 

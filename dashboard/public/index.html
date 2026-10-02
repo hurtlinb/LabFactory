@@ -483,7 +483,7 @@
                     </select>
                   </label>
                 </div>
-                <p id="deploymentPreview" class="preview-box" role="status"></p><button class="btn btn-primary" type="submit">Create lab record</button>
+                <button class="btn btn-primary" type="submit">Create lab record</button>
               </form>
             </article>
 
@@ -506,14 +506,14 @@
         </section>
 
         <!-- ── Deployment details dialog ─────────────────────── -->
-        <section id="deploymentDetailsDialog" class="page deployment-details-page" data-view="lifecycle-details" aria-labelledby="deploymentDetailsTitle" hidden>
+        <dialog id="deploymentDetailsDialog" class="details-dialog" aria-labelledby="deploymentDetailsTitle">
           <article class="details-card">
             <div class="panel-head">
               <div>
                 <p class="eyebrow">Deployment details</p>
                 <h3 id="deploymentDetailsTitle" tabindex="-1">Deployment</h3>
               </div>
-              <button id="closeDeploymentDetailsButton" class="btn btn-ghost" type="button">Back to labs</button>
+              <button id="closeDeploymentDetailsButton" class="btn btn-ghost" type="button">Close</button>
             </div>
             <div class="inline-actions section-actions">
               <a id="downloadDeploymentCsvButton" class="btn btn-secondary" href="#" download>Download VM CSV</a>
@@ -523,7 +523,7 @@
               <p class="placeholder">Loading deployment VMs…</p>
             </div>
           </article>
-        </section>
+        </dialog>
 
         <!-- ── Maintenance ─────────────────────────────────────── -->
         <section class="page" data-view="admin-settings" data-role-group="admin" hidden>

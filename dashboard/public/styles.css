@@ -1449,10 +1449,17 @@ input:focus, textarea:focus, select:focus {
 .modal-help { margin: 0; font-size: 12px; }
 
 .details-dialog {
-  width: min(1080px, calc(100vw - 24px));
+  width: min(1280px, calc(100vw - 32px));
+  max-width: none;
+  max-height: calc(100vh - 32px);
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
   padding: 0;
   border: none;
-  background: transparent;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
   margin: auto;
 }
 
@@ -1718,13 +1725,14 @@ input:focus, textarea:focus, select:focus {
 /* UI/UX: reading hierarchy, editor layout and narrow screens. */
 :root { --muted: #62615c; --topbar-h: 64px; }
 [hidden] { display: none !important; }
-h2 { font-size: 18px; font-weight: 600; }
-.page-title { font-size: 22px; font-weight: 600; }
-.nav button, .btn, .field > span, .vm-lib-name, .vm-lib-cust-name { font-size: 14px; }
+body { font-size: 13px; }
+h2 { font-size: 16px; font-weight: 600; }
+.page-title { font-size: 20px; font-weight: 600; }
+.nav button, .btn, .field > span, .vm-lib-name, .vm-lib-cust-name { font-size: 13px; }
 .btn { min-height: 36px; padding: 7px 12px; justify-content: center; }
 .icon-btn { width: 36px; height: 36px; flex-basis: 36px; }
-.muted, .deploy-meta, .dash-row-meta, .queue-table, .vm-lib-hint { font-size: 13px; }
-.eyebrow, .mini-pill, .nav-group-title { font-size: 12px; }
+.muted, .deploy-meta, .dash-row-meta, .queue-table, .vm-lib-hint { font-size: 12px; }
+.eyebrow, .mini-pill, .nav-group-title { font-size: 11px; }
 .vm-lib-cust-icon svg { fill: none; width: 16px; height: 16px; }
 .filter-bar { display: flex; flex-wrap: wrap; gap: 12px; margin: 12px 0 18px; align-items: end; }
 .filter-bar .field { flex: 1 1 170px; }
@@ -1753,7 +1761,7 @@ a { color: var(--brand); }
 .menu-toggle { display: none; }
 .jobs-table td:last-child { white-space: normal; }
 .deployment-card .lc-actions { flex-wrap: wrap; }
-.deployment-progress { margin: 8px 0; font-size: 13px; color: var(--text-secondary); }
+.deployment-progress { margin: 8px 0; font-size: 12px; color: var(--text-secondary); }
 .vm-state-name-cell details pre { white-space: pre-wrap; }
 @media (max-width: 1024px) {
   .menu-toggle { display: inline-flex; margin-right: 12px; }
@@ -1765,7 +1773,7 @@ a { color: var(--brand); }
   .sidebar .sidebar-footer { flex-direction: column; align-items: stretch; }
   .main { height: 100dvh; }
   .app-topbar { padding: 0 12px; }
-  .page-title { font-size: 19px; }
+  .page-title { font-size: 18px; }
   .page-breadcrumb { display: none; }
   #blueprintWorkspace > .panel:first-of-type { max-height: 300px; overflow: auto; }
   #blueprintWorkspace > .panel-wide > .panel-head { top: -14px; }
@@ -1784,8 +1792,13 @@ a { color: var(--brand); }
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
 
-.deployment-details-page .details-card { padding: 0; background: transparent; }
-.field-error { color: var(--danger); font-size: 14px; }
+.details-dialog .details-card { min-width: 0; border: 0; box-shadow: none; }
+.details-dialog .details-card > .panel-head { position: sticky; top: -20px; z-index: 2; background: var(--surface); padding: 12px 0; }
+@media (max-width: 720px) {
+  .details-dialog .details-card { padding: 12px; }
+  .details-dialog .details-card > .panel-head { top: -12px; }
+}
+.field-error { color: var(--danger); font-size: 13px; }
 
 .palette-toggle { display: none; }
 @media (max-width: 1024px) { .palette-toggle { display: inline-flex; } .palette-collapsed #paletteFilters, .palette-collapsed #templatePalette { display: none; } }
