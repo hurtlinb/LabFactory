@@ -1412,7 +1412,7 @@ function renderDashboard() {
               <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)} — ${escapeHtml(d.classroom.name)}</a>
               <p class="dash-row-meta">${d.totalVmCount} VMs · Lab #${d.deploymentNumber}</p>
             </div>
-            <div class="dash-lab-actions"><span class="dash-badge ${badgeClass}">${badgeText}</span>${renderDashboardPowerActions(d)}</div>
+            <div class="dash-lab-actions"><div class="dash-lab-power">${renderDashboardPowerActions(d)}</div><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
           </div>`;
       }).join('');
     }
@@ -1446,7 +1446,7 @@ function renderDashboard() {
                     <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
                     <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''} · ${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</p>
                   </div>
-                  <div class="dash-lab-actions"><span class="dash-badge ${badgeClass}">${badgeText}</span>${renderDashboardPowerActions(d)}</div>
+                  <div class="dash-lab-actions"><div class="dash-lab-power">${renderDashboardPowerActions(d)}</div><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
                 </div>`;
             }).join('')
           : '<p class="dash-classroom-empty">No labs deployed</p>';

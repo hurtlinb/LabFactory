@@ -1549,11 +1549,20 @@ input:focus, textarea:focus, select:focus {
 
 .dash-lab-actions {
   display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.dash-lab-power {
+  display: flex;
   align-items: center;
   justify-content: flex-end;
-  flex-wrap: wrap;
   gap: 6px;
 }
+
+.dash-lab-power:empty { display: none; }
 
 .dash-lab-actions .btn { padding: 5px 8px; font-size: 12px; }
 
