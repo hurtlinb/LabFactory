@@ -1350,7 +1350,7 @@ function renderDashboardPowerActions(deployment) {
   const actions = resolveLifecycleActions(deployment.status);
   if (actions.busy) return '<span class="loading-spinner" role="status" aria-label="Lab operation in progress"></span>';
   return actions.items.filter(item => ['start', 'stop'].includes(item.action)).map(item =>
-    `<button class="btn btn-ghost lifecycle-action" type="button" data-action="${item.action}" data-deployment-id="${escapeHtmlAttr(deployment.id)}" aria-label="${item.label} lab #${escapeHtmlAttr(String(deployment.deploymentNumber))}">${uiIcon(item.action)} ${item.label}</button>`
+    `<button class="btn btn-ghost lifecycle-action" type="button" data-action="${item.action}" data-deployment-id="${escapeHtmlAttr(deployment.id)}" aria-label="${item.label} #${escapeHtmlAttr(String(deployment.deploymentNumber))}" title="${item.label}">${uiIcon(item.action)}</button>`
   ).join('');
 }
 
