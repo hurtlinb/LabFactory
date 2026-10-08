@@ -699,14 +699,20 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
     ...(discoveredNodes.length ? discoveredNodes : fallbackNodes),
     ...resourceNodes
   ])];
+  const errors = [];
   const storageContentByNode = await Promise.all(
-    targetNodes.map(async node => ({
-      node,
-      volumes: await fetchStorageContent(envSettings, node, ORPHANED_DISK_CLEANUP_POOL)
-    }))
+    targetNodes.map(async node => {
+      try {
+        return { node, volumes: await fetchStorageContent(envSettings, node, ORPHANED_DISK_CLEANUP_POOL) };
+      } catch (error) {
+        errors.push({ node, reason: error?.message || 'storage inventory failed' });
+        return { node, volumes: [] };
+      }
+    })
   );
   const skippedVolumes = [];
   const candidateVolumes = [];
+  const seenVolumes = new Set();
 
   for (const { node, volumes } of storageContentByNode) {
     for (const volume of volumes) {
@@ -714,6 +720,9 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
       if (!volid.startsWith(`${ORPHANED_DISK_CLEANUP_POOL}:`) || !isStorageImageVolume(volume)) {
         continue;
       }
+      // The Ceph pool is shared: each node can report the same image.
+      if (seenVolumes.has(volid)) continue;
+      seenVolumes.add(volid);
 
       const imageName = getStorageVolumeName(volid);
       if (!imageName) {
@@ -737,6 +746,7 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
   }
 
   const deletedVolumes = [];
+  const absentVolumes = [];
   for (const { node, volid } of candidateVolumes) {
     try {
       const taskId = await deleteStorageVolume(envSettings, node, ORPHANED_DISK_CLEANUP_POOL, volid);
@@ -748,14 +758,21 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
         skippedVolumes.push({ node, volid, reason: 'image still has watchers' });
         continue;
       }
-      throw error;
+      // Only accept an explicit missing-image error, not a generic HTTP 404.
+      if (/\b(?:image|volume)\b.*(?:does not exist|not found|no such file)|error opening image.*\(2\)/i.test(message)) {
+        absentVolumes.push(volid);
+        continue;
+      }
+      errors.push({ node, volid, reason: message });
     }
   }
 
   const stdoutLines = [
     ...deletedVolumes.map(volid => `Suppression de ${volid}`),
     ...skippedVolumes.map(volume => `Ignored ${volume.volid} sur ${volume.node}: ${volume.reason}`),
-    `Clean orphaned disks completed: ${deletedVolumes.length} deleted, ${skippedVolumes.length} ignored`
+    ...absentVolumes.map(volid => `Already absent: ${volid}`),
+    ...errors.map(error => `Error on ${error.node}${error.volid ? ` (${error.volid})` : ''}: ${error.reason}`),
+    `Clean orphaned disks ${errors.length ? 'incomplete' : 'completed'}: ${deletedVolumes.length} deleted, ${skippedVolumes.length} ignored, ${errors.length} errors`
   ];
 
   return {
@@ -764,6 +781,9 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
     pool: ORPHANED_DISK_CLEANUP_POOL,
     deletedVolumes,
     skippedVolumes,
+    absentVolumes,
+    errors,
+    complete: errors.length === 0,
     stdout: stdoutLines.join('\n'),
     stderr: ''
   };

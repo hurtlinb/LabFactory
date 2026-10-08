@@ -2,6 +2,19 @@
 
 All notable changes to LabFactory are documented here.
 
+## [1.8.1] — 2026-10-08
+
+### Corrections
+- Nettoyage « Clean orphaned disks » : déduplication des volumes du pool Ceph partagé entre les nœuds Proxmox, pour éviter de supprimer plusieurs fois le même disque et d'interrompre le nettoyage sur une erreur « No such file or directory ».
+- Les volumes explicitement signalés comme déjà absents ne bloquent plus le nettoyage. Une erreur de lecture du stockage sur un nœud ou de suppression d'un volume n'empêche plus le traitement des autres volumes accessibles.
+- Affichage d'un bilan incomplet avec les erreurs rencontrées lorsque le nettoyage ne peut pas tout traiter, au lieu d'un message de succès ou d'absence de disques orphelins.
+- Conservation des protections : les volumes dont le VMID existe encore, ceux référencés par une configuration de VM et ceux utilisés par un client Ceph (« watchers ») ne sont pas supprimés. L'impossibilité de lire les configurations des VM interrompt le nettoyage avant toute suppression.
+
+### Tests
+- Ajout de six tests de régression couvrant les volumes partagés, les erreurs d'inventaire, les disques déjà absents, les erreurs de suppression et la protection des volumes encore utilisés.
+
+---
+
 ## [1.8.0] — 2026-09-30
 
 ### Ajouts

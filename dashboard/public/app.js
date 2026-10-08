@@ -3460,13 +3460,16 @@ cleanOrphanedDisksButton?.addEventListener('click', async () => {
     });
     const deletedCount = Array.isArray(result.deletedVolumes) ? result.deletedVolumes.length : 0;
     const skippedCount = Array.isArray(result.skippedVolumes) ? result.skippedVolumes.length : 0;
+    const cleanupErrors = Array.isArray(result.errors) ? result.errors : [];
     showMessage(
       targetStatus,
-      deletedCount === 0 && skippedCount === 0
+      cleanupErrors.length
+        ? `Cleanup incomplete: ${deletedCount} deleted; ${skippedCount} ignored. ${cleanupErrors.map(error => `${error.node}: ${error.reason}`).join('; ')}`
+        : deletedCount === 0 && skippedCount === 0
         ? 'No orphaned disks found.'
         : `Deleted ${deletedCount} orphaned disk${deletedCount === 1 ? '' : 's'}; ignored ${skippedCount}.`,
-      'success',
-      8000
+      cleanupErrors.length ? 'danger' : 'success',
+      cleanupErrors.length ? 30000 : 8000
     );
   } catch (error) {
     showMessage(targetStatus, error.message, 'danger', 10000);
