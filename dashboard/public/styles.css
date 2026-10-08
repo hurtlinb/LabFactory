@@ -1547,6 +1547,16 @@ input:focus, textarea:focus, select:focus {
 
 .dash-row-info { flex: 1; min-width: 0; }
 
+.dash-lab-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dash-lab-actions .btn { padding: 5px 8px; font-size: 12px; }
+
 .dash-row-name {
   font-size: 12px;
   font-weight: 500;

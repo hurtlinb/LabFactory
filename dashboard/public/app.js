@@ -1253,42 +1253,7 @@ function renderLifecycleLabs() {
     })
     .join('');
 
-  lifecycleList.querySelectorAll('.lifecycle-action').forEach(button => {
-    button.addEventListener('click', async event => {
-      event.stopPropagation();
-      const action = button.dataset.action;
-      const target = state.deployments.find(d => d.id === button.dataset.deploymentId);
-      if (['destroy', 'stop', 'deploy'].includes(action) && !await confirmLabAction(target, action)) return;
-      if (action === 'deploy' || action === 'start') {
-        const thisDeployment = state.deployments.find(d => d.id === button.dataset.deploymentId);
-        const conflicting = state.deployments.find(
-          d => d.id !== button.dataset.deploymentId &&
-               d.classroom?.id === thisDeployment?.classroom?.id &&
-               DEPLOY_ACTIVE_STATUSES.includes(d.status)
-        );
-        if (conflicting) {
-          const confirmed = await promptDeploymentConflict(conflicting);
-          if (!confirmed) return;
-        }
-      }
-      button.disabled = true;
-      try {
-        const result = await fetchJson(
-          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${action}`,
-          { method: 'POST' }
-        );
-        await refreshLifecycleLabs();
-        if (state.isAdmin) {
-          await refreshQueues();
-        }
-        showMessage(globalStatus, `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
-      } catch (error) {
-        showMessage(globalStatus, error.message, 'danger');
-      } finally {
-        button.disabled = false;
-      }
-    });
-  });
+  bindLifecycleActions(lifecycleList);
 
   lifecycleList.querySelectorAll('.refresh-deployment-button').forEach(button => {
     button.addEventListener('click', async event => {
@@ -1340,6 +1305,53 @@ function renderLifecycleLabs() {
       await openDeploymentDetails(btn.dataset.deploymentId);
     });
   });
+}
+
+function bindLifecycleActions(container) {
+  container.querySelectorAll('.lifecycle-action').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      const action = button.dataset.action;
+      const target = state.deployments.find(d => d.id === button.dataset.deploymentId);
+      if (['destroy', 'stop', 'deploy'].includes(action) && !await confirmLabAction(target, action)) return;
+      if (action === 'deploy' || action === 'start') {
+        const thisDeployment = state.deployments.find(d => d.id === button.dataset.deploymentId);
+        const conflicting = state.deployments.find(
+          d => d.id !== button.dataset.deploymentId &&
+               d.classroom?.id === thisDeployment?.classroom?.id &&
+               DEPLOY_ACTIVE_STATUSES.includes(d.status)
+        );
+        if (conflicting) {
+          const confirmed = await promptDeploymentConflict(conflicting);
+          if (!confirmed) return;
+        }
+      }
+      button.disabled = true;
+      try {
+        const result = await fetchJson(
+          `/api/lifecycle/deployments/${button.dataset.deploymentId}/${action}`,
+          { method: 'POST' }
+        );
+        await refreshLifecycleLabs();
+        if (state.isAdmin) {
+          await refreshQueues();
+        }
+        showMessage(globalStatus, `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
+      } catch (error) {
+        showMessage(globalStatus, error.message, 'danger');
+      } finally {
+        button.disabled = false;
+      }
+    });
+  });
+}
+
+function renderDashboardPowerActions(deployment) {
+  const actions = resolveLifecycleActions(deployment.status);
+  if (actions.busy) return '<span class="loading-spinner" role="status" aria-label="Lab operation in progress"></span>';
+  return actions.items.filter(item => ['start', 'stop'].includes(item.action)).map(item =>
+    `<button class="btn btn-ghost lifecycle-action" type="button" data-action="${item.action}" data-deployment-id="${escapeHtmlAttr(deployment.id)}" aria-label="${item.label} lab #${escapeHtmlAttr(String(deployment.deploymentNumber))}">${uiIcon(item.action)} ${item.label}</button>`
+  ).join('');
 }
 
 function renderDashboard() {
@@ -1400,11 +1412,13 @@ function renderDashboard() {
               <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)} — ${escapeHtml(d.classroom.name)}</a>
               <p class="dash-row-meta">${d.totalVmCount} VMs · Lab #${d.deploymentNumber}</p>
             </div>
-            <span class="dash-badge ${badgeClass}">${badgeText}</span>
+            <div class="dash-lab-actions"><span class="dash-badge ${badgeClass}">${badgeText}</span>${renderDashboardPowerActions(d)}</div>
           </div>`;
       }).join('');
     }
   }
+
+  if (labsList) bindLifecycleActions(labsList);
 
   // Classrooms overview
   const classroomsGrid = elById('dashClassroomsGrid');
@@ -1432,7 +1446,7 @@ function renderDashboard() {
                     <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
                     <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''} · ${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</p>
                   </div>
-                  <span class="dash-badge ${badgeClass}">${badgeText}</span>
+                  <div class="dash-lab-actions"><span class="dash-badge ${badgeClass}">${badgeText}</span>${renderDashboardPowerActions(d)}</div>
                 </div>`;
             }).join('')
           : '<p class="dash-classroom-empty">No labs deployed</p>';
@@ -1448,6 +1462,7 @@ function renderDashboard() {
       }).join('');
     }
   }
+  if (classroomsGrid) bindLifecycleActions(classroomsGrid);
 }
 
 function isDeploymentBusy(status) {

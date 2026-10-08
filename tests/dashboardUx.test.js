@@ -29,7 +29,7 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
+  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
@@ -166,4 +166,26 @@ test('lab modal closes on Escape and navigation without overwriting the destinat
   dialog.dispatchEvent(new w.Event('close'));
   assert.equal(api.state.activeDeploymentDetailsId, 'other');
   assert.equal(dialog.open, true);
+});
+
+
+test('dashboard tiles expose power actions according to lab status', t => {
+  const { api, document } = setup(t);
+  api.state.isAdmin = true;
+  api.state.classrooms = [{ id: 'room', name: 'Room', workstationCount: 1 }];
+  api.state.deployments = ['running', 'stopped', 'mixed', 'starting', 'failed'].map((status, i) => ({
+    id: status, status, deploymentNumber: i + 1, blueprint: { name: 'Lab' },
+    classroom: api.state.classrooms[0], totalVmCount: 1
+  }));
+  api.renderDashboard();
+  for (const container of ['dashRecentLabsList', 'dashClassroomsGrid']) {
+    const root = document.getElementById(container);
+    const actions = id => [...root.querySelectorAll('[data-deployment-id="' + id + '"]')].map(b => b.dataset.action);
+    assert.deepEqual(actions('running'), ['stop']);
+    assert.deepEqual(actions('stopped'), ['start']);
+    assert.deepEqual(actions('mixed'), ['start', 'stop']);
+    assert.deepEqual(actions('starting'), []);
+    assert.deepEqual(actions('failed'), []);
+    assert(root.querySelector('[role="status"]'));
+  }
 });
