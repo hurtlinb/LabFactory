@@ -295,6 +295,12 @@
                   </label>
                 </div>
                 <label class="field">
+                  <span>Course</span>
+                  <select id="blueprintCourseId" name="courseId" required>
+                    <option value="">Select a course</option>
+                  </select>
+                </label>
+                <label class="field">
                   <span>Description</span>
                   <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
                 </label>
@@ -328,18 +334,7 @@
           </div>
 
           <div id="blueprintWorkspace" class="builder-grid" hidden><div class="editor-toolbar"><button id="backToBlueprints" class="btn btn-ghost" type="button">Back to blueprints</button><span id="blueprintSaveStatus" role="status">All changes saved</span><button id="duplicateBlueprint" class="btn btn-secondary" type="button">Duplicate blueprint</button><div id="blueprintLockInfo"></div></div>
-            <article class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">VM models and customizations</p><button class="btn btn-ghost palette-toggle" id="paletteToggle" aria-expanded="true" aria-controls="templatePalette paletteFilters" type="button">Show / hide palette</button>
-                </div>
-              </div>
-              <div class="stack" id="paletteFilters"><label class="field"><span>Find a VM model</span><input id="paletteSearch" type="search" placeholder="Model name"></label><label class="field"><span>Operating system</span><select id="paletteOs"><option value="">All systems</option><option value="ubuntu">Ubuntu</option><option value="windows11">Windows 11</option><option value="windows-server">Windows Server</option><option value="other">Other</option></select></label></div><div id="templatePalette" class="template-palette">
-                <p class="placeholder">No VM models yet.</p>
-              </div>
-            </article>
-
-            <article class="panel panel-wide">
+            <article class="panel blueprint-settings">
               <div class="panel-head">
                 <div>
                   <p class="eyebrow">workspace</p>
@@ -350,7 +345,7 @@
                 </div>
               </div>
 
-                            <form id="blueprintForm" class="stack"><h2>1. Blueprint details</h2>
+              <form id="blueprintForm" class="blueprint-settings-form"><section class="blueprint-details-fields"><h2>1. Blueprint details</h2>
                 <label class="field">
                   <span>Blueprint name</span>
                   <input id="blueprintName" type="text" name="name" placeholder="SOC analyst sandbox" required>
@@ -359,13 +354,8 @@
                   <span>Description</span>
                   <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
                 </label>
-                <label class="field">
-                  <span>Course</span>
-                  <select id="blueprintCourseId" name="courseId" required>
-                    <option value="">Select a course</option>
-                  </select>
-                </label>
-                <h2>2. Guest access</h2><p class="muted">Choose one shared password or generate a password for each workstation. Credentials are included in the VM CSV export.</p><label class="switch blueprint-password-toggle">
+
+                </section><section class="blueprint-access-fields"><h2>2. Guest access</h2><p class="muted">Choose one shared password or generate a password for each workstation. Credentials are included in the VM CSV export.</p><label class="switch blueprint-password-toggle">
                   <input id="blueprintGuestPasswordMode" type="checkbox" name="guestPasswordMode" value="per-workstation">
                   <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
                   <span class="switch-label">Generate a different password for each workstation</span>
@@ -378,7 +368,21 @@
                   <span>Linux default username</span>
                   <input id="blueprintLinuxDefaultUsername" type="text" name="linuxDefaultUsername" placeholder="ubuntu">
                 </label>
-              </form><h2>3. Machines and customizations</h2><p class="muted">Drag VM models below, then drag customizations onto each VM. All edits are saved with Save blueprint. File uploads also save the blueprint.</p><div id="dropzone" class="dropzone">
+              </section></form>
+            </article>
+            <div class="blueprint-machine-editor">
+            <article class="panel blueprint-palette">
+              <div class="panel-head">
+                <div>
+                  <p class="eyebrow">VM models and customizations</p><button class="btn btn-ghost palette-toggle" id="paletteToggle" aria-expanded="true" aria-controls="templatePalette paletteFilters" type="button">Show / hide palette</button>
+                </div>
+              </div>
+              <div class="stack" id="paletteFilters"><label class="field"><span>Find a VM model</span><input id="paletteSearch" type="search" placeholder="Model name"></label><label class="field"><span>Operating system</span><select id="paletteOs"><option value="">All systems</option><option value="ubuntu">Ubuntu</option><option value="windows11">Windows 11</option><option value="windows-server">Windows Server</option><option value="other">Other</option></select></label></div><div id="templatePalette" class="template-palette">
+                <p class="placeholder">No VM models yet.</p>
+              </div>
+            </article>
+
+            <article class="panel blueprint-canvas"><h2>3. Machines and customizations</h2><p class="muted">Drag VM models below, then drag customizations onto each VM. All edits are saved with Save blueprint. File uploads also save the blueprint.</p><div id="dropzone" class="dropzone">
                 <div class="dropzone-copy">
                   <p>Drop VM templates here</p>
                   <span>Each drop creates a VM instance inside the lab blueprint.</span>
@@ -388,6 +392,7 @@
 
 
             </article>
+            </div>
           </div>
         </section>
 
