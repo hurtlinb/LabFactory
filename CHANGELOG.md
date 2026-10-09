@@ -2,6 +2,25 @@
 
 All notable changes to LabFactory are documented here.
 
+## [1.8.2] — 2026-10-09
+
+### Ajouts
+- Actions Start/Stop directement dans les tuiles du dashboard, sous forme d'icônes au-dessus du statut du lab. Les actions disponibles suivent l'état du lab et conservent les confirmations et contrôles de conflits de salle.
+- Colonnes Username et Password dans les détails du déploiement, avec les identifiants utilisés par l'export CSV. Le mot de passe est masqué par défaut et peut être affiché ou masqué individuellement avec le bouton œil ; il est de nouveau masqué au rafraîchissement des détails.
+- Aperçu du contenu des blueprints dans la bibliothèque : noms et icônes des quatre premières VM, avec un compteur pour les VM supplémentaires.
+
+### Interface
+- Bibliothèque de blueprints présentée en cartes compactes dans une grille, avec description raccourcie et aperçu en bas de carte sur fond blanc.
+- Workspace sur toute la largeur, réservé aux détails du blueprint et aux accès invités, avec des champs regroupés pour réduire la hauteur du formulaire.
+- Section « Machines and customizations » séparée, avec son titre au-dessus d'une palette horizontale à deux onglets : VM et Customization. Navigation au clavier entre les onglets.
+- Palette compacte sans barres de recherche ni filtre OS, icônes réduites et personnalisations en couleur, dont le logo Docker. Pictogrammes ajoutés aux titres des onglets.
+- Zone de dépose sur fond pointillé, cartes VM compactes et palette maintenue visible pendant le défilement sur grand écran. Mise en page adaptée aux petits écrans.
+
+### Tests
+- Couverture des actions Start/Stop du dashboard, des onglets de la palette, de l'affichage individuel des mots de passe et des aperçus de blueprints.
+
+---
+
 ## [1.8.1] — 2026-10-08
 
 ### Corrections
