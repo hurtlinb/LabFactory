@@ -383,7 +383,6 @@ function renderBlueprintList() {
         const lockTitle = locked ? getBlueprintLockMessage(blueprint) : '';
         return `
         <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${blueprint.id}">
-          ${renderBlueprintPreview(blueprint)}
           <div class="panel-head">
             <div class="blueprint-summary">
               <strong>${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</strong>
@@ -397,6 +396,7 @@ function renderBlueprintList() {
               <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle)}" ${locked ? 'disabled' : ''}>${uiIcon('delete')}</button>
             </div>
           </div>
+          ${renderBlueprintPreview(blueprint)}
         </article>
       `;
       }
