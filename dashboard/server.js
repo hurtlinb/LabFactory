@@ -858,6 +858,7 @@ const mapBlueprintSummary = row => ({
       ''
   },
   vmCount: Number(row.vm_count ?? 0),
+  previewVms: row.preview_vms ?? [],
   deploymentCount: Number(row.deployment_count ?? 0),
   guestPasswordMode: row.guest_password_mode === 'per-workstation' ? 'per-workstation' : 'shared',
   isLocked: Number(row.deployment_count ?? 0) > 0,
@@ -3398,6 +3399,17 @@ app.get(
          t.last_name AS teacher_last_name,
          t.display_name AS teacher_display_name,
          COUNT(v.id) AS vm_count,
+         (
+           SELECT COALESCE(json_agg(preview ORDER BY preview.vm_order, preview.id), '[]'::json)
+           FROM (
+             SELECT pv.id, pv.name, pt.os_type AS "osType", pv.vm_order
+             FROM lab_blueprint_vms pv
+             JOIN vm_templates pt ON pt.id = pv.template_id
+             WHERE pv.blueprint_id = b.id
+             ORDER BY pv.vm_order, pv.id
+             LIMIT 4
+           ) preview
+         ) AS preview_vms,
          (
            SELECT COUNT(*)::int
            FROM lab_deployments d

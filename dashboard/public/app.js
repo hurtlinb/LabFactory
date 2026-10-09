@@ -359,6 +359,16 @@ function renderClassroomEditor() {
   }
 }
 
+function renderBlueprintPreview(blueprint) {
+  const vms = (blueprint.previewVms || []).slice(0, 4);
+  const remaining = Math.max(0, Number(blueprint.vmCount || 0) - vms.length);
+  return `<div class="blueprint-preview" aria-label="VM preview">
+    ${vms.map(vm => `<div class="blueprint-preview-vm" title="${escapeHtmlAttr(vm.name)} · ${escapeHtmlAttr(getOsLabel(vm.osType))}"><img src="${escapeHtmlAttr(getOsLogo(vm.osType))}" alt="${escapeHtmlAttr(getOsLabel(vm.osType))}" loading="lazy"><span>${escapeHtml(vm.name)}</span></div>`).join('')}
+    ${remaining ? `<span class="blueprint-preview-more">+${remaining} VM</span>` : ''}
+    ${!vms.length && !remaining ? '<span class="muted">No machines yet</span>' : ''}
+  </div>`;
+}
+
 function renderBlueprintList() {
   if (!state.blueprints.length) {
     blueprintList.innerHTML = '<p class="placeholder">No blueprints yet. Use New to create your first reusable lab.</p>';
@@ -373,6 +383,7 @@ function renderBlueprintList() {
         const lockTitle = locked ? getBlueprintLockMessage(blueprint) : '';
         return `
         <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${blueprint.id}">
+          ${renderBlueprintPreview(blueprint)}
           <div class="panel-head">
             <div class="blueprint-summary">
               <strong>${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</strong>

@@ -1894,3 +1894,19 @@ a { color: var(--brand); }
 .vm-customization-pill img { width: 16px; height: 16px; object-fit: contain; }
 .vm-password-cell { display: flex; align-items: center; gap: 6px; }
 .vm-password-value { font-family: monospace; white-space: pre; }
+
+/* Blueprint library: compact cards with a live VM preview. */
+#blueprintList { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr)); gap: 12px; }
+#blueprintList > .placeholder { grid-column: 1 / -1; }
+#blueprintList .blueprint-item { padding: 0; overflow: hidden; min-width: 0; }
+#blueprintList .blueprint-item > .panel-head { display: flex; flex-direction: column; gap: 10px; padding: 12px; margin: 0; }
+#blueprintList .blueprint-summary { width: 100%; }
+#blueprintList .blueprint-summary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#blueprintList .blueprint-summary .muted { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 30px; }
+#blueprintList .blueprint-item .inline-actions { width: 100%; flex-wrap: wrap; gap: 5px; align-items: center; justify-content: flex-start; }
+#blueprintList .delete-blueprint-button { margin-left: auto; width: 28px; height: 28px; flex-basis: 28px; }
+.blueprint-preview { height: 112px; padding: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-content: center; justify-content: center; align-items: center; border-bottom: 1px solid var(--line); background-color: var(--surface-soft); background-image: radial-gradient(var(--line-strong) 1px, transparent 1px); background-size: 12px 12px; }
+.blueprint-preview-vm { display: flex; align-items: center; gap: 6px; padding: 6px 8px; width: calc(50% - 4px); min-width: 0; max-width: 150px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); box-shadow: 0 2px 4px rgb(0 0 0 / 4%); }
+.blueprint-preview-vm img { width: 20px; height: 20px; object-fit: contain; }
+.blueprint-preview-vm span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+.blueprint-preview-more { font-size: 11px; color: var(--muted); background: var(--surface); padding: 2px 6px; border-radius: 4px; }

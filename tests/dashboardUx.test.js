@@ -130,6 +130,23 @@ test('VM credentials show usernames and reveal each password only on request', a
   assert(!root.innerHTML.includes('secret'));
 });
 
+test('blueprint cards preview VM names and OS with overflow count and escaped content', t => {
+  const { api, document } = setup(t);
+  api.state.blueprints = [{ id: 'preview', name: 'Preview', vmCount: 6, updatedAt: new Date().toISOString(), previewVms: [
+    { name: '<script>VM</script>', osType: 'ubuntu' },
+    { name: 'DC', osType: 'windows-server' },
+    { name: 'Client', osType: 'windows11' },
+    { name: 'Other', osType: 'other' }
+  ] }];
+  api.renderBlueprintList();
+  const preview = document.querySelector('.blueprint-preview');
+  assert.equal(preview.querySelectorAll('.blueprint-preview-vm').length, 4);
+  assert.equal(preview.querySelector('script'), null);
+  assert(preview.textContent.includes('<script>VM</script>'));
+  assert.equal(preview.querySelector('.blueprint-preview-more').textContent, '+2 VM');
+  assert.equal(preview.querySelector('img').getAttribute('src'), '/assets/os-ubuntu.png');
+});
+
 test('delete blueprint does not also trigger opening that blueprint', async t => {
   const { api, document, requests } = setup(t); await api.bootstrap();
   document.querySelector('.delete-blueprint-button').click(); await tick();
