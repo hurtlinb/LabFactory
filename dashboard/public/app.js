@@ -1,6 +1,8 @@
 import { labStatusLabel, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
 
 const UI_ICONS = {
+  "eye": '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  "eye-off": '<path d="m3 3 18 18M10 5a12 12 0 0 1 12 7 18 18 0 0 1-4 5M6 6a18 18 0 0 0-4 6s3 7 10 7a12 12 0 0 0 5-1"/>',
   "close": "<path d=\"m6 6 12 12M6 18 18 6\"/>",
   "delete": "<path d=\"M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7\"/>",
   "edit": "<path d=\"m16 3 5 5L8 21H3v-5ZM14 5l5 5\"/>",
@@ -1645,6 +1647,8 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
           <td>${escapeHtml(getOsLabel(vm.osType))}</td>
           <td>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</td>
           <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
+          <td>${escapeHtml(vm.username || 'n/a')}</td>
+          <td>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button></div>` : '<span class="muted">n/a</span>'}</td>
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
           <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}</td>
@@ -1817,6 +1821,8 @@ function renderDeploymentVmDetails(payload) {
                       <th scope="col">OS</th>
                       <th scope="col">VLAN</th>
                       <th scope="col">IP</th>
+                      <th scope="col">Username</th>
+                      <th scope="col">Password</th>
                       <th scope="col">State</th>
                       <th scope="col">Proxmox</th>
                       <th scope="col"></th>
@@ -1874,6 +1880,22 @@ function renderDeploymentVmDetails(payload) {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       await pauseVmUpdates(button.dataset.deploymentId, button.dataset.vmid, button);
+    });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.vm-password-toggle').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      const vm = payload.vms.find(item => String(item.vmid) === button.dataset.vmid);
+      if (!vm) return;
+      const reveal = button.getAttribute('aria-pressed') !== 'true';
+      const value = button.parentElement.querySelector('.vm-password-value');
+      value.textContent = reveal ? vm.password : '';
+      value.hidden = !reveal;
+      button.setAttribute('aria-pressed', String(reveal));
+      button.setAttribute('aria-label', `${reveal ? 'Hide' : 'Show'} password for ${vm.name}`);
+      button.title = `${reveal ? 'Hide' : 'Show'} password`;
+      button.innerHTML = uiIcon(reveal ? 'eye-off' : 'eye');
     });
   });
 

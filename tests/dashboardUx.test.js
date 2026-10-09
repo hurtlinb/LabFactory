@@ -106,6 +106,30 @@ test('detail refresh preserves expanded task output and focused VM selection', a
   assert.match(root.querySelector('pre').textContent, /Updated output/);
 });
 
+test('VM credentials show usernames and reveal each password only on request', async t => {
+  const { api, document } = setup(t);
+  await api.bootstrap();
+  const payload = { deployment: { id: 'lab', status: 'running' }, vms: [
+    { vmid: 1, name: 'Ubuntu', osType: 'ubuntu', username: 'ubuntu', password: '<secret>&123' },
+    { vmid: 2, name: 'Windows', osType: 'windows11', username: 'Administrator', password: 'second-secret' }
+  ] };
+  api.renderDeploymentVmDetails(payload);
+  const root = document.getElementById('deploymentVmDetailsList');
+  assert(root.textContent.includes('Administrator'));
+  assert(!root.innerHTML.includes('secret'));
+  const button = root.querySelector('.vm-password-toggle');
+  button.click();
+  assert.equal(root.querySelector('.vm-password-value').textContent, '<secret>&123');
+  assert.equal(root.querySelector('secret'), null);
+  assert(!root.textContent.includes('second-secret'));
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  button.click();
+  assert(!root.innerHTML.includes('secret'));
+  button.click();
+  api.renderDeploymentVmDetails(payload);
+  assert(!root.innerHTML.includes('secret'));
+});
+
 test('delete blueprint does not also trigger opening that blueprint', async t => {
   const { api, document, requests } = setup(t); await api.bootstrap();
   document.querySelector('.delete-blueprint-button').click(); await tick();

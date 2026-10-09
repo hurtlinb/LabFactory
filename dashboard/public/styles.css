@@ -1892,3 +1892,5 @@ a { color: var(--brand); }
 .blueprint-palette [data-customization-key="domain-controller"] .vm-lib-cust-icon { color: #0078d4; }
 .blueprint-palette [data-customization-key="domain-member"] .vm-lib-cust-icon { color: #0891b2; }
 .vm-customization-pill img { width: 16px; height: 16px; object-fit: contain; }
+.vm-password-cell { display: flex; align-items: center; gap: 6px; }
+.vm-password-value { font-family: monospace; white-space: pre; }

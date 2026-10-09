@@ -2466,6 +2466,7 @@ app.get(
     });
     const activeWorkstationNumbers = deriveTargetWorkstationNumbers(vmPlan, vmProgressSource.targetVmids);
 
+    res.set('Cache-Control', 'no-store');
     res.json({
       deployment: {
         id: deployment.id,
@@ -2489,6 +2490,10 @@ app.get(
           osType: vm.osType,
           vlanTag: vm.vlanTag,
           ipAddress: buildDeploymentVmIpAddress(vm),
+          username: isWindowsOsType(vm.osType)
+            ? getWindowsAdminUsername(vm.language)
+            : String(blueprint.linuxDefaultUsername ?? 'ubuntu').trim() || 'ubuntu',
+          password: vm.windowsAdminPassword ?? '',
           state: inferDeploymentVmStatus({
             deploymentStatus: effectiveDeploymentStatus,
             vm,
