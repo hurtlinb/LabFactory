@@ -210,26 +210,66 @@ Use:
 datasource_list: [ NoCloud, ConfigDrive ]
 ```
 
-4. Clean the Cloud-Init state before turning the VM into a template:
+4. On Ubuntu Server 26.04 templates using Dracut, check for early DHCP configuration before final cleanup.
+
+An observed failure occurs when `/run/systemd/network/zzzz-dracut-default.network` activates DHCP on `ens18` before Cloud-Init can rename it to `eth0`. Cloud-Init reports `Error renaming ... from ens18 to eth0` with `[busy]`, while the generated Netplan configuration contains the correct static IP. Running `sudo netplan apply` manually then applies the expected IP, but does not fix the template for future clones.
+
+For VMs booting from a local virtual disk **without networking required in the initramfs** (no NFS/iSCSI root or network-based disk unlocking), disable Dracut's `dyn-netconf` module in the template:
+
+```bash
+sudo mkdir -p /etc/dracut.conf.d
+echo 'omit_dracutmodules+=" dyn-netconf "' \
+  | sudo tee /etc/dracut.conf.d/90-labfactory-no-dyn-netconf.conf
+
+kernel_version="$(uname -r)"
+sudo dracut --force "/boot/initrd.img-${kernel_version}" "$kernel_version"
+echo "Dracut exit code: $?"
+```
+
+Proceed only if the build succeeds (exit code `0`, without build errors). Verify the resulting image:
+
+```bash
+sudo lsinitrd -m "/boot/initrd.img-$(uname -r)"
+```
+
+`dyn-netconf` must be absent from the module list. Reboot into that kernel and check the network **without running `netplan apply`**:
+
+```bash
+sudo reboot
+# After reconnecting:
+uname -r
+ip -4 address
+ip -4 route
+cloud-init status --long
+sudo journalctl -b -u systemd-networkd --no-pager
+```
+
+The configured address and route should be applied automatically, without early DHCP activation through `zzzz-dracut-default.network` or the interface-renaming error. Keep the Dracut configuration file in the template so future initramfs builds also exclude the module.
+
+**Old kernel remnants:** avoid `dracut --regenerate-all --force` for this procedure. It can attempt to build an image for a removed kernel whose directory remains under `/usr/lib/modules`, producing missing-module errors unrelated to `dyn-netconf`. In the observed case, `7.0.0-14-generic` was removed while `7.0.0-38-generic` and its modules were installed. Check `uname -r` and the installed kernel packages, and target the valid kernel explicitly as above; do not reboot after a failed build without checking the image for the kernel you intend to boot.
+
+References: [Ubuntu 26.04 Dracut/Netplan conflict and dyn-netconf workaround](https://discourse.ubuntu.com/t/server-installation-creates-conflicting-dracut-and-netplan-networking-configuration/87238), [Dracut image generation](https://dracut-ng.github.io/dracut/man/dracut.8.html).
+
+5. After completing the preparation and reboot checks, clean the Cloud-Init state before turning the VM into a template:
 
 ```bash
 sudo cloud-init clean --logs
 ```
 
-5. Remove machine identifiers to avoid duplicate identities and network conflicts on clones:
+6. Remove machine identifiers to avoid duplicate identities and network conflicts on clones:
 
 ```bash
 sudo truncate -s 0 /etc/machine-id
 sudo rm /var/lib/dbus/machine-id
 ```
 
-6. Optionally remove existing SSH host keys so they are regenerated on first boot:
+7. Optionally remove existing SSH host keys so they are regenerated on first boot:
 
 ```bash
 sudo rm -f /etc/ssh/ssh_host_*
 ```
 
-7. Power off the VM:
+8. Power off the VM:
 
 ```bash
 sudo poweroff
@@ -238,6 +278,8 @@ sudo poweroff
 Once the VM is powered off, convert it into a Proxmox template.
 
 LabFactory expects Linux guest customization over SSH. The template must therefore expose an SSH server and allow login for the configured `linux_default_username`.
+
+9. Validate the template with a **new clone** deployed by LabFactory, with a static IP configured in the blueprint. Before any manual `netplan apply`, verify that the clone receives its intended IP and gateway on its first boot, that Cloud-Init has no interface-renaming errors, and that SSH/customization succeeds. A reboot of the template alone does not validate first-boot behavior on a new clone. LabFactory intentionally requests DHCP when no static IP is configured for the VM.
 
 ## Windows Template Preparation
 The Windows template preparation flow is the same for Windows Server 2022 and Windows 11.
