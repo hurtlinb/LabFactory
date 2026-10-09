@@ -1839,3 +1839,38 @@ a { color: var(--brand); }
 
 .palette-toggle { display: none; }
 @media (max-width: 1024px) { .palette-toggle { display: inline-flex; } .palette-collapsed #paletteFilters, .palette-collapsed #templatePalette { display: none; } }
+
+/* Horizontal blueprint palette and dotted machine canvas. */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.blueprint-machine-editor { grid-template-columns: minmax(0, 1fr); gap: 0; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface); }
+.blueprint-machine-editor .blueprint-palette { position: sticky; top: 0; z-index: 5; max-height: none; padding: 0 16px 12px; border: 0; border-bottom: 1px solid var(--line); border-radius: var(--r) var(--r) 0 0; background: var(--surface); box-shadow: none; }
+.blueprint-palette-tabs { display: flex; gap: 20px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+.blueprint-palette-tabs button { padding: 14px 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.blueprint-palette-tabs button[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
+.blueprint-palette-tabs button:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
+.palette-search-bar { display: flex; gap: 10px; }
+.palette-search-bar > .field:first-child { flex: 1; min-width: 0; }
+.palette-search-bar > .field:last-child { width: 170px; }
+.blueprint-palette #templatePalette { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; }
+.blueprint-palette .vm-lib-section { flex-direction: row; gap: 16px; width: max-content; min-width: 100%; }
+.blueprint-palette .vm-lib-group { display: flex; flex-direction: row; gap: 8px; position: relative; padding-top: 20px; }
+.blueprint-palette .vm-lib-group-label { position: absolute; top: 0; left: 0; margin: 0; }
+.blueprint-palette .vm-lib-item, .blueprint-palette .vm-lib-cust { flex: 0 0 112px; width: 112px; min-height: 94px; padding: 10px 8px; flex-direction: column; justify-content: center; gap: 6px; text-align: center; border-style: solid; }
+.blueprint-palette .vm-lib-name { flex: none; white-space: normal; overflow-wrap: anywhere; line-height: 1.2; }
+.blueprint-palette .vm-lib-cust-name { line-height: 1.2; }
+.blueprint-palette .palette-os-icon { width: 30px; height: 30px; object-fit: contain; }
+.blueprint-palette .vm-lib-cust-icon { width: 30px; height: 30px; }
+.blueprint-palette .vm-lib-cust-icon svg { width: 22px; height: 22px; }
+.blueprint-palette .vm-lib-hint { display: none; }
+.blueprint-machine-editor .blueprint-canvas { padding: 16px; border: 0; border-radius: 0 0 var(--r) var(--r); box-shadow: none; background: var(--surface-soft); }
+.blueprint-canvas .dropzone { min-height: 460px; padding: 24px; border: 1px dashed var(--line-strong); background-color: var(--surface-soft); background-image: radial-gradient(var(--line-strong) 1px, transparent 1px); background-size: 16px 16px; }
+.blueprint-canvas .canvas-vm-list { gap: 20px; align-items: flex-start; }
+.blueprint-canvas .vm-card { flex: 0 1 250px; width: 250px; min-width: 0; background: var(--surface); border: 1px solid var(--line-strong); box-shadow: 0 3px 10px rgb(0 0 0 / 6%); }
+.blueprint-canvas .dropzone.dragover { border-color: var(--brand); background-color: var(--brand-soft); }
+@media (max-width: 720px) {
+  .blueprint-machine-editor .blueprint-palette { position: static; }
+  .palette-search-bar { flex-wrap: wrap; }
+  .palette-search-bar > .field:last-child { width: 130px; }
+  .blueprint-canvas .dropzone { padding: 12px; }
+  .blueprint-canvas .vm-card { flex: auto; width: 100%; }
+}

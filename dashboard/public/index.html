@@ -372,12 +372,11 @@
             </article>
             <div class="blueprint-machine-editor">
             <article class="panel blueprint-palette">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">VM models and customizations</p><button class="btn btn-ghost palette-toggle" id="paletteToggle" aria-expanded="true" aria-controls="templatePalette paletteFilters" type="button">Show / hide palette</button>
-                </div>
+              <div class="blueprint-palette-tabs" role="tablist" aria-label="Palette">
+                <button id="paletteVmTab" type="button" role="tab" aria-selected="true" aria-controls="paletteVmPanel" data-palette-tab="vm">VM</button>
+                <button id="paletteCustomizationTab" type="button" role="tab" aria-selected="false" aria-controls="paletteCustomizationPanel" tabindex="-1" data-palette-tab="customization">Customization</button>
               </div>
-              <div class="stack" id="paletteFilters"><label class="field"><span>Find a VM model</span><input id="paletteSearch" type="search" placeholder="Model name"></label><label class="field"><span>Operating system</span><select id="paletteOs"><option value="">All systems</option><option value="ubuntu">Ubuntu</option><option value="windows11">Windows 11</option><option value="windows-server">Windows Server</option><option value="other">Other</option></select></label></div><div id="templatePalette" class="template-palette">
+              <div id="paletteFilters" class="palette-search-bar"><label class="field"><span id="paletteSearchLabel" class="sr-only">Find a VM model</span><input id="paletteSearch" type="search" placeholder="Find a VM model..."></label><label class="field" id="paletteOsField"><span class="sr-only">Operating system</span><select id="paletteOs"><option value="">All systems</option><option value="ubuntu">Ubuntu</option><option value="windows11">Windows 11</option><option value="windows-server">Windows Server</option><option value="other">Other</option></select></label></div><div id="templatePalette" class="template-palette">
                 <p class="placeholder">No VM models yet.</p>
               </div>
             </article>

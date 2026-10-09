@@ -9,6 +9,30 @@ const source = readFileSync('dashboard/public/app.js', 'utf8')
   .replace(/^import .*from '.\/ux.js';\s*/, '')
   .replace(/bootstrap\(\)\.catch\(error => \{[\s\S]*?\n\}\);/, '');
 const tick = () => new Promise(resolve => setImmediate(resolve));
+
+test('blueprint palette switches tabs, searches customizations and supports keyboard navigation', async t => {
+  const { api, document, w } = setup(t);
+  await api.bootstrap();
+  const vmTab = document.getElementById('paletteVmTab');
+  const customizationTab = document.getElementById('paletteCustomizationTab');
+  assert.equal(document.querySelectorAll('[data-palette-tab]').length, 2);
+  assert.equal(document.getElementById('paletteVmPanel').hidden, false);
+  assert.equal(document.getElementById('paletteCustomizationPanel').hidden, true);
+  customizationTab.click();
+  assert.equal(customizationTab.getAttribute('aria-selected'), 'true');
+  assert.equal(document.getElementById('paletteVmPanel').hidden, true);
+  assert.equal(document.getElementById('paletteOsField').hidden, true);
+  const search = document.getElementById('paletteSearch');
+  search.value = 'Docker';
+  search.dispatchEvent(new w.Event('input'));
+  assert.equal(document.querySelectorAll('.vm-lib-cust:not([hidden])').length, 1);
+  assert.equal(document.querySelector('.vm-lib-cust:not([hidden])').dataset.customizationKey, 'docker-install');
+  customizationTab.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowLeft' }));
+  assert.equal(document.activeElement, vmTab);
+  assert.equal(search.value, '');
+  assert.equal(document.getElementById('paletteVmPanel').hidden, false);
+  assert.equal(document.getElementById('paletteOsField').hidden, false);
+});
 const blueprint = { id: 'bp', name: 'Network lab', description: '', course: { id: 'course', courseNumber: 101 }, vms: [{ id: 'vm', name: 'Server', template: { id: 'template' }, config: {} }], updatedAt: new Date().toISOString() };
 function setup(t) {
   const dom = new JSDOM(html, { url: 'http://localhost/', runScripts: 'outside-only' });

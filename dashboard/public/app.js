@@ -579,6 +579,33 @@ function getOsDotClass(osType) {
   return 'dot-linux';
 }
 
+let activePaletteTab = 'vm';
+
+function selectPaletteTab(tab) {
+  activePaletteTab = tab;
+  document.querySelectorAll('[data-palette-tab]').forEach(button => {
+    const selected = button.dataset.paletteTab === tab;
+    button.setAttribute('aria-selected', String(selected));
+    button.tabIndex = selected ? 0 : -1;
+  });
+  document.getElementById('paletteOsField').hidden = tab !== 'vm';
+  document.getElementById('paletteSearch').value = '';
+  document.getElementById('paletteSearch').placeholder = tab === 'vm' ? 'Find a VM model...' : 'Find a customization...';
+  document.getElementById('paletteSearchLabel').textContent = tab === 'vm' ? 'Find a VM model' : 'Find a customization';
+  renderTemplates();
+}
+
+document.querySelectorAll('[data-palette-tab]').forEach(button => {
+  button.addEventListener('click', () => selectPaletteTab(button.dataset.paletteTab));
+  button.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    const tab = event.key === 'Home' ? 'vm' : event.key === 'End' ? 'customization' : activePaletteTab === 'vm' ? 'customization' : 'vm';
+    selectPaletteTab(tab);
+    document.querySelector(`[data-palette-tab="${tab}"]`).focus();
+  });
+});
+
 function renderTemplates() {
   renderModelList();
 
@@ -588,6 +615,7 @@ function renderTemplates() {
       <p class="vm-lib-group-label">VMs</p>
       ${paletteTemplates.map(t => `
         <article class="vm-lib-item" draggable="true" data-template-id="${t.id}">
+          <img class="palette-os-icon" src="${escapeHtmlAttr(getOsLogo(t.osType))}" alt="" draggable="false">
           <span class="vm-lib-name">${escapeHtml(t.name)}</span>
           <span class="vm-lib-vmid">${escapeHtml(getOsLabel(t.osType))}</span>
         </article>`).join('')}
@@ -638,10 +666,24 @@ function renderTemplates() {
     <p class="vm-lib-hint">Drag models to the canvas; drag customizations onto a VM.</p>`;
 
   templatePalette.innerHTML = `
-    <div class="vm-lib-section">
+    <div id="paletteVmPanel" role="tabpanel" aria-labelledby="paletteVmTab" class="vm-lib-section" ${activePaletteTab === 'vm' ? '' : 'hidden'}>
       ${groupsHtml || '<p class="vm-lib-group-label">VMs</p><p class="placeholder">No VM models yet.</p>'}
+    </div>
+    <div id="paletteCustomizationPanel" role="tabpanel" aria-labelledby="paletteCustomizationTab" class="vm-lib-section" ${activePaletteTab === 'customization' ? '' : 'hidden'}>
       ${custHtml}
     </div>`;
+
+  if (activePaletteTab === 'customization') {
+    templatePalette.querySelectorAll('.vm-lib-cust').forEach(card => {
+      card.hidden = !matchesSearch(filterValue('paletteSearch'), card.textContent);
+    });
+    templatePalette.querySelectorAll('#paletteCustomizationPanel .vm-lib-group').forEach(group => {
+      group.hidden = !group.querySelector('.vm-lib-cust:not([hidden])');
+    });
+    if (!templatePalette.querySelector('.vm-lib-cust:not([hidden])')) {
+      document.getElementById('paletteCustomizationPanel').insertAdjacentHTML('beforeend', '<p class="placeholder">No customizations match your search.</p>');
+    }
+  }
 
   templatePalette.querySelectorAll('.vm-lib-item').forEach(card => {
     card.addEventListener('dragstart', event => {
