@@ -1877,6 +1877,7 @@ a { color: var(--brand); }
 }
 
 /* Compact, colored palette symbols. */
+.blueprint-machine-title { margin: 0; padding: 16px 16px 4px; }
 .blueprint-palette .vm-lib-item, .blueprint-palette .vm-lib-cust { flex-basis: 96px; width: 96px; min-height: 76px; padding: 8px 6px; gap: 4px; }
 .blueprint-palette .palette-os-icon, .blueprint-palette .vm-lib-cust-icon { width: 24px; height: 24px; }
 .blueprint-palette .vm-lib-cust-icon { background: transparent; }
