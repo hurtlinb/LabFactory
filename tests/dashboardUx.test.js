@@ -245,6 +245,20 @@ test('lab modal closes on Escape and navigation without overwriting the destinat
 });
 
 
+test('classroom deploy shortcut selects the room without creating a deployment', async t => {
+  const { api, document, w, requests } = setup(t);
+  await api.bootstrap();
+  api.state.classrooms = [{ id: 'room', name: 'A39', workstationCount: 22, vlans: [200], subnetOctets: [200] }];
+  document.getElementById('deploymentClassroomSelect').add(new w.Option('A39', 'room'));
+  api.renderDashboard();
+  document.querySelector('.dash-classroom-deploy').click();
+  await tick();
+  assert.equal(document.getElementById('deploymentClassroomSelect').value, 'room');
+  assert.equal(document.activeElement.id, 'deploymentBlueprintSelect');
+  assert.equal(w.location.hash, '#/lifecycle');
+  assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+});
+
 test('dashboard tiles expose power actions according to lab status', t => {
   const { api, document } = setup(t);
   api.state.isAdmin = true;

@@ -1,6 +1,9 @@
 import { labStatusLabel, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
 
 const UI_ICONS = {
+  "lab": '<path d="M9 3h6M10 3v7L4 20a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1l-6-10V3M8 15h8"/><path d="M10 18h.01M14 17h.01"/>',
+  "monitor": '<rect x="3" y="3" width="18" height="13" rx="2"/><path d="M12 16v5M8 21h8"/>',
+  "plus": '<path d="M12 5v14M5 12h14"/>',
   "eye": '<path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
   "eye-off": '<path d="m3 3 18 18M10 5a12 12 0 0 1 12 7 18 18 0 0 1-4 5M6 6a18 18 0 0 0-4 6s3 7 10 7a12 12 0 0 0 5-1"/>',
   "close": "<path d=\"m6 6 12 12M6 18 18 6\"/>",
@@ -382,21 +385,22 @@ function renderBlueprintList() {
         const locked = Boolean(blueprint.isLocked);
         const lockTitle = locked ? getBlueprintLockMessage(blueprint) : '';
         return `
-        <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${blueprint.id}">
-          <div class="panel-head">
+        <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${escapeHtmlAttr(blueprint.id)}">
+          <div class="blueprint-card-header">
             <div class="blueprint-summary">
-              <strong>${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</strong>
-              <p class="muted">${escapeHtml(blueprint.description || 'No description')}</p>
+              <strong title="${escapeHtmlAttr(blueprint.name)}">${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</strong>
             </div>
-            <div class="inline-actions">
-              ${locked ? `<span class="mini-pill lock-pill" title="${escapeHtmlAttr(lockTitle)}">Locked</span>` : ''}
-              ${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}
-              <span class="mini-pill" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
-              <span class="pill">${blueprint.vmCount} VM</span>
-              <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${blueprint.id}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle)}" ${locked ? 'disabled' : ''}>${uiIcon('delete')}</button>
-            </div>
+            <span class="blueprint-machine-count">${blueprint.vmCount} VM${blueprint.vmCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
+            <button class="btn btn-secondary blueprint-open-button" type="button" aria-label="Open blueprint ${escapeHtmlAttr(blueprint.name)}">${uiIcon(locked ? 'eye' : 'edit')} Open</button>
           </div>
+          <p class="blueprint-card-description" title="${escapeHtmlAttr(blueprint.description || '')}">${escapeHtml(blueprint.description || 'No description')}</p>
           ${renderBlueprintPreview(blueprint)}
+          <div class="blueprint-card-footer">
+            <div class="blueprint-card-owner">${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}</div>
+            <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
+            <div class="blueprint-card-lock">${locked ? `<span class="mini-pill lock-pill" title="${escapeHtmlAttr(lockTitle)}">Locked</span>` : ''}</div>
+            <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${escapeHtmlAttr(blueprint.id)}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle || 'Delete blueprint')}" ${locked ? 'disabled' : ''}>${uiIcon('delete')}</button>
+          </div>
         </article>
       `;
       }
@@ -1469,6 +1473,11 @@ function renderDashboard() {
         const labs = dashboardDeployments.filter(d => d.classroom.id === classroom.id);
         const labsHtml = labs.length
           ? labs.map(d => {
+              const previewVms = state.blueprints.find(blueprint => blueprint.id === d.blueprint.id)?.previewVms || [];
+              const osTypes = [...new Set(previewVms.map(vm => vm.osType).filter(Boolean))];
+              const labIcon = osTypes.length === 1
+                ? `<img src="${escapeHtmlAttr(getOsLogo(osTypes[0]))}" alt="${escapeHtmlAttr(getOsLabel(osTypes[0]))}" loading="lazy">`
+                : uiIcon('lab');
               const badgeClass =
                 d.status === 'mixed' ? 'dash-badge-preparing' : ['running', 'deployed'].includes(d.status) ? 'dash-badge-running' :
                 ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
@@ -1481,27 +1490,42 @@ function renderDashboard() {
                 d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
               return `
                 <div class="dash-classroom-lab">
+                  <span class="dash-classroom-lab-icon">${labIcon}</span>
                   <div class="dash-row-info">
                     <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
-                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''} · ${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
                   </div>
-                  <div class="dash-lab-actions"><div class="dash-lab-power">${renderDashboardPowerActions(d)}</div><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
+                  <div class="dash-classroom-owner">${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</div>
+                  <div class="dash-classroom-status"><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
+                  <div class="dash-lab-power">${renderDashboardPowerActions(d)}</div>
+                  <a class="btn btn-ghost dash-classroom-details" href="#/lifecycle/${encodeURIComponent(d.id)}" aria-label="View lab #${escapeHtmlAttr(String(d.deploymentNumber))}" title="View lab details">${uiIcon('eye')}</a>
                 </div>`;
             }).join('')
-          : '<p class="dash-classroom-empty">No labs deployed</p>';
+          : `<div class="dash-classroom-empty"><span class="dash-classroom-empty-icon">${uiIcon('lab')}</span><div><strong>No labs deployed</strong><p>Deploy a lab to this classroom.</p></div></div>`;
 
         return `
           <div class="dash-classroom-card">
             <div class="dash-classroom-header">
               <strong>${escapeHtml(classroom.name)}</strong>
-              <span class="muted">${classroom.workstationCount} workstation${classroom.workstationCount !== 1 ? 's' : ''}</span>
+              <span class="dash-classroom-seats">${classroom.workstationCount} workstation${classroom.workstationCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
+              <button class="btn ${labs.length ? 'btn-secondary' : 'btn-primary'} dash-classroom-deploy" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}">${uiIcon('plus')} Deploy a lab</button>
             </div>
             <div class="dash-classroom-labs">${labsHtml}</div>
           </div>`;
       }).join('');
     }
   }
-  if (classroomsGrid) bindLifecycleActions(classroomsGrid);
+  if (classroomsGrid) {
+    bindLifecycleActions(classroomsGrid);
+    classroomsGrid.querySelectorAll('.dash-classroom-deploy').forEach(button => {
+      button.addEventListener('click', async () => {
+        await setActiveView('lifecycle');
+        deploymentClassroomSelect.value = button.dataset.classroomId;
+        deploymentBlueprintSelect.focus();
+        deploymentBlueprintSelect.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      });
+    });
+  }
 }
 
 function isDeploymentBusy(status) {
