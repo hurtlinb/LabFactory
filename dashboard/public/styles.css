@@ -1848,6 +1848,7 @@ a { color: var(--brand); }
 .blueprint-palette-tabs button { padding: 14px 8px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
 .blueprint-palette-tabs button[aria-selected="true"] { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
 .blueprint-palette-tabs button:focus-visible { outline: 2px solid var(--brand); outline-offset: -3px; }
+.blueprint-palette-tabs button { display: inline-flex; align-items: center; gap: 7px; padding: 10px 8px; }
 .palette-search-bar { display: flex; gap: 10px; }
 .palette-search-bar > .field:first-child { flex: 1; min-width: 0; }
 .palette-search-bar > .field:last-child { width: 170px; }
@@ -1874,3 +1875,19 @@ a { color: var(--brand); }
   .blueprint-canvas .dropzone { padding: 12px; }
   .blueprint-canvas .vm-card { flex: auto; width: 100%; }
 }
+
+/* Compact, colored palette symbols. */
+.blueprint-palette .vm-lib-item, .blueprint-palette .vm-lib-cust { flex-basis: 96px; width: 96px; min-height: 76px; padding: 8px 6px; gap: 4px; }
+.blueprint-palette .palette-os-icon, .blueprint-palette .vm-lib-cust-icon { width: 24px; height: 24px; }
+.blueprint-palette .vm-lib-cust-icon { background: transparent; }
+.blueprint-palette .vm-lib-cust-icon svg, .vm-lib-cust-icon img { width: 22px; height: 22px; object-fit: contain; }
+.blueprint-palette [data-customization-key="timezone"] .vm-lib-cust-icon { color: #d97706; }
+.blueprint-palette [data-customization-key="timezone"] svg circle { fill: #fff3d6; }
+.blueprint-palette [data-customization-key="second-disk"] .vm-lib-cust-icon { color: #087f8c; }
+.blueprint-palette [data-customization-key="second-disk"] svg rect { fill: #d8f3ef; }
+.blueprint-palette [data-customization-key="name"] .vm-lib-cust-icon { color: #7c3aed; }
+.blueprint-palette [data-customization-key="file-upload"] .vm-lib-cust-icon { color: #16a34a; }
+.blueprint-palette [data-customization-key="ansible-tasks"] .vm-lib-cust-icon { color: #d92344; }
+.blueprint-palette [data-customization-key="domain-controller"] .vm-lib-cust-icon { color: #0078d4; }
+.blueprint-palette [data-customization-key="domain-member"] .vm-lib-cust-icon { color: #0891b2; }
+.vm-customization-pill img { width: 16px; height: 16px; object-fit: contain; }

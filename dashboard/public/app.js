@@ -588,10 +588,6 @@ function selectPaletteTab(tab) {
     button.setAttribute('aria-selected', String(selected));
     button.tabIndex = selected ? 0 : -1;
   });
-  document.getElementById('paletteOsField').hidden = tab !== 'vm';
-  document.getElementById('paletteSearch').value = '';
-  document.getElementById('paletteSearch').placeholder = tab === 'vm' ? 'Find a VM model...' : 'Find a customization...';
-  document.getElementById('paletteSearchLabel').textContent = tab === 'vm' ? 'Find a VM model' : 'Find a customization';
   renderTemplates();
 }
 
@@ -609,7 +605,7 @@ document.querySelectorAll('[data-palette-tab]').forEach(button => {
 function renderTemplates() {
   renderModelList();
 
-  const paletteTemplates = state.templates.filter(t => matchesSearch(filterValue('paletteSearch'), t.name, getOsLabel(t.osType)) && (!filterValue('paletteOs') || t.osType === filterValue('paletteOs')));
+  const paletteTemplates = state.templates;
   const groupsHtml = paletteTemplates.length ? `
     <div class="vm-lib-group">
       <p class="vm-lib-group-label">VMs</p>
@@ -672,18 +668,6 @@ function renderTemplates() {
     <div id="paletteCustomizationPanel" role="tabpanel" aria-labelledby="paletteCustomizationTab" class="vm-lib-section" ${activePaletteTab === 'customization' ? '' : 'hidden'}>
       ${custHtml}
     </div>`;
-
-  if (activePaletteTab === 'customization') {
-    templatePalette.querySelectorAll('.vm-lib-cust').forEach(card => {
-      card.hidden = !matchesSearch(filterValue('paletteSearch'), card.textContent);
-    });
-    templatePalette.querySelectorAll('#paletteCustomizationPanel .vm-lib-group').forEach(group => {
-      group.hidden = !group.querySelector('.vm-lib-cust:not([hidden])');
-    });
-    if (!templatePalette.querySelector('.vm-lib-cust:not([hidden])')) {
-      document.getElementById('paletteCustomizationPanel').insertAdjacentHTML('beforeend', '<p class="placeholder">No customizations match your search.</p>');
-    }
-  }
 
   templatePalette.querySelectorAll('.vm-lib-item').forEach(card => {
     card.addEventListener('dragstart', event => {
@@ -2960,13 +2944,7 @@ function getCustomizationIcon(key) {
       <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
     </svg>`;
   }
-  if (key === 'docker-install') {
-    return `<svg viewBox="0 0 24 24" focusable="false" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
-      <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
-      <line x1="12" y1="22.08" x2="12" y2="12"/>
-    </svg>`;
-  }
+  if (key === 'docker-install') return '<img src="/assets/customization-docker.svg" alt="" draggable="false">';
   return uiIcon('warning');
 }
 
@@ -3786,7 +3764,7 @@ function initUx() {
   blueprintGuestPasswordModeInput?.addEventListener('change', updateSaveStatus);
   window.addEventListener('beforeunload', event => { if (isBlueprintDirty() || savingBlueprint) { event.preventDefault(); event.returnValue = ''; } });
   window.addEventListener('hashchange', readRoute);
-  for (const [id, render] of Object.entries({ blueprintSearch: renderBlueprintList, blueprintCourseFilter: renderBlueprintList, labSearch: renderLifecycleLabs, labStatusFilter: renderLifecycleLabs, labClassroomFilter: renderLifecycleLabs, paletteSearch: renderTemplates, paletteOs: renderTemplates, jobSearch: refreshJobs, jobStatusFilter: refreshJobs, jobActionFilter: refreshJobs })) {
+  for (const [id, render] of Object.entries({ blueprintSearch: renderBlueprintList, blueprintCourseFilter: renderBlueprintList, labSearch: renderLifecycleLabs, labStatusFilter: renderLifecycleLabs, labClassroomFilter: renderLifecycleLabs, jobSearch: refreshJobs, jobStatusFilter: refreshJobs, jobActionFilter: refreshJobs })) {
     document.getElementById(id)?.addEventListener('input', render);
   }
   document.getElementById('menuToggle')?.addEventListener('click', event => {
