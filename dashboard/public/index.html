@@ -130,24 +130,6 @@
           </div>
         </div>
 
-        <div id="userSession" class="user-session" hidden>
-          <span id="userSessionName" class="user-session-name">User</span>
-          <span id="userSessionMeta" class="user-session-meta"></span>
-          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
-        </div>
-
-        <div class="app-version-row">
-          <span id="appVersion" class="app-version">Version --</span>
-          <button id="changelogBtn" class="changelog-btn" type="button" title="Changelog" aria-label="View changelog">
-            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <line x1="16" y1="13" x2="8" y2="13"></line>
-              <line x1="16" y1="17" x2="8" y2="17"></line>
-              <polyline points="10 9 9 9 8 9"></polyline>
-            </svg>
-          </button>
-        </div>
       </div>
     </aside>
 
@@ -692,6 +674,27 @@
         </section>
       </div><!-- /.main-content -->
     </main>
+    <footer class="app-footer" aria-label="Session and application version">
+        <div id="userSession" class="user-session" hidden>
+          <span id="userSessionInitials" class="user-session-avatar" aria-hidden="true"></span>
+          <span id="userSessionName" class="user-session-name">User</span>
+          <span id="userSessionMeta" class="user-session-meta"></span>
+          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
+        </div>
+
+        <div class="app-version-row">
+          <span id="appVersion" class="app-version">Version --</span>
+          <button id="changelogBtn" class="changelog-btn" type="button" title="Changelog" aria-label="View changelog">
+            <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <line x1="16" y1="13" x2="8" y2="13"></line>
+              <line x1="16" y1="17" x2="8" y2="17"></line>
+              <polyline points="10 9 9 9 8 9"></polyline>
+            </svg>
+          </button>
+        </div>
+    </footer>
   </div><!-- /.shell -->
 
   <!-- ── Access denied (no recognized Keycloak role) ──────────── -->

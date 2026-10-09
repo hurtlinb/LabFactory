@@ -51,10 +51,16 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
 .sidebar-health-list { display: flex; flex-wrap: wrap; gap: 14px; }
 .sidebar-health { font-size: 11px; }
 .sidebar-health[data-state='ok'] .sidebar-health-icon { color: var(--accent); }
-.user-session { margin-left: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0; border: 0; }
+.app-footer { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 18px; padding: 12px 24px; min-height: 56px; background: var(--surface); border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.user-session { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; padding: 0; border: 0; min-width: 0; }
+.user-session-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: var(--brand); color: white; font-size: 10px; font-weight: 600; letter-spacing: .02em; }
 .user-session-name { color: var(--text); font-weight: 600; }
-.user-session-meta { padding: 3px 8px; background: var(--accent-soft); color: var(--accent); border-radius: var(--r-full); }
-.app-version { color: var(--brand); background: var(--brand-soft); padding: 2px 5px; border-radius: 4px; }
+.user-session-meta { width: auto; max-width: 100%; padding: 0; background: transparent; color: var(--muted); }
+.user-session-meta:empty { display: none; }
+.app-footer .app-version-row { gap: 8px; }
+.app-footer .user-session:not([hidden]) + .app-version-row::before { content: '\00b7'; margin-right: 8px; }
+.app-version { color: var(--muted); font-size: 11px; }
+.changelog-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 3px; }
 .app-topbar {
   position: relative; z-index: 10; background: transparent; border: 0;
   width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 0; height: 76px;
@@ -110,7 +116,7 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
   .sidebar .sidebar-footer { align-items: stretch; }
   .sidebar-health-list { gap: 10px; }
   .user-session { margin-left: 0; }
-  .main { height: auto; min-height: 100dvh; }
+  .main { height: auto; min-height: 0; }
   .app-topbar { position: sticky; top: 0; width: 100%; height: 64px; padding: 0 20px; margin-bottom: 24px; background: var(--surface); border-bottom: 1px solid var(--line-strong); z-index: 50; }
   .dev-env .app-topbar { background: var(--surface); }
   .menu-toggle { display: inline-flex; }

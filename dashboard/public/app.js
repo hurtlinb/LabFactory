@@ -2665,6 +2665,14 @@ async function loadAppInfo() {
   }
 
   userSessionName.textContent = state.currentUser.name || state.currentUser.username || 'Authenticated user';
+  const avatar = document.getElementById('userSessionInitials');
+  if (avatar) {
+    const words = userSessionName.textContent.match(/[\p{L}\p{N}]+/gu) || ['User'];
+    const initials = words.length === 1 ? Array.from(words[0]).slice(0, 3).join('')
+      : words.length === 2 ? Array.from(words[0])[0] + Array.from(words[1]).slice(0, 2).join('')
+      : words.slice(0, 3).map(word => Array.from(word)[0]).join('');
+    avatar.textContent = initials.toLocaleUpperCase().slice(0, 3);
+  }
   userSessionMeta.textContent = state.currentUser.email || state.currentUser.username || '';
   if (logoutLink && state.auth.logoutUrl) {
     logoutLink.href = state.auth.logoutUrl;
