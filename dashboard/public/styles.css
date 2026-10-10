@@ -1286,7 +1286,6 @@ input:focus, textarea:focus, select:focus {
   flex-wrap: wrap;
 }
 
-.lc-actions-spacer { margin-left: auto; }
 
 /* ── Deployment details ────────────────────────────────────────── */
 .vm-state-table-wrap { max-height: min(60vh, 580px); }

@@ -1246,7 +1246,6 @@ function renderLifecycleLabs() {
       const visibleActions = actions.busy
         ? []
         : actions.items.filter(item => canManage || !['deploy', 'destroy'].includes(item.action));
-      const canDeleteDeployment = canManage && ['idle', 'failed', 'destroyed'].includes(deployment.status);
       const hasWarning = deployment.status === 'mixed';
       const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
       const totalVmCount = Number(deployment.totalVmCount ?? 0);
@@ -1260,10 +1259,6 @@ function renderLifecycleLabs() {
         : visibleActions
             .map(a => `<button class="btn lifecycle-action ${a.action === 'destroy' ? 'btn-danger' : ''}" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${uiIcon(({deploy: 'upload', start: 'start', stop: 'stop', destroy: 'delete'})[a.action])} ${a.label}</button>`)
             .join('');
-
-      const deleteBtn = canDeleteDeployment
-        ? `<button class="btn btn-ghost delete-deployment-button" type="button" data-deployment-id="${deployment.id}">${uiIcon('delete')} Delete record</button>`
-        : '';
 
       const s = deployment.status || 'idle';
       const statusPillClass = actions.busy ? 'status-pill-busy'
@@ -1299,7 +1294,6 @@ function renderLifecycleLabs() {
           <div class="lc-actions">
             ${actionButtons}
             ${deployment.canResumeCustomization ? `<button class="btn lifecycle-action" type="button" data-action="resume-customization" data-deployment-id="${deployment.id}">Resume incomplete customizations</button>` : ''}
-            ${deleteBtn ? `<span class="lc-actions-spacer"></span>${deleteBtn}` : ''}
           </div>
         </article>`;
     })
@@ -1328,25 +1322,6 @@ function renderLifecycleLabs() {
         button.disabled = false;
         button.removeAttribute('aria-busy');
         button.innerHTML = icon;
-      }
-    });
-  });
-
-  lifecycleList.querySelectorAll('.delete-deployment-button').forEach(button => {
-    button.addEventListener('click', async event => {
-      event.stopPropagation();
-      const resource = state.deployments.find(item => item.id === button.dataset.deploymentId);
-      if (!await confirmAction('Delete lab record?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'lab record') + '? This cannot be undone.', 'Delete')) return;
-      button.disabled = true;
-      try {
-        await fetchJson(`/api/lifecycle/deployments/${button.dataset.deploymentId}`, { method: 'DELETE' });
-        await refreshLifecycleLabs();
-        await loadBlueprints();
-        showMessage(globalStatus, 'Deployment deleted.', 'success');
-      } catch (error) {
-        showMessage(globalStatus, error.message, 'danger');
-      } finally {
-        button.disabled = false;
       }
     });
   });
