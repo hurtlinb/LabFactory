@@ -102,6 +102,50 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .dev-env .dev-banner * { color: var(--warning); }
 
 /* Blueprint library: identical header, preview and metadata slots on every card. */
+/* Deployment details use the same compact headers and inset white cards. */
+#deploymentDetailsDialog { width: min(1320px, calc(100vw - 40px)); background: var(--bg); }
+#deploymentDetailsDialog .details-card { padding: 0 20px 20px; gap: 18px; background: var(--bg); }
+#deploymentDetailsDialog .details-card > .panel-head { top: 0; margin: 0 -20px; padding: 16px 20px; min-height: 76px; border-bottom: 1px solid var(--line-strong); box-shadow: var(--shadow-xs); gap: 12px; z-index: 10; }
+#deploymentDetailsDialog .details-card > .panel-head > div:first-child { flex: 1; min-width: 180px; }
+#deploymentDetailsDialog .eyebrow { color: var(--muted); font-size: 11px; font-weight: 400; margin-bottom: 4px; }
+#deploymentDetailsTitle { font-size: 17px; font-weight: 600; letter-spacing: -.02em; overflow-wrap: anywhere; }
+#deploymentDetailsDialog .btn { min-height: 30px; padding: 5px 9px; font-size: 11px; gap: 6px; }
+#deploymentDetailsDialog .icon-btn { width: 28px; height: 28px; flex-basis: 28px; }
+#deploymentDetailsDialog .deployment-details-actions { gap: 8px; }
+#deploymentVmDetailsList { gap: 16px; min-width: 0; }
+#deploymentVmDetailsList > .placeholder { border: 1px solid var(--line); border-radius: 14px; background: var(--surface); padding: 48px 16px; }
+#deploymentDetailsDialog .vm-bulk-toolbar { padding: 12px 16px; gap: 10px 14px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
+#deploymentDetailsDialog .vm-bulk-toolbar label { font-size: 12px; font-weight: 500; }
+#deploymentDetailsDialog .vm-selection-count { color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: 3px 8px; font-size: 11px; }
+#deploymentDetailsDialog .vm-bulk-actions { margin-left: auto; gap: 6px; }
+#deploymentDetailsDialog .vm-bulk-actions svg { width: 14px; height: 14px; }
+#deploymentDetailsDialog .vm-bulk-toolbar small { font-size: 11px; padding-top: 8px; border-top: 1px solid var(--line); }
+#deploymentDetailsDialog input[type='checkbox'] { accent-color: var(--brand); }
+#deploymentDetailsDialog .vm-bulk-feedback:empty { display: none; }
+#deploymentDetailsDialog .vm-bulk-results { background: var(--surface); border-radius: 12px; }
+#deploymentDetailsDialog .workstation-detail-list { display: grid; gap: 14px; }
+#deploymentDetailsDialog .workstation-detail-card { padding: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); }
+#deploymentDetailsDialog .workstation-detail-head { margin: 0; min-height: 52px; padding: 10px 14px; background: #fbfcff; border-bottom: 1px solid var(--line); }
+#deploymentDetailsDialog .workstation-detail-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; }
+#deploymentDetailsDialog .workstation-detail-summary strong { font-size: 13px; font-weight: 600; }
+#deploymentDetailsDialog .workstation-detail-summary .mini-pill { font-size: 10px; padding: 3px 7px; background: var(--brand-soft); color: var(--brand); }
+.workstation-detail-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--brand-soft); color: var(--brand); }
+#deploymentDetailsDialog .vm-state-table-wrap { margin: 0; border: 0; border-radius: 0; max-height: none; overflow-x: auto; }
+#deploymentDetailsDialog .vm-state-table { min-width: 1120px; width: 100%; }
+#deploymentDetailsDialog .vm-state-table th { font-size: 10px; font-weight: 500; padding: 10px 8px; background: var(--surface-soft); }
+#deploymentDetailsDialog .vm-state-table td { padding: 11px 8px; font-size: 12px; border-bottom: 1px solid var(--line); }
+#deploymentDetailsDialog .vm-state-table tr:last-child td { border-bottom: 0; }
+#deploymentDetailsDialog .vm-state-table tbody tr:hover { background: #fafaff; }
+#deploymentDetailsDialog .vm-state-table tbody tr:has(.vm-select:checked) { background: var(--brand-soft); }
+#deploymentDetailsDialog .vm-state-table .mini-pill { font-size: 10px; padding: 3px 6px; }
+@media (max-width: 720px) {
+  #deploymentDetailsDialog { width: calc(100vw - 16px); }
+  #deploymentDetailsDialog .details-card { padding: 0 12px 12px; gap: 12px; }
+  #deploymentDetailsDialog .details-card > .panel-head { margin: 0 -12px; padding: 12px; }
+  #deploymentDetailsTitle { font-size: 15px; }
+  #deploymentDetailsDialog .vm-bulk-toolbar { padding: 12px; }
+  #deploymentDetailsDialog .vm-bulk-actions { margin-left: 0; flex-basis: 100%; }
+}
 .module-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(310px, 100%), 1fr)); gap: 14px; }
 .module-grid > .placeholder { grid-column: 1 / -1; }
 .module-card { min-width: 0; display: grid; grid-template-rows: 52px 56px 112px 48px; overflow: hidden; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow-sm); }

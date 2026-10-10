@@ -92,6 +92,7 @@ test('select all, partial selection and refresh preserve row selection and count
     querySelectorAll: selector => selector === '.vm-select' ? rows : selector === '[data-vm-bulk-action]' ? buttons : []
   };
   context.escapeHtmlAttr = String; context.getOsLabel = String;
+  context.uiIcon = () => '<svg aria-hidden="true"></svg>';
   context.getDeploymentWorkstationNumber = () => '1'; context.isDeploymentBusy = () => false;
   vm.runInContext(source.slice(source.indexOf('function renderDeploymentVmRows('), source.indexOf('async function redeployDeploymentWorkstation(')), context);
   vm.runInContext(source.slice(source.indexOf('function renderDeploymentVmDetails('), source.indexOf('async function openDeploymentDetails(')), context);
