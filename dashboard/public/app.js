@@ -149,7 +149,6 @@ const teacherList = document.getElementById('teacherList');
 const userSession = document.getElementById('userSession');
 const userSessionName = document.getElementById('userSessionName');
 const userSessionMeta = document.getElementById('userSessionMeta');
-const logoutLink = document.getElementById('logoutLink');
 const shellEl = document.querySelector('.shell');
 const accessDeniedScreen = document.getElementById('accessDeniedScreen');
 
@@ -1410,34 +1409,7 @@ function renderDashboardPowerActions(deployment) {
 function renderDashboard() {
   renderAttentionLabs();
   const dashboardDeployments = state.deployments.filter(d => state.isAdmin || isDeploymentOwnedByCurrentUser(d));
-  // Metrics
-  const active = dashboardDeployments.filter(d =>
-    ['running', 'deployed', 'mixed', 'starting'].includes(d.status)
-  );
-  const totalVms = dashboardDeployments.filter(d => !['idle', 'destroyed'].includes(d.status)).reduce((s, d) => s + Number(d.totalVmCount ?? 0), 0);
-
   const elById = id => document.getElementById(id);
-
-  const labsCount = elById('dashLabsCount');
-  const labsSub   = elById('dashLabsSub');
-  if (labsCount) labsCount.textContent = active.length;
-  if (labsSub)   labsSub.textContent   = `${dashboardDeployments.length} deployment${dashboardDeployments.length !== 1 ? 's' : ''} total`;
-
-  const vmsCount = elById('dashVmsCount');
-  const vmsSub   = elById('dashVmsSub');
-  const totalSeats = state.classrooms.reduce((s, c) => s + (c.workstationCount || 0), 0);
-  if (vmsCount) vmsCount.textContent = totalVms;
-  if (vmsSub)   vmsSub.textContent   = `across ${totalSeats} configured seats`;
-
-  const bpCount = elById('dashBlueprintsCount');
-  const bpSub   = elById('dashBlueprintsSub');
-  if (bpCount) bpCount.textContent = state.blueprints.length;
-  if (bpSub)   bpSub.textContent   = `${state.courses.length} module${state.courses.length !== 1 ? 's' : ''} configured`;
-
-  const clCount = elById('dashClassroomsCount');
-  const clSub   = elById('dashClassroomsSub');
-  if (clCount) clCount.textContent = state.classrooms.length;
-  if (clSub)   clSub.textContent   = state.classrooms.slice(0, 3).map(c => c.name).join(', ') + (state.classrooms.length > 3 ? '…' : '') || 'No classrooms';
 
   // Recent labs
   const labsList = elById('dashRecentLabsList');
@@ -2705,9 +2677,6 @@ async function loadAppInfo() {
     avatar.textContent = initials.toLocaleUpperCase().slice(0, 3);
   }
   userSessionMeta.textContent = state.currentUser.email || state.currentUser.username || '';
-  if (logoutLink && state.auth.logoutUrl) {
-    logoutLink.href = state.auth.logoutUrl;
-  }
   userSession.hidden = false;
 }
 
@@ -2823,6 +2792,11 @@ async function refreshLifecycleLabs() {
   renderLifecycleLabs();
   renderClassrooms();
   renderDashboard();
+  const removedDeployments = [...previousDeploymentsById.keys()].filter(id => !state.deployments.some(deployment => deployment.id === id));
+  if (removedDeployments.includes(state.activeDeploymentDetailsId)) {
+    deploymentDetailsDialog.close();
+  }
+  if (removedDeployments.length) await loadBlueprints();
 }
 
 async function loadBlueprint(blueprintId) {
@@ -3821,7 +3795,7 @@ async function guardBlueprintChanges() {
 async function confirmLabAction(deployment, action) {
   if (!deployment) return false;
   const context = `${deployment.blueprint.name} — ${deployment.classroom.name}, lab #${deployment.deploymentNumber}, ${deployment.totalVmCount} VMs.`;
-  if (action === 'destroy') return confirmAction('Delete lab VMs?', `${context} All VM data will be permanently deleted. The blueprint is preserved.`, 'Delete VMs');
+  if (action === 'destroy') return confirmAction('Destroy lab?', `${context} All VM data will be permanently deleted. After successful destruction, the lab will also be removed from the list. The blueprint is preserved.`, 'Destroy lab');
   if (action === 'stop') return confirmAction('Stop lab?', `${context} Running sessions will be interrupted.`, 'Stop lab');
   return await chooseAction('Deploy lab', `${context} The blueprint will be replicated for every workstation.`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
 }

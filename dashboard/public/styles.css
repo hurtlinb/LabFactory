@@ -271,14 +271,7 @@ button, input, textarea, select { font: inherit; }
   text-overflow: ellipsis;
 }
 
-.user-session-link {
-  font-size: 11px;
-  color: var(--muted);
-  text-decoration: none;
-  transition: color 120ms var(--ease);
-}
 
-.user-session-link:hover { color: var(--brand); }
 
 .app-version-row {
   display: flex;
@@ -1476,39 +1469,11 @@ input:focus, textarea:focus, select:focus {
 }
 
 /* ── Dashboard ────────────────────────────────────────────────── */
-.dash-metrics {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
-}
 
-.dash-metric {
-  background: var(--surface-soft);
-  border: 0.5px solid var(--line);
-  border-radius: var(--r);
-  padding: 12px 14px;
-}
 
-.dash-metric-label {
-  font-size: 11px;
-  color: var(--muted);
-  margin-bottom: 4px;
-}
 
-.dash-metric-value {
-  font-size: 24px;
-  font-weight: 500;
-  color: var(--text);
-  line-height: 1.1;
-}
 
-.dash-metric-value.accent { color: var(--brand); }
 
-.dash-metric-sub {
-  font-size: 11px;
-  color: var(--text-secondary);
-  margin-top: 3px;
-}
 
 .dash-grid {
   display: grid;
@@ -1712,7 +1677,6 @@ input:focus, textarea:focus, select:focus {
 
   .main { min-height: 0; }
   .hero-grid, .builder-grid, .dash-grid { grid-template-columns: 1fr; }
-  .dash-metrics { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 720px) {
@@ -1721,7 +1685,6 @@ input:focus, textarea:focus, select:focus {
   .split, .split-tight, .vm-controls { grid-template-columns: 1fr; }
   .canvas-vm-list { flex-direction: column; }
   .os-choice-grid { grid-template-columns: repeat(2, 1fr); }
-  .dash-metrics { grid-template-columns: repeat(2, 1fr); }
   .seat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 

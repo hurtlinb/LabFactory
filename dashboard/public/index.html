@@ -166,30 +166,6 @@
         <!-- ── Dashboard ─────────────────────────────────────── -->
         <section class="page" data-view="dashboard" hidden>
           <div class="panel"><div class="panel-head"><h2>Needs attention</h2><button id="dashboardDeployLabButton" type="button" class="btn btn-primary">Deploy a lab</button></div><div id="attentionLabs"></div></div>
-          <!-- Metrics row -->
-          <div class="dash-metrics">
-            <div class="dash-metric">
-              <p class="dash-metric-label">Active labs</p>
-              <p class="dash-metric-value accent" id="dashLabsCount">—</p>
-              <p class="dash-metric-sub" id="dashLabsSub">—</p>
-            </div>
-            <div class="dash-metric">
-              <p class="dash-metric-label">VMs tracked</p>
-              <p class="dash-metric-value" id="dashVmsCount">—</p>
-              <p class="dash-metric-sub" id="dashVmsSub">—</p>
-            </div>
-            <div class="dash-metric">
-              <p class="dash-metric-label">Blueprints</p>
-              <p class="dash-metric-value" id="dashBlueprintsCount">—</p>
-              <p class="dash-metric-sub" id="dashBlueprintsSub">—</p>
-            </div>
-            <div class="dash-metric">
-              <p class="dash-metric-label">Classrooms</p>
-              <p class="dash-metric-value" id="dashClassroomsCount">—</p>
-              <p class="dash-metric-sub" id="dashClassroomsSub">—</p>
-            </div>
-          </div>
-
           <!-- Classrooms overview -->
           <div class="panel">
             <div class="panel-head">
@@ -629,7 +605,6 @@
           <span id="userSessionInitials" class="user-session-avatar" aria-hidden="true"></span>
           <span id="userSessionName" class="user-session-name">User</span>
           <span id="userSessionMeta" class="user-session-meta"></span>
-          <a id="logoutLink" class="user-session-link" href="/auth/logout">Sign out</a>
         </div>
 
         <div class="app-version-row">
@@ -653,7 +628,6 @@
       <p class="eyebrow">Access denied</p>
       <h3>No role assigned</h3>
       <p class="muted">Your account is authenticated but has no <strong>teacher</strong> or <strong>admin</strong> role assigned in Keycloak. Contact an administrator to request access.</p>
-      <a class="btn btn-secondary" href="/auth/logout">Sign out</a>
     </div>
   </div>
 

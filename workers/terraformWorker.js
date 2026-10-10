@@ -1,5 +1,6 @@
 import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
+import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -1872,8 +1873,11 @@ export function startTerraformWorker(connection) {
             jobId: String(ansibleJob.id),
             runId: job.data.runId
           });
+        } else if (action === 'destroy') {
+          const removed = await removeDestroyedDeployment(dbPool, job.data.labInstanceId, job.data.runId);
+          if (!removed) console.warn(`Skipping stale deployment cleanup for ${job.data.labInstanceId} (runId=${job.data.runId})`);
         } else {
-          await safeUpdateLifecycleStatus(job.data.labInstanceId, action === 'destroy' ? 'destroyed' : 'deployed', {
+          await safeUpdateLifecycleStatus(job.data.labInstanceId, 'deployed', {
             action,
             jobId: String(job.id),
             runId: job.data.runId

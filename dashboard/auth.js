@@ -111,8 +111,7 @@ export const initializeOidcAuth = async app => {
       describeSession: () => ({
         enabled: false,
         user: null,
-        loginUrl: null,
-        logoutUrl: null
+        loginUrl: null
       })
     };
   }
@@ -234,9 +233,6 @@ export const initializeOidcAuth = async app => {
         { ...userInfo, resource_access: roleSource.resource_access, realm_access: roleSource.realm_access },
         clientId
       );
-      req.session.oidcTokens = {
-        idToken: tokenResponse.id_token ?? null
-      };
       delete req.session.oidc;
       delete req.session.returnTo;
 
@@ -245,35 +241,6 @@ export const initializeOidcAuth = async app => {
       console.error('OIDC callback failed', error);
       res.status(500).send('Authentication failed');
     }
-  });
-
-  app.get('/auth/logout', (req, res) => {
-    const baseUrl = buildExternalBaseUrl(req);
-    const postLogoutRedirectUri =
-      String(process.env.OIDC_POST_LOGOUT_REDIRECT_URI ?? '').trim() || `${baseUrl}/`;
-    const endSessionEndpoint = discovery.end_session_endpoint;
-    const idTokenHint = req.session?.oidcTokens?.idToken;
-
-    req.session.destroy(error => {
-      if (error) {
-        console.error('Unable to destroy authenticated session', error);
-      }
-
-      if (!endSessionEndpoint) {
-        res.redirect(postLogoutRedirectUri);
-        return;
-      }
-
-      const logoutUrl = new URL(endSessionEndpoint);
-      logoutUrl.searchParams.set('post_logout_redirect_uri', postLogoutRedirectUri);
-      if (clientId) {
-        logoutUrl.searchParams.set('client_id', clientId);
-      }
-      if (idTokenHint) {
-        logoutUrl.searchParams.set('id_token_hint', idTokenHint);
-      }
-      res.redirect(logoutUrl.toString());
-    });
   });
 
   const attachUser = (req, _res, next) => {
@@ -313,8 +280,7 @@ export const initializeOidcAuth = async app => {
   const describeSession = req => ({
     enabled: true,
     user: req.session?.user ?? null,
-    loginUrl: '/auth/login',
-    logoutUrl: '/auth/logout'
+    loginUrl: '/auth/login'
   });
 
   return {

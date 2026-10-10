@@ -72,11 +72,6 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
 .panel > .panel-head:first-child { margin: -22px -24px 20px; padding: 16px 24px; border-bottom: 1px solid var(--line); min-height: 58px; }
 .panel-head h2, .eyebrow { font-size: 14px; font-weight: 600; letter-spacing: 0; text-transform: none; color: var(--text); }
 .eyebrow { margin-bottom: 0; }
-.dash-metrics { gap: 20px; }
-.dash-metric { background: var(--surface); border: 1px solid var(--line-strong); border-radius: 16px; padding: 22px 24px; box-shadow: var(--shadow); }
-.dash-metric-label { font-size: 13px; color: var(--text-secondary); }
-.dash-metric-value { font-size: 32px; font-weight: 600; letter-spacing: -.04em; margin: 8px 0; }
-.dash-metric-sub { font-size: 12px; }
 .dash-row { padding: 18px 0; }
 .dash-row-name { font-size: 13px; font-weight: 600; }
 .dash-row-meta { font-size: 12px; margin-top: 3px; }
@@ -237,8 +232,5 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
   .panel { padding: 18px 16px; border-radius: 14px; }
   .panel > .panel-head:first-child { margin: -18px -16px 16px; padding: 14px 16px; }
   .danger-panel > .danger-eyebrow { margin: -18px -16px 0; padding: 14px 16px; }
-  .dash-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  .dash-metric { padding: 16px; }
-  .dash-metric-value { font-size: 28px; }
   .dev-banner-text { max-width: 100px; }
 }

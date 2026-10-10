@@ -29,7 +29,7 @@ The dashboard can be protected with OpenID Connect through Keycloak.
 When `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID` are configured:
 - all dashboard pages and `/api/*` routes require authentication
 - login is handled with the Authorization Code flow + PKCE
-- the sidebar shows the authenticated user and a logout link
+- the page footer shows the authenticated user
 
 Required environment variables for OIDC:
 - `SESSION_SECRET`
@@ -40,7 +40,6 @@ Optional environment variables:
 - `OIDC_CLIENT_SECRET`
 - `OIDC_SCOPES` (default: `openid profile email`)
 - `OIDC_REDIRECT_URI`
-- `OIDC_POST_LOGOUT_REDIRECT_URI`
 - `SESSION_COOKIE_SECURE`
 - `TRUST_PROXY`
 
