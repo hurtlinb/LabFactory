@@ -1831,9 +1831,8 @@ const deriveDeploymentStatusFromResources = (
     .filter(Boolean);
 
   if (!states.length) {
-    if (currentStatus === 'destroying') {
-      return 'destroyed';
-    }
+    // Missing VMs do not mean destruction is complete: the worker still cleans
+    // up storage before removing the deployment record.
     if (TRANSIENT_DEPLOYMENT_STATUSES.has(currentStatus)) {
       return currentStatus;
     }
