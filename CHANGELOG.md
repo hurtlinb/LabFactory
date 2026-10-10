@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.0.0] — 2026-10-10
+
+- UI change
+
 ## [1.8.2] — 2026-10-09
 
 - Démarrage et arrêt des labs directement depuis le dashboard.
