@@ -233,6 +233,7 @@ export const initializeOidcAuth = async app => {
         { ...userInfo, resource_access: roleSource.resource_access, realm_access: roleSource.realm_access },
         clientId
       );
+      req.session.idToken = tokenResponse.id_token || null;
       delete req.session.oidc;
       delete req.session.returnTo;
 
@@ -241,6 +242,27 @@ export const initializeOidcAuth = async app => {
       console.error('OIDC callback failed', error);
       res.status(500).send('Authentication failed');
     }
+  });
+
+  app.post('/auth/logout', (req, res) => {
+    const idToken = req.session?.idToken;
+    let destination = '/';
+    if (discovery.end_session_endpoint) {
+      const logoutUrl = new URL(discovery.end_session_endpoint);
+      logoutUrl.searchParams.set('client_id', clientId);
+      if (idToken) logoutUrl.searchParams.set('id_token_hint', idToken);
+      logoutUrl.searchParams.set('post_logout_redirect_uri',
+        String(process.env.OIDC_POST_LOGOUT_REDIRECT_URI ?? '').trim() || `${buildExternalBaseUrl(req)}/`);
+      destination = logoutUrl.toString();
+    }
+    req.session.destroy(error => {
+      if (error) {
+        res.status(500).send('Unable to sign out');
+        return;
+      }
+      res.clearCookie('labfactory.sid', { path: '/', httpOnly: true, sameSite: 'lax', secure: secureCookie });
+      res.redirect(303, destination);
+    });
   });
 
   const attachUser = (req, _res, next) => {

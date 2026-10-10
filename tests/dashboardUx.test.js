@@ -331,7 +331,8 @@ test('dashboard tiles expose power actions according to lab status', t => {
     classroom: api.state.classrooms[0], totalVmCount: 1
   }));
   api.renderDashboard();
-  for (const container of ['dashRecentLabsList', 'dashClassroomsGrid']) {
+  assert.equal(document.getElementById('dashRecentLabsList'), null);
+  for (const container of ['dashClassroomsGrid']) {
     const root = document.getElementById(container);
     const actions = id => [...root.querySelectorAll('[data-deployment-id="' + id + '"]')].map(b => b.dataset.action);
     assert.deepEqual(actions('running'), ['stop']);

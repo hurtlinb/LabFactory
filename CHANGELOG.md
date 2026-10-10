@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.0.1] — 2026-10-10
+
+- Déconnexion via une icône à côté du nom de l’utilisateur.
+
 ## [2.0.0] — 2026-10-10
 
 - UI change

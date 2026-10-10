@@ -1386,41 +1386,6 @@ function renderDashboard() {
   const dashboardDeployments = state.deployments.filter(d => state.isAdmin || isDeploymentOwnedByCurrentUser(d));
   const elById = id => document.getElementById(id);
 
-  // Recent labs
-  const labsList = elById('dashRecentLabsList');
-  if (labsList) {
-    if (!dashboardDeployments.length) {
-      labsList.innerHTML = '<p class="placeholder">No deployments yet.</p>';
-    } else {
-      labsList.innerHTML = dashboardDeployments.slice(0, 5).map(d => {
-        const badgeClass =
-          d.status === 'mixed' ? 'dash-badge-preparing' : ['running', 'deployed'].includes(d.status) ? 'dash-badge-running' :
-          ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
-          d.status === 'stopped' ? 'dash-badge-stopped' :
-          d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
-        const badgeText =
-          d.status === 'mixed' ? 'Partially running' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
-          d.status === 'starting' ? labStatusLabel(d.status) :
-          ['queued', 'deploying', 'customizing'].includes(d.status) ? 'Preparing' :
-          d.status === 'stopped' ? 'Stopped' :
-          d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
-        return `
-          <div class="dash-row">
-            <div class="dash-row-icon">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
-            </div>
-            <div class="dash-row-info">
-              <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)} — ${escapeHtml(d.classroom.name)}</a>
-              <p class="dash-row-meta">${d.totalVmCount} VMs · Lab #${d.deploymentNumber}</p>
-            </div>
-            <div class="dash-lab-actions"><div class="dash-lab-power">${renderDashboardPowerActions(d)}</div><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
-          </div>`;
-      }).join('');
-    }
-  }
-
-  if (labsList) bindLifecycleActions(labsList);
-
   // Classrooms overview
   const classroomsGrid = elById('dashClassroomsGrid');
   if (classroomsGrid) {
@@ -3236,7 +3201,7 @@ navButtons.forEach(button => {
   });
 });
 
-document.getElementById('dashGotoLifecycle')?.addEventListener('click', () => setActiveView('lifecycle'));
+
 document.getElementById('dashGotoModels')?.addEventListener('click', () => setActiveView('models'));
 
 showOnlyMyLabsToggle?.addEventListener('change', () => {

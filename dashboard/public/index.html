@@ -176,16 +176,6 @@
             </div>
           </div>
 
-          <!-- Recent labs -->
-          <div class="panel">
-            <div class="panel-head">
-              <p class="eyebrow">Recent labs</p>
-              <button class="btn btn-ghost" type="button" id="dashGotoLifecycle">View all</button>
-            </div>
-            <div id="dashRecentLabsList" class="saved-list">
-              <p class="placeholder">Loading…</p>
-            </div>
-          </div>
         </section>
 
         <!-- ── VM Models ──────────────────────────────────────── -->
@@ -604,6 +594,13 @@
         <div id="userSession" class="user-session" hidden>
           <span id="userSessionInitials" class="user-session-avatar" aria-hidden="true"></span>
           <span id="userSessionName" class="user-session-name">User</span>
+          <form class="user-session-logout" action="/auth/logout" method="post">
+            <button class="changelog-btn" type="submit" title="Sign out" aria-label="Sign out">
+              <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path>
+              </svg>
+            </button>
+          </form>
           <span id="userSessionMeta" class="user-session-meta"></span>
         </div>
 

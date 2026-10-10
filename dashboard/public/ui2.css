@@ -55,6 +55,7 @@ body { font-family: 'Segoe UI', system-ui, sans-serif; font-size: 13px; }
 .user-session { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px; padding: 0; border: 0; min-width: 0; }
 .user-session-avatar { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 30px; width: 30px; height: 30px; border-radius: 50%; background: var(--brand); color: white; font-size: 10px; font-weight: 600; letter-spacing: .02em; }
 .user-session-name { color: var(--text); font-weight: 600; }
+.user-session-logout { display: inline-flex; margin: 0; padding: 0; }
 .user-session-meta { width: auto; max-width: 100%; padding: 0; background: transparent; color: var(--muted); }
 .user-session-meta:empty { display: none; }
 .app-footer .app-version-row { gap: 8px; }
