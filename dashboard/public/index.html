@@ -165,7 +165,7 @@
 
         <!-- ── Dashboard ─────────────────────────────────────── -->
         <section class="page" data-view="dashboard" hidden>
-          <div class="panel"><div class="panel-head"><h2>Needs attention</h2><a href="#/lifecycle" class="btn btn-primary">Create a lab</a></div><div id="attentionLabs"></div></div>
+          <div class="panel"><div class="panel-head"><h2>Needs attention</h2><button id="dashboardDeployLabButton" type="button" class="btn btn-primary">Deploy a lab</button></div><div id="attentionLabs"></div></div>
           <!-- Metrics row -->
           <div class="dash-metrics">
             <div class="dash-metric">
@@ -450,30 +450,7 @@
         <!-- ── Labs ──────────────────────────────────────────── -->
         <section class="page" data-view="lifecycle" hidden>
           <div class="stack">
-            <article class="panel">
-              <div class="panel-head">
-                <div>
-                  <h2>Create a lab</h2>
-                </div>
-              </div>
-              <form id="deploymentForm" class="stack section-form">
-                <div class="split">
-                  <label class="field">
-                    <span>Blueprint</span>
-                    <select id="deploymentBlueprintSelect" name="blueprintId" required>
-                      <option value="">Select a blueprint</option>
-                    </select>
-                  </label>
-                  <label class="field">
-                    <span>Classroom</span>
-                    <select id="deploymentClassroomSelect" name="classroomId" required>
-                      <option value="">Select a classroom</option>
-                    </select>
-                  </label>
-                </div>
-                <button class="btn btn-primary" type="submit">Create lab record</button>
-              </form>
-            </article>
+            <div class="inline-actions"><h2>Labs</h2><button id="openDeployLabButton" class="btn btn-primary" type="button">Deploy a lab</button></div>
 
             <article class="panel">
               <div class="panel-head">
@@ -878,5 +855,22 @@
     </form>
   </dialog>
   <script type="module" src="/app.js"></script>
+<dialog id="deployLabDialog" class="modal-dialog deploy-lab-dialog" aria-labelledby="deployLabTitle"><div class="modal-card"><div class="panel-head"><h2 id="deployLabTitle">Deploy a lab</h2><button id="closeDeployLabButton" class="btn btn-ghost" type="button" aria-label="Close deployment dialog">Cancel</button></div><p class="muted">The blueprint will be deployed to every workstation in the selected classroom.</p><form id="deploymentForm" class="stack section-form">
+                <div class="split">
+                  <label class="field">
+                    <span>Blueprint</span>
+                    <select id="deploymentBlueprintSelect" name="blueprintId" required>
+                      <option value="">Select a blueprint</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Classroom</span>
+                    <select id="deploymentClassroomSelect" name="classroomId" required>
+                      <option value="">Select a classroom</option>
+                    </select>
+                  </label>
+                </div>
+                <button class="btn btn-primary" type="submit">Deploy</button>
+              <p id="deploymentDialogError" class="field-error" role="alert" hidden></p></form></div></dialog>
 </body>
 </html>

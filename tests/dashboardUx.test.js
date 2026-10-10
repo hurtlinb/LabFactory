@@ -255,8 +255,47 @@ test('classroom deploy shortcut selects the room without creating a deployment',
   await tick();
   assert.equal(document.getElementById('deploymentClassroomSelect').value, 'room');
   assert.equal(document.activeElement.id, 'deploymentBlueprintSelect');
-  assert.equal(w.location.hash, '#/lifecycle');
+  assert.equal(document.getElementById('deployLabDialog').open, true);
   assert.equal(requests.filter(request => request.method === 'POST').length, 0);
+});
+
+test('blueprint deployment dialog retries failed launch without creating a second record', async t => {
+  const { api, document, w } = setup(t);
+  await api.bootstrap();
+  api.state.classrooms = [{ id: 'room', name: 'A39', workstationCount: 22, vlans: [200], subnetOctets: [200] }];
+  api.renderBlueprintList();
+  document.querySelector('.blueprint-deploy-button').click();
+  const dialog = document.getElementById('deployLabDialog');
+  assert.equal(dialog.open, true);
+  assert.equal(document.getElementById('deploymentBlueprintSelect').value, 'bp');
+  assert.equal(document.activeElement.id, 'deploymentClassroomSelect');
+  assert.equal(api.state.currentBlueprint.id, null);
+  document.getElementById('deploymentClassroomSelect').value = 'room';
+  const originalFetch = w.fetch;
+  let creates = 0, launches = 0;
+  w.fetch = async (url, options = {}) => {
+    if (url === '/api/lifecycle/deployments' && options.method === 'POST') {
+      creates++;
+      assert.deepEqual(JSON.parse(options.body), { blueprintId: 'bp', classroomId: 'room' });
+      return { ok: true, json: async () => ({ deployment: { id: 'new-lab' } }) };
+    }
+    if (url === '/api/lifecycle/deployments/new-lab/deploy') {
+      launches++;
+      return { ok: launches > 1, json: async () => launches === 1 ? { error: 'Queue unavailable' } : { jobId: 'job' } };
+    }
+    return originalFetch(url, options);
+  };
+  const form = document.getElementById('deploymentForm');
+  form.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await tick();
+  assert.equal(dialog.open, true);
+  assert.equal(document.getElementById('deploymentDialogError').textContent, 'Queue unavailable');
+  form.dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await tick();
+  assert.equal(creates, 1);
+  assert.equal(launches, 2);
+  assert.equal(dialog.open, false);
+  assert.equal(w.location.hash, '#/lifecycle');
 });
 
 test('dashboard tiles expose power actions according to lab status', t => {

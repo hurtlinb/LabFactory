@@ -392,12 +392,13 @@ function renderBlueprintList() {
             </div>
             <span class="blueprint-machine-count">${blueprint.vmCount} VM${blueprint.vmCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
             <button class="btn btn-secondary blueprint-open-button" type="button" aria-label="Open blueprint ${escapeHtmlAttr(blueprint.name)}">${uiIcon(locked ? 'eye' : 'edit')} Open</button>
+            <button class="btn btn-primary blueprint-deploy-button" type="button" data-blueprint-id="${escapeHtmlAttr(blueprint.id)}">${uiIcon('start')} Deploy</button>
           </div>
           <p class="blueprint-card-description" title="${escapeHtmlAttr(blueprint.description || '')}">${escapeHtml(blueprint.description || 'No description')}</p>
           ${renderBlueprintPreview(blueprint)}
           <div class="blueprint-card-footer">
             <div class="blueprint-card-owner">${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}</div>
-            <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
+            <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${blueprint.vmCount} VM · ${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
             <div class="blueprint-card-lock">${locked ? `<span class="mini-pill lock-pill" title="${escapeHtmlAttr(lockTitle)}">Locked</span>` : ''}</div>
             <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${escapeHtmlAttr(blueprint.id)}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle || 'Delete blueprint')}" ${locked ? 'disabled' : ''}>${uiIcon('delete')}</button>
           </div>
@@ -433,6 +434,12 @@ function renderBlueprintList() {
       } finally {
         button.disabled = false;
       }
+    });
+  });
+  blueprintList.querySelectorAll('.blueprint-deploy-button').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      openDeployLabDialog({ blueprintId: button.dataset.blueprintId });
     });
   });
 }
@@ -1519,10 +1526,7 @@ function renderDashboard() {
     bindLifecycleActions(classroomsGrid);
     classroomsGrid.querySelectorAll('.dash-classroom-deploy').forEach(button => {
       button.addEventListener('click', async () => {
-        await setActiveView('lifecycle');
-        deploymentClassroomSelect.value = button.dataset.classroomId;
-        deploymentBlueprintSelect.focus();
-        deploymentBlueprintSelect.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+        openDeployLabDialog({ classroomId: button.dataset.classroomId });
       });
     });
   }
@@ -3420,33 +3424,73 @@ courseForm?.addEventListener('submit', async event => {
   }
 });
 
+const deployLabDialog = document.getElementById('deployLabDialog');
+const deploymentDialogError = document.getElementById('deploymentDialogError');
+let pendingDeploymentId = null;
+function openDeployLabDialog({ blueprintId = '', classroomId = '' } = {}) {
+  if (deploymentForm.dataset.busy) return;
+  pendingDeploymentId = null;
+  renderDeploymentSelectors();
+  deploymentBlueprintSelect.disabled = false;
+  deploymentClassroomSelect.disabled = false;
+  deploymentBlueprintSelect.value = blueprintId;
+  deploymentClassroomSelect.value = classroomId;
+  deploymentDialogError.hidden = true;
+  deployLabDialog.showModal();
+  (blueprintId ? deploymentClassroomSelect : deploymentBlueprintSelect).focus();
+}
+document.getElementById('openDeployLabButton')?.addEventListener('click', () => openDeployLabDialog());
+document.getElementById('dashboardDeployLabButton')?.addEventListener('click', () => openDeployLabDialog());
+document.getElementById('closeDeployLabButton')?.addEventListener('click', () => {
+  if (!deploymentForm.dataset.busy) deployLabDialog.close();
+});
+deployLabDialog?.addEventListener('cancel', event => {
+  if (deploymentForm.dataset.busy) event.preventDefault();
+});
+
 deploymentForm?.addEventListener('submit', async event => {
   event.preventDefault();
-  if (deploymentForm.dataset.busy) return;
+  if (deploymentForm.dataset.busy || !deploymentForm.reportValidity()) return;
   deploymentForm.dataset.busy = 'true';
   const submitButton = deploymentForm.querySelector('button[type="submit"]');
   submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true');
-  const form = new FormData(deploymentForm);
   const payload = {
-    blueprintId: String(form.get('blueprintId') || ''),
-    classroomId: String(form.get('classroomId') || '')
+    blueprintId: deploymentBlueprintSelect.value,
+    classroomId: deploymentClassroomSelect.value
   };
+  deploymentBlueprintSelect.disabled = true;
+  deploymentClassroomSelect.disabled = true;
+  deploymentDialogError.hidden = true;
 
   try {
-    await fetchJson('/api/lifecycle/deployments', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    });
+    const conflicting = state.deployments.find(d => d.id !== pendingDeploymentId && d.classroom?.id === payload.classroomId && DEPLOY_ACTIVE_STATUSES.includes(d.status));
+    if (conflicting && !await promptDeploymentConflict(conflicting)) return;
+    if (!pendingDeploymentId) {
+      const result = await fetchJson('/api/lifecycle/deployments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload)
+      });
+      pendingDeploymentId = result.deployment.id;
+    }
+    await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(pendingDeploymentId)}/deploy`, { method: 'POST' });
+    deployLabDialog.close();
+    pendingDeploymentId = null;
+    await setActiveView('lifecycle');
     if (state.isAdmin) {
       await loadTeachers();
     }
     await refreshLifecycleLabs();
     await loadBlueprints();
-    showMessage(globalStatus, 'Lab record created. Choose Deploy lab to create its VMs.', 'success');
+    showMessage(globalStatus, 'Lab deployment queued.', 'success');
   } catch (error) {
-    showMessage(globalStatus, error.message, 'danger');
-  } finally { delete deploymentForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
+    if (deployLabDialog.open) {
+      deploymentDialogError.textContent = error.message;
+      deploymentDialogError.hidden = false;
+    } else showMessage(globalStatus, error.message, 'danger');
+  } finally {
+    delete deploymentForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy');
+    deploymentBlueprintSelect.disabled = Boolean(pendingDeploymentId);
+    deploymentClassroomSelect.disabled = Boolean(pendingDeploymentId);
+  }
 });
 
 newBlueprintButton.addEventListener('click', async () => {

@@ -107,6 +107,16 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .dev-env .dev-banner * { color: var(--warning); }
 
 /* Blueprint library: identical header, preview and metadata slots on every card. */
+.deploy-lab-dialog { width: min(520px, calc(100vw - 28px)); }
+.deploy-lab-dialog .split { grid-template-columns: 1fr; }
+.blueprint-deploy-button { min-height: 30px; padding: 5px 8px; gap: 4px; font-size: 11px; }
+.blueprint-card-header:has(.blueprint-deploy-button) { grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.blueprint-card-header:has(.blueprint-deploy-button) .blueprint-machine-count { display: none; }
+.deploy-lab-dialog { width: min(520px, calc(100vw - 28px)); }
+.deploy-lab-dialog .split { grid-template-columns: 1fr; }
+.blueprint-deploy-button { min-height: 30px; padding: 5px 8px; gap: 4px; font-size: 11px; }
+.blueprint-card-header:has(.blueprint-deploy-button) { grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
+.blueprint-card-header:has(.blueprint-deploy-button) .blueprint-machine-count { display: none; }
 #blueprintList { grid-template-columns: repeat(auto-fit, minmax(min(350px, 100%), 1fr)); gap: 14px; }
 #blueprintList .blueprint-item { display: grid; grid-template-rows: 52px 48px 108px 46px; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-sm); }
 #blueprintList .blueprint-item:hover { border-color: var(--line-strong); background: var(--surface); }
