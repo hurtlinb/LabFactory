@@ -1400,7 +1400,8 @@ function renderDashboard() {
           d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
         const badgeText =
           d.status === 'mixed' ? 'Partially running' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
-          ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
+          d.status === 'starting' ? labStatusLabel(d.status) :
+          ['queued', 'deploying', 'customizing'].includes(d.status) ? 'Preparing' :
           d.status === 'stopped' ? 'Stopped' :
           d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
         return `
@@ -1442,7 +1443,8 @@ function renderDashboard() {
                 d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
               const badgeText =
                 d.status === 'mixed' ? 'Partially running' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
-                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'Preparing' :
+                d.status === 'starting' ? labStatusLabel(d.status) :
+                ['queued', 'deploying', 'customizing'].includes(d.status) ? 'Preparing' :
                 d.status === 'stopped' ? 'Stopped' :
                 d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
               return `
