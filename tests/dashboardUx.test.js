@@ -298,6 +298,30 @@ test('blueprint deployment dialog retries failed launch without creating a secon
   assert.equal(w.location.hash, '#/lifecycle');
 });
 
+test('modules search and edit dialog preserve data when cancelled and reset for creation', async t => {
+  const { api, document, w, requests } = setup(t);
+  await api.bootstrap();
+  api.state.courses = [{ id: 'module-a', courseNumber: 101, description: 'Networks', updatedAt: '2026-10-10' }, { id: 'module-b', courseNumber: 202, description: 'Linux', updatedAt: '2026-10-10' }];
+  const search = document.getElementById('moduleSearch');
+  search.value = 'Linux';
+  search.dispatchEvent(new w.Event('input'));
+  assert.equal(document.querySelectorAll('.module-card').length, 1);
+  document.querySelector('.edit-course-button').click();
+  const dialog = document.getElementById('moduleDialog');
+  const number = document.getElementById('courseForm').elements.courseNumber;
+  assert.equal(dialog.open, true);
+  assert.equal(number.value, '202');
+  number.value = '303';
+  document.getElementById('cancelCourseEdit').click();
+  assert.equal(dialog.open, false);
+  assert.equal(api.state.courses[1].courseNumber, 202);
+  document.getElementById('newModuleButton').click();
+  assert.equal(dialog.open, true);
+  assert.equal(number.value, '');
+  assert.equal(document.getElementById('moduleDialogTitle').textContent, 'Add module');
+  assert.equal(requests.filter(request => request.method === 'POST' || request.method === 'PUT').length, 0);
+});
+
 test('dashboard tiles expose power actions according to lab status', t => {
   const { api, document } = setup(t);
   api.state.isAdmin = true;

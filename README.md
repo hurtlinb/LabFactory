@@ -13,9 +13,9 @@ Current version: `1.8.2`
 
 ## Dashboard interaction updates
 
-The dashboard provides searchable blueprints, VM models in the editor, labs and jobs, with course, classroom, OS, status and action filters. Views and individual blueprints/labs have bookmarkable hash URLs. Lab details open in a scrollable modal over the labs page and preserve expanded task output and VM selection during refresh.
+The dashboard provides searchable blueprints, VM models in the editor, labs and jobs, with module, classroom, OS, status and action filters. Views and individual blueprints/labs have bookmarkable hash URLs. Lab details open in a scrollable modal over the labs page and preserve expanded task output and VM selection during refresh.
 
-Blueprint editing is separate from the library and protects unsaved changes when leaving or replacing a blueprint. Duplication creates an independent draft, including copies of uploaded files and the existing guest access settings. The editor keeps drag-and-drop creation; it does not add keyboard creation of VMs or customizations. Course records can be edited in place.
+Blueprint editing is separate from the library and protects unsaved changes when leaving or replacing a blueprint. Duplication creates an independent draft, including copies of uploaded files and the existing guest access settings. The editor keeps drag-and-drop creation; it does not add keyboard creation of VMs or customizations. Module records can be edited in place.
 
 Destructive operations show contextual confirmations. **Clear finished job history** removes only completed/failed jobs and their resume checkpoints; **Cancel all jobs** separately cancels active and pending work while preserving finished history. The classroom conflict confirmation accepts `deploy` after a corrected entry and resolves cancellation on Escape, Cancel or dialog closure.
 
@@ -46,7 +46,7 @@ Optional environment variables:
 
 ### Authorization
 Page and API access is controlled by two Keycloak **client roles** (not realm roles), created on the client identified by `OIDC_CLIENT_ID` and assigned per-user:
-- `teacher` — access to the Labs pages (Dashboard, Blueprints, Labs, Courses)
+- `teacher` — access to the Labs pages (Dashboard, Blueprints, Labs, Modules)
 - `admin` — access to everything, including Administration (Users, VM Models, Classrooms, Maintenance, Jobs)
 
 Notes:
@@ -90,7 +90,7 @@ Blueprints are created with drag and drop:
 
 Each blueprint stores a reusable lab definition in PostgreSQL.
 Each blueprint is also linked to the teacher who created it, using the authenticated OpenID Connect user email.
-Each blueprint must also be attached to a course.
+Each blueprint must also be attached to a module.
 
 ### Classrooms
 Classrooms are used as deployment targets and include:
@@ -102,10 +102,10 @@ For a classroom deployment:
 - each workstation gets its own VLAN
 - VLAN = `startingVlan + workstationIndex`
 
-### Courses
-Courses are managed from the `Administration` section.
+### Modules
+Modules are managed from the `Administration` section.
 
-Each course contains:
+Each module contains:
 - a unique required number
 - an optional description
 
@@ -128,7 +128,7 @@ Each deployment also stores the teacher email that created it, using the authent
 For a classroom deployment, the blueprint is replicated for every workstation in the classroom.
 
 VM naming convention:
-- `<course-number>-<teacher-initials>-<blueprint-name>-<two-digit-workstation-number>-<instance-name>`
+- `<module-number>-<teacher-initials>-<blueprint-name>-<two-digit-workstation-number>-<instance-name>`
 
 Example:
 - `101-bh-soc-lab-01-dc`

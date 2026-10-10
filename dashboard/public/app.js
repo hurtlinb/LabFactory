@@ -179,7 +179,7 @@ const PAGE_TITLES = {
   'blueprint':      { title: 'Blueprints',  breadcrumb: 'Labs' },
   'lifecycle':      { title: 'Labs',        breadcrumb: 'Labs' },
   'admin-users':    { title: 'Users',       breadcrumb: 'Administration' },
-  'admin-courses':  { title: 'Courses',     breadcrumb: 'Labs' },
+  'admin-courses':  { title: 'Modules',     breadcrumb: 'Labs' },
   'models':         { title: 'VM Models',   breadcrumb: 'Administration' },
   'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
   'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
@@ -408,7 +408,7 @@ function renderBlueprintList() {
     )
     .join('');
 
-  if (!blueprintList.children.length) blueprintList.innerHTML = '<p class="placeholder">No blueprints match these filters. Clear the search or choose another course.</p>';
+  if (!blueprintList.children.length) blueprintList.innerHTML = '<p class="placeholder">No blueprints match these filters. Clear the search or choose another module.</p>';
   blueprintList.querySelectorAll('article[data-blueprint-id]').forEach(node => {
     node.addEventListener('click', async () => {
       await loadBlueprint(node.dataset.blueprintId);
@@ -494,7 +494,7 @@ function renderBlueprintCourseOptions() {
   if (!blueprintCourseIdInput) return;
   const selected = state.currentBlueprint.courseId || blueprintCourseIdInput.value || '';
   blueprintCourseIdInput.innerHTML =
-    '<option value="">Select a course</option>' +
+    '<option value="">Select a module</option>' +
     state.courses
       .map(course => `<option value="${course.id}">#${escapeHtml(String(course.courseNumber))}${course.description ? ` - ${escapeHtml(course.description)}` : ''}</option>`)
       .join('');
@@ -544,44 +544,47 @@ function renderTeachers() {
 function renderCourses() {
   if (!courseList) return;
   if (!state.courses.length) {
-    courseList.innerHTML = '<p class="placeholder">No courses yet.</p>';
+    courseList.innerHTML = '<p class="placeholder">No modules yet. Add a module to organize your blueprints.</p>';
     return;
   }
 
   courseList.innerHTML = state.courses
+    .filter(course => matchesSearch(filterValue('moduleSearch'), course.courseNumber, course.description))
     .map(
       course => `
-        <article class="blueprint-item course-card">
-          <div class="panel-head">
-            <div>
-              <strong>Course ${escapeHtml(String(course.courseNumber))}</strong>
-              <p class="muted">${escapeHtml(course.description || 'No description')}</p><p class="muted">${state.blueprints.filter(b => b.course?.id === course.id).map(b => `<a href="#/blueprint/${encodeURIComponent(b.id)}">${escapeHtml(b.name)}</a>`).join(', ') || 'No linked blueprints'}</p>
-            </div>
-            <div class="inline-actions">
-              <span class="mini-pill">${new Date(course.updatedAt).toLocaleString()}</span>
-              <button class="icon-btn edit-course-button" type="button" data-course-id="${course.id}" aria-label="Edit course">${uiIcon('edit')}</button><button class="icon-btn delete-course-button" type="button" data-course-id="${course.id}" aria-label="Delete course">${uiIcon('delete')}</button>
-            </div>
+        <article class="module-card">
+          <div class="module-card-header">
+            <strong>Module ${escapeHtml(String(course.courseNumber))}</strong>
+            <span class="mini-pill">${state.blueprints.filter(b => b.course?.id === course.id).length} blueprints</span>
+          </div>
+          <p class="module-description" title="${escapeHtmlAttr(course.description || '')}">${escapeHtml(course.description || 'No description')}</p>
+          <div class="module-blueprints">${state.blueprints.filter(b => b.course?.id === course.id).map(b => `<a href="#/blueprint/${encodeURIComponent(b.id)}" title="${escapeHtmlAttr(b.name)}">${uiIcon('lab')}<span>${escapeHtml(b.name)}</span>${uiIcon('arrow')}</a>`).join('') || '<p class="muted">No linked blueprints</p>'}</div>
+          <div class="module-card-footer">
+            <span class="muted" title="${escapeHtmlAttr(new Date(course.updatedAt).toLocaleString())}">${new Date(course.updatedAt).toLocaleDateString()}</span>
+            <button class="btn btn-secondary edit-course-button" type="button" data-course-id="${escapeHtmlAttr(course.id)}" aria-label="Edit module ${escapeHtmlAttr(String(course.courseNumber))}">${uiIcon('edit')} Edit</button>
+            <button class="icon-btn delete-course-button" type="button" data-course-id="${escapeHtmlAttr(course.id)}" aria-label="Delete module ${escapeHtmlAttr(String(course.courseNumber))}">${uiIcon('delete')}</button>
           </div>
         </article>
       `
     )
     .join('');
 
+  if (!courseList.children.length) courseList.innerHTML = '<p class="placeholder">No modules match your search.</p>';
+
   courseList.querySelectorAll('.edit-course-button').forEach(button => button.addEventListener('click', () => {
     const course = state.courses.find(c => c.id === button.dataset.courseId);
-    editingCourseId = course.id; courseForm.elements.courseNumber.value = course.courseNumber; courseForm.elements.description.value = course.description;
-    courseSubmitButton.textContent = 'Save course'; document.getElementById('cancelCourseEdit').hidden = false; courseForm.elements.courseNumber.focus();
+    openModuleDialog(course);
   }));
   courseList.querySelectorAll('.delete-course-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       const resource = state.courses.find(item => item.id === button.dataset.courseId);
-      if (!await confirmAction('Delete course?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'course') + '? This cannot be undone.', 'Delete')) return;
+      if (!await confirmAction('Delete module?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'module') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/courses/${button.dataset.courseId}`, { method: 'DELETE' });
         await loadCourses();
-        showMessage(globalStatus, 'Course deleted.', 'success');
+        showMessage(globalStatus, 'Module deleted.', 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
       } finally {
@@ -1429,7 +1432,7 @@ function renderDashboard() {
   const bpCount = elById('dashBlueprintsCount');
   const bpSub   = elById('dashBlueprintsSub');
   if (bpCount) bpCount.textContent = state.blueprints.length;
-  if (bpSub)   bpSub.textContent   = `${state.courses.length} course${state.courses.length !== 1 ? 's' : ''} configured`;
+  if (bpSub)   bpSub.textContent   = `${state.courses.length} module${state.courses.length !== 1 ? 's' : ''} configured`;
 
   const clCount = elById('dashClassroomsCount');
   const clSub   = elById('dashClassroomsSub');
@@ -2891,7 +2894,7 @@ async function saveBlueprint() {
   }
   if (!state.currentBlueprint.courseId) {
     blueprintCourseIdInput.reportValidity();
-    throw new Error('A course must be selected');
+    throw new Error('A module must be selected');
   }
 
   const payload = {
@@ -3393,8 +3396,29 @@ classroomForm?.addEventListener('submit', async event => {
   } finally { delete classroomForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
 });
 
+function openModuleDialog(course = null) {
+  if (courseSubmitButton.disabled) return;
+  editingCourseId = course?.id || null;
+  courseForm.reset();
+  courseForm.elements.courseNumber.value = course?.courseNumber || '';
+  courseForm.elements.description.value = course?.description || '';
+  courseSubmitButton.textContent = course ? 'Save module' : 'Add module';
+  document.getElementById('moduleDialogTitle').textContent = course ? 'Edit module' : 'Add module';
+  document.getElementById('moduleFormError').hidden = true;
+  document.getElementById('cancelCourseEdit').hidden = false;
+  document.getElementById('moduleDialog').showModal();
+  courseForm.elements.courseNumber.focus();
+}
+document.getElementById('newModuleButton')?.addEventListener('click', () => openModuleDialog());
+document.getElementById('moduleSearch')?.addEventListener('input', renderCourses);
+document.getElementById('moduleDialog')?.addEventListener('cancel', event => {
+  if (courseSubmitButton.disabled) event.preventDefault();
+});
+
 courseForm?.addEventListener('submit', async event => {
   event.preventDefault();
+  if (courseSubmitButton.disabled || !courseForm.reportValidity()) return;
+  document.getElementById('moduleFormError').hidden = true;
   const form = new FormData(courseForm);
   const payload = {
     courseNumber: Number(form.get('courseNumber') || 0),
@@ -3411,12 +3435,17 @@ courseForm?.addEventListener('submit', async event => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    document.getElementById('moduleDialog').close();
     courseForm.reset();
-    editingCourseId = null; courseSubmitButton.textContent = 'Add course'; document.getElementById('cancelCourseEdit').hidden = true;
+    editingCourseId = null; courseSubmitButton.textContent = 'Add module'; document.getElementById('cancelCourseEdit').hidden = true;
     await Promise.all([loadCourses(), loadBlueprints(), refreshLifecycleLabs()]);
-    showMessage(globalStatus, 'Course saved.', 'success');
+    showMessage(globalStatus, 'Module saved.', 'success');
   } catch (error) {
-    showMessage(globalStatus, error.message, 'danger');
+    if (document.getElementById('moduleDialog').open) {
+      const errorNode = document.getElementById('moduleFormError');
+      errorNode.textContent = error.message;
+      errorNode.hidden = false;
+    } else showMessage(globalStatus, error.message, 'danger');
   } finally {
     if (courseSubmitButton) {
       courseSubmitButton.disabled = false;
@@ -3844,7 +3873,7 @@ function syncFilterOptions() {
     el.replaceChildren(new Option(label, ''), ...entries.map(([value, text]) => new Option(text, value)));
     el.value = previous;
   };
-  fill('blueprintCourseFilter', state.courses.map(c => [c.id, `Course ${c.courseNumber}`]), 'All courses');
+  fill('blueprintCourseFilter', state.courses.map(c => [c.id, `Module ${c.courseNumber}`]), 'All modules');
   fill('labClassroomFilter', state.classrooms.map(c => [c.id, c.name]), 'All classrooms');
 }
 
@@ -3866,7 +3895,11 @@ function initUx() {
     const collapsed = blueprintWorkspace.classList.toggle('palette-collapsed');
     event.currentTarget.setAttribute('aria-expanded', String(!collapsed));
   });
-  document.getElementById('cancelCourseEdit')?.addEventListener('click', () => { editingCourseId = null; courseForm.reset(); courseSubmitButton.textContent = 'Add course'; document.getElementById('cancelCourseEdit').hidden = true; });
+  document.getElementById('cancelCourseEdit')?.addEventListener('click', () => {
+    if (courseSubmitButton.disabled) return;
+    document.getElementById('moduleDialog').close();
+    editingCourseId = null; courseForm.reset(); courseSubmitButton.textContent = 'Add module';
+  });
   markBlueprintSaved();
   document.getElementById('blueprintForm')?.addEventListener('input', updateSaveStatus);
   new MutationObserver(updateSaveStatus).observe(canvasVmList, { childList: true, subtree: true });

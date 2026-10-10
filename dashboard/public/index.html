@@ -54,7 +54,7 @@
               <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/>
               <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
             </svg>
-            Courses
+            Modules
           </button>
         </div>
         <div class="nav-group" data-role-group="admin">
@@ -304,7 +304,7 @@
                 </div>
                 <button id="newBlueprintButton" class="btn btn-ghost" type="button">New</button>
               </div>
-              <div class="filter-bar"><label class="field"><span>Search blueprints</span><input id="blueprintSearch" type="search" placeholder="Name, course or owner"></label><label class="field"><span>Course</span><select id="blueprintCourseFilter"><option value="">All courses</option></select></label></div><div id="blueprintList" class="saved-list">
+              <div class="filter-bar"><label class="field"><span>Search blueprints</span><input id="blueprintSearch" type="search" placeholder="Name, module or owner"></label><label class="field"><span>Module</span><select id="blueprintCourseFilter"><option value="">All modules</option></select></label></div><div id="blueprintList" class="saved-list">
                 <p class="placeholder">Loading blueprints…</p>
               </div>
             </article>
@@ -328,9 +328,9 @@
                   <input id="blueprintName" type="text" name="name" placeholder="SOC analyst sandbox" required>
                 </label>
                 <label class="field">
-                  <span>Course</span>
+                  <span>Module</span>
                   <select id="blueprintCourseId" name="courseId" required>
-                    <option value="">Select a course</option>
+                    <option value="">Select a module</option>
                   </select>
                 </label>
                 <label class="field">
@@ -463,7 +463,7 @@
                   <span id="showOnlyMyLabsLabel" class="switch-label">Only my labs</span>
                 </label>
               </div>
-              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, course, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially running</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option></select></label></div><div id="lifecycleList" class="saved-list">
+              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, module, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially running</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option></select></label></div><div id="lifecycleList" class="saved-list">
                 <p class="placeholder">Loading deployments…</p>
               </div>
             </article>
@@ -549,40 +549,13 @@
           </article>
         </section>
 
-        <!-- ── Courses ────────────────────────────────────────── -->
+        <!-- ── Modules ────────────────────────────────────────── -->
         <section class="page" data-view="admin-courses" hidden>
-          <div class="builder-grid">
-            <article class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">courses</p>
-                  <h3>Courses</h3>
-                </div>
-              </div>
-              <div id="courseList" class="saved-list">
-                <p class="placeholder">Loading courses…</p>
-              </div>
-            </article>
-
-            <article class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">new course</p>
-                </div>
-              </div>
-              <form id="courseForm" class="stack">
-                <label class="field">
-                  <span>Course number</span>
-                  <input type="number" name="courseNumber" min="1" placeholder="101" required>
-                </label>
-                <label class="field">
-                  <span>Description</span>
-                  <textarea name="description" rows="3" placeholder="Optional description"></textarea>
-                </label>
-                <button type="button" id="cancelCourseEdit" class="btn btn-ghost" hidden>Cancel edit</button><button id="courseSubmitButton" class="btn btn-primary" type="submit">Add course</button>
-              </form>
-            </article>
-          </div>
+          <article class="panel">
+            <div class="panel-head"><div><h2>Modules</h2><p class="muted">Organize your blueprints by teaching module.</p></div><button id="newModuleButton" type="button" class="btn btn-primary">Add module</button></div>
+            <div class="filter-bar"><label class="field"><span>Search modules</span><input id="moduleSearch" type="search" placeholder="Module number or description"></label></div>
+            <div id="courseList" class="module-grid" aria-live="polite"></div>
+          </article>
         </section>
 
         <!-- ── Jobs / Queues ──────────────────────────────────── -->
@@ -872,5 +845,16 @@
                 </div>
                 <button class="btn btn-primary" type="submit">Deploy</button>
               <p id="deploymentDialogError" class="field-error" role="alert" hidden></p></form></div></dialog>
+<dialog id="moduleDialog" class="modal-dialog module-dialog" aria-labelledby="moduleDialogTitle"><div class="modal-card"><h2 id="moduleDialogTitle">Add module</h2><form id="courseForm" class="stack">
+                <label class="field">
+                  <span>Module number</span>
+                  <input type="number" name="courseNumber" min="1" placeholder="101" required>
+                </label>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea name="description" rows="3" placeholder="Optional description"></textarea>
+                </label>
+                <button type="button" id="cancelCourseEdit" class="btn btn-ghost">Cancel</button><button id="courseSubmitButton" class="btn btn-primary" type="submit">Add module</button>
+              <p id="moduleFormError" class="field-error" role="alert" hidden></p></form></div></dialog>
 </body>
 </html>

@@ -2205,7 +2205,7 @@ app.post(
       res.status(201).json(mapCourse(result.rows[0]));
     } catch (error) {
       if (error?.code === '23505') {
-        res.status(409).json({ error: 'course number already exists' });
+        res.status(409).json({ error: 'module number already exists' });
         return;
       }
       throw error;
@@ -2220,10 +2220,10 @@ app.put('/api/courses/:id', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(a
     const result = await dbPool.query(`UPDATE courses SET course_number = $2, description = $3, updated_at = NOW()
       WHERE id = $1 RETURNING id, course_number, description, created_at, updated_at`,
     [req.params.id, parsed.data.courseNumber, parsed.data.description]);
-    if (!result.rowCount) return res.status(404).json({ error: 'course not found' });
+    if (!result.rowCount) return res.status(404).json({ error: 'module not found' });
     res.json(mapCourse(result.rows[0]));
   } catch (error) {
-    if (error.code === '23505') return res.status(409).json({ error: 'course number already exists' });
+    if (error.code === '23505') return res.status(409).json({ error: 'module number already exists' });
     throw error;
   }
 }));
@@ -2235,13 +2235,13 @@ app.delete(
     try {
       const result = await dbPool.query('DELETE FROM courses WHERE id = $1 RETURNING id', [req.params.id]);
       if (!result.rowCount) {
-        res.status(404).json({ error: 'course not found' });
+        res.status(404).json({ error: 'module not found' });
         return;
       }
       res.json({ ok: true, id: result.rows[0].id });
     } catch (error) {
       if (error?.code === '23503') {
-        res.status(409).json({ error: 'course is used by an existing blueprint' });
+        res.status(409).json({ error: 'module is used by an existing blueprint' });
         return;
       }
       throw error;
@@ -3495,7 +3495,7 @@ app.post(
     await validateBlueprintGuestPassword(parsed.data);
     const course = await fetchCourseById(parsed.data.courseId);
     if (!course) {
-      res.status(404).json({ error: 'course not found' });
+      res.status(404).json({ error: 'module not found' });
       return;
     }
     const teacherEmail = await upsertTeacher(req.session?.user);
@@ -3527,7 +3527,7 @@ app.put(
     await validateBlueprintGuestPassword(parsed.data);
     const course = await fetchCourseById(parsed.data.courseId);
     if (!course) {
-      res.status(404).json({ error: 'course not found' });
+      res.status(404).json({ error: 'module not found' });
       return;
     }
 
