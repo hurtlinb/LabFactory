@@ -1383,7 +1383,7 @@ function renderDashboardPowerActions(deployment) {
 
 function renderDashboard() {
   renderAttentionLabs();
-  const dashboardDeployments = state.deployments.filter(d => state.isAdmin || isDeploymentOwnedByCurrentUser(d));
+  const dashboardDeployments = state.deployments;
   const elById = id => document.getElementById(id);
 
   // Classrooms overview
@@ -3796,7 +3796,7 @@ function syncFilterOptions() {
 
 function renderAttentionLabs() {
   const el = document.getElementById('attentionLabs'); if (!el) return;
-  const labs = state.deployments.filter(d => (state.isAdmin || isDeploymentOwnedByCurrentUser(d)) && (['failed', 'mixed'].includes(d.status) || d.canResumeCustomization));
+  const labs = state.deployments.filter(d => ['failed', 'mixed'].includes(d.status) || d.canResumeCustomization);
   el.innerHTML = labs.length ? labs.map(d => `<a class="attention-item" href="#/lifecycle/${encodeURIComponent(d.id)}">${uiIcon('warning')} <strong>${escapeHtml(d.blueprint.name)}</strong> · ${escapeHtml(d.classroom.name)} · ${escapeHtml(labStatusLabel(d.status))}</a>`).join('') : '<p class="muted">No labs need attention.</p>';
 }
 

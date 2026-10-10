@@ -322,6 +322,24 @@ test('modules search and edit dialog preserve data when cancelled and reset for 
   assert.equal(requests.filter(request => request.method === 'POST' || request.method === 'PUT').length, 0);
 });
 
+test('dashboard shows other teachers labs and attention items even when only my labs is selected', t => {
+  const { api, document } = setup(t);
+  api.state.isAdmin = false;
+  api.state.auth = { enabled: true };
+  api.state.currentUser = { email: 'me@example.org', roles: ['teacher'] };
+  api.state.showOnlyMyLabs = true;
+  api.state.classrooms = [{ id: 'room', name: 'Room', workstationCount: 1 }];
+  api.state.deployments = ['running', 'failed'].map(status => ({
+    id: status, status, teacherEmail: 'other@example.org', deploymentNumber: 1,
+    blueprint: { name: `Other ${status}` }, classroom: api.state.classrooms[0], totalVmCount: 1
+  }));
+  api.renderDashboard();
+  assert.equal(document.querySelectorAll('#dashClassroomsGrid .dash-classroom-lab').length, 2);
+  assert.match(document.getElementById('attentionLabs').textContent, /Other failed/);
+  assert(document.querySelector('#dashClassroomsGrid [data-action="stop"]'));
+  assert.equal(document.querySelector('#dashClassroomsGrid [data-action="destroy"]'), null);
+});
+
 test('dashboard tiles expose power actions according to lab status', t => {
   const { api, document } = setup(t);
   api.state.isAdmin = true;
