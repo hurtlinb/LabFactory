@@ -8,7 +8,7 @@ const STATUS_KEY = `worker:${WORKER_NAME}`;
 
 (async () => {
   const connection = redisConnectionOptions();
-  await resetStalledTerraformDeployments();
+  await resetStalledTerraformDeployments(connection);
   const worker = startTerraformWorker(connection);
   console.log('Terraform worker started');
 

@@ -165,6 +165,14 @@ The `Settings` page also contains a `Clear job history` button to remove complet
 The danger zone also contains a `Clean orphaned disks` button. It uses the Proxmox API token to inspect QEMU VM configs, list volumes in `PROXMOX_ORPHANED_DISK_POOL` (`ceph-pool` by default), and remove pool volumes that are not referenced by any VM config. Volumes whose VMID still exists in Proxmox or whose RBD image still has watchers are ignored. The cleanup uses direct Proxmox REST API calls on every node from `PROXMOX_NODES` or `PROXMOX_NODE`; the `nodes/{node}/execute` endpoint is not used because Proxmox restricts it to `root@pam`.
 
 ## Terraform Behavior
+
+Jobs for different labs can run concurrently: `TERRAFORM_JOB_CONCURRENCY` defaults to 4 and `ANSIBLE_JOB_CONCURRENCY` to 2 (accepted range: 1–8 per worker). A PostgreSQL advisory lock allows only **one Terraform deploy job globally**, including redeployments, through VM readiness checks. Start/stop and destroy jobs for other labs can proceed during that deployment. Subsequent Ansible customization can overlap with the next lab's Terraform deployment.
+
+Terraform and Ansible share a lock per lab, preventing simultaneous operations on that lab across worker processes. Jobs waiting for a lock are delayed in BullMQ without consuming a worker slot or being reported as failed. Worker startup preserves active, waiting and delayed jobs; abandoned operations without a live job are marked failed. Stalled jobs are not replayed automatically.
+
+Each Terraform job uses its own temporary configuration, variables, plan and `TF_DATA_DIR`, removed on completion or failure. The existing PostgreSQL backend and `blueprint-<deployment-id>` workspace names are unchanged, so existing lab state remains available. Workers must use the same PostgreSQL database for coordination and connect directly (session advisory locks are incompatible with transaction-mode connection pooling). Connection loss aborts the affected job. The provider mirror installed in the worker image remains read-only and shared.
+
+Deploy both updated worker services together before using concurrent jobs; older workers do not acquire these locks. These limits control jobs, separately from Terraform's per-job VM parallelism and Ansible's per-job customization concurrency.
 Terraform is used for deployment and destruction.
 
 Important points:

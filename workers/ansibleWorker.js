@@ -1,10 +1,11 @@
 import { activeAnsibleTasks } from '../lib/ansibleTasks.js';
+import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { runAnsibleTaskBlock } from '../lib/runAnsibleTasks.js';
 import { getFileUploads, resolveFileUpload } from '../lib/blueprintFiles.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
-import { Queue, Worker } from 'bullmq';
+import { DelayedError, Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { promises as fs } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -248,7 +249,7 @@ export function startAnsibleWorker(connection) {
 
   const worker = new Worker(
     ansibleQueueName,
-    async job => {
+    async (job, token) => {
       const abortController = new AbortController();
       activeAbortControllers.set(String(job.id), abortController);
       const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.deploymentId ?? job.id);
@@ -264,12 +265,15 @@ export function startAnsibleWorker(connection) {
       };
 
       let fileStagingDirectory;
+      let lease;
       try {
         if (job.name === 'validate-ansible-tasks') {
           if (Date.now() > job.data.expiresAt) throw new Error('Validation expired; please validate again');
           const result = await runAnsibleTaskBlock({ block: job.data.block, syntaxOnly: true, signal: abortController.signal });
           return { valid: true, image: result.image, message: 'Ansible syntax valid. Runtime prerequisites are not checked.' };
         }
+        lease = await acquireJobLocks(dbPool, job, token, abortController);
+        lease.assertHeld();
         console.log(`Ansible job ${job.id} started for deployment ${deploymentLabel} (customize)`);
         if (extraVars.windows_admin_password !== blueprintWindowsAdminPassword) {
           throw new Error('Ansible customization password does not match blueprint windowsAdminPassword');
@@ -364,6 +368,7 @@ export function startAnsibleWorker(connection) {
           probePlaybook: windowsReconnectCheckPlaybook, signal: abortController.signal
         });
 
+        lease.assertHeld();
         await safeUpdateDeploymentStatus(job.data.deploymentId, 'deployed', {
           action: 'customize',
           jobId: String(job.id),
@@ -373,6 +378,7 @@ export function startAnsibleWorker(connection) {
         console.log(`Ansible job ${job.id} finished for deployment ${deploymentLabel} (customize)`);
         return { status: 'ansible-done' };
       } catch (error) {
+        if (error instanceof DelayedError) throw error;
         console.error(`Ansible job ${job.id} failed for deployment ${deploymentLabel} (customize)`, error);
         if (job.data.deploymentId) await safeUpdateDeploymentStatus(job.data.deploymentId, 'failed', {
           action: 'customize',
@@ -382,12 +388,14 @@ export function startAnsibleWorker(connection) {
         if (job.name === 'validate-ansible-tasks') throw new Error(commandFailure(error));
         throw error;
       } finally {
-        if (fileStagingDirectory) await fs.rm(fileStagingDirectory, { recursive: true, force: true });
         activeAbortControllers.delete(String(job.id));
+        try {
+          if (fileStagingDirectory) await fs.rm(fileStagingDirectory, { recursive: true, force: true });
+        } finally { await lease?.release(); }
       }
     },
     // Arbitrary task blocks must not be replayed automatically after a lost worker lock.
-    { connection, concurrency: 1, maxStalledCount: 0 }
+    { connection, concurrency: workerConcurrency(process.env.ANSIBLE_JOB_CONCURRENCY, 2), maxStalledCount: 0 }
   );
 
   worker.on('stalled', async (jobId) => {
@@ -416,17 +424,12 @@ export function startAnsibleWorker(connection) {
   return worker;
 }
 
-export async function resetStalledAnsibleDeployments() {
+export async function resetStalledAnsibleDeployments(connection) {
+  const queue = new Queue(ansibleQueueName, { connection });
   try {
-    const result = await dbPool.query(
-      `UPDATE lab_deployments
-         SET status = 'failed', last_action = 'customize', updated_at = NOW()
-       WHERE status = 'customizing'`
-    );
-    if (result.rowCount > 0) {
-      console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) en customizing remis à failed`);
-    }
-  } catch (err) {
-    console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
-  }
+    const count = await recoverDeploymentJobs(dbPool, queue, ['customizing'], 'customize');
+    if (count) console.log(`[startup] Recovered ${count} abandoned deployment(s)`);
+  } catch (error) {
+    console.error('[startup] Unable to recover abandoned deployments:', error);
+  } finally { await queue.close(); }
 }

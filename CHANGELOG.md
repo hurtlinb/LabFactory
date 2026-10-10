@@ -1,291 +1,74 @@
 # Changelog
 
-All notable changes to LabFactory are documented here.
+Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
 ## [1.8.2] — 2026-10-09
 
-### Ajouts
-- Actions Start/Stop directement dans les tuiles du dashboard, sous forme d'icônes au-dessus du statut du lab. Les actions disponibles suivent l'état du lab et conservent les confirmations et contrôles de conflits de salle.
-- Colonnes Username et Password dans les détails du déploiement, avec les identifiants utilisés par l'export CSV. Le mot de passe est masqué par défaut et peut être affiché ou masqué individuellement avec le bouton œil ; il est de nouveau masqué au rafraîchissement des détails.
-- Aperçu du contenu des blueprints dans la bibliothèque : noms et icônes des quatre premières VM, avec un compteur pour les VM supplémentaires.
-
-### Interface
-- Bibliothèque de blueprints présentée en cartes compactes dans une grille, avec description raccourcie et aperçu en bas de carte sur fond blanc.
-- Workspace sur toute la largeur, réservé aux détails du blueprint et aux accès invités, avec des champs regroupés pour réduire la hauteur du formulaire.
-- Section « Machines and customizations » séparée, avec son titre au-dessus d'une palette horizontale à deux onglets : VM et Customization. Navigation au clavier entre les onglets.
-- Palette compacte sans barres de recherche ni filtre OS, icônes réduites et personnalisations en couleur, dont le logo Docker. Pictogrammes ajoutés aux titres des onglets.
-- Zone de dépose sur fond pointillé, cartes VM compactes et palette maintenue visible pendant le défilement sur grand écran. Mise en page adaptée aux petits écrans.
-
-### Tests
-- Couverture des actions Start/Stop du dashboard, des onglets de la palette, de l'affichage individuel des mots de passe et des aperçus de blueprints.
-
----
-
-## [1.8.1] — 2026-10-08
-
-### Corrections
-- Nettoyage « Clean orphaned disks » : déduplication des volumes du pool Ceph partagé entre les nœuds Proxmox, pour éviter de supprimer plusieurs fois le même disque et d'interrompre le nettoyage sur une erreur « No such file or directory ».
-- Les volumes explicitement signalés comme déjà absents ne bloquent plus le nettoyage. Une erreur de lecture du stockage sur un nœud ou de suppression d'un volume n'empêche plus le traitement des autres volumes accessibles.
-- Affichage d'un bilan incomplet avec les erreurs rencontrées lorsque le nettoyage ne peut pas tout traiter, au lieu d'un message de succès ou d'absence de disques orphelins.
-- Conservation des protections : les volumes dont le VMID existe encore, ceux référencés par une configuration de VM et ceux utilisés par un client Ceph (« watchers ») ne sont pas supprimés. L'impossibilité de lire les configurations des VM interrompt le nettoyage avant toute suppression.
-
-### Tests
-- Ajout de six tests de régression couvrant les volumes partagés, les erreurs d'inventaire, les disques déjà absents, les erreurs de suppression et la protection des volumes encore utilisés.
-
----
+- Démarrage et arrêt des labs directement depuis le dashboard.
+- Consultation des identifiants des VM dans les détails du déploiement, avec affichage du mot de passe à la demande.
+- Aperçu des VM de chaque blueprint dans la bibliothèque.
 
 ## [1.8.0] — 2026-09-30
 
-### Ajouts
-- Customization « Ansible Tasks » en Beta : blocs de tâches YAML par VM, avec nom, variables, activation et ordre d'exécution, pour appliquer des configurations ou provoquer volontairement des pannes.
-- Exécution des blocs en dernier dans l'étape de personnalisation, après les configurations standard, les redémarrages et les copies de fichiers ; aucune exécution à la demande.
-- Validation du YAML et de la structure à l'enregistrement du bloc, puis vérification de syntaxe avec Ansible avant les personnalisations. Collections disponibles dans un catalogue avec versions fixes, notamment Windows, Active Directory et Docker.
-- Suivi des résultats et points de reprise par bloc : les blocs réussis sont conservés lors d'une reprise et les tâches en échec ne sont pas réessayées automatiquement.
-- Exécution isolée dans des Jobs Kubernetes temporaires sur le cluster, ou dans des conteneurs Docker hors Kubernetes, avec limites de ressources et de durée, collecte des logs et nettoyage automatique.
-
-### Interface
-- Modification des customizations existantes depuis leur bouton d'édition : hostname, timezone, second disque, contrôleur de domaine et jonction au domaine, en complément des fichiers et des tâches Ansible. Le verrouillage des blueprints déployés reste applicable.
-- Bandeau « Beta » dans l'éditeur Ansible et validation intégrée au parcours, sans bouton « Validate with Ansible ».
-
-### Corrections
-- Attente du redémarrage Windows effectif avant de poursuivre les personnalisations : une réponse WinRM reçue avant l'arrêt ne peut plus déclencher prématurément les tâches Ansible.
-- Inclusion du catalogue des collections dans l'image du dashboard pour éviter un échec au démarrage.
-- Compatibilité des tâches personnalisées avec les clusters Kubernetes sans daemon Docker dans le worker ; publication de l'image dédiée et configuration des permissions via GitOps.
-- Création de l'utilisateur non privilégié utilisé par les pods Ansible pour permettre les connexions SSH, et correction des permissions des fichiers transmis aux conteneurs Docker sous Linux.
-- Tests d'intégration de l'image Ansible dans les pipelines avant la mise à jour GitOps, avec diagnostics détaillés en cas d'échec.
-
-### Compatibilité
-- Les tâches s'exécutent sur la VM ciblée : leurs prérequis doivent y être installés. Pour lancer un conteneur avec `community.docker.docker_container`, activer la customization « Docker CE » ou fournir une VM disposant déjà d'un moteur Docker opérationnel.
-
----
+- Tâches Ansible personnalisées par VM (bêta), avec validation et suivi des résultats.
+- Modification des personnalisations existantes : nom de machine, fuseau horaire, second disque et configuration de domaine.
 
 ## [1.7.10] — 2026-09-29
 
-### Ajouts
-- Suivi de la personnalisation par VM : nombre de réussites, d'échecs et de VM en attente, avec détail de l'étape ou du fichier concerné, de la tentative et de l'erreur.
-- Action « Resume incomplete customizations » pour reprendre les personnalisations incomplètes, en conservant les VM et les étapes Windows déjà réussies, sans relancer Terraform. Action réservée au propriétaire du lab et aux administrateurs.
-
-### Corrections
-- Les coupures temporaires WinRM pendant la configuration Windows ou la copie de fichiers déclenchent jusqu'à trois nouvelles tentatives, après 15, 30 et 60 secondes, avec vérification de WinRM avant chaque reprise. Les erreurs d'authentification, de permissions et de stockage ne sont pas réessayées automatiquement.
-- Conservation des points de reprise par VM et par fichier ; vérification du contenu par checksum pour éviter de retransférer un fichier déjà copié après une perte de connexion.
-- Une VM en échec n'interrompt plus la personnalisation des autres VM ; le traitement est limité à cinq VM simultanées.
-- Un échec de reconnexion Windows après redémarrage ne peut plus laisser le lab marqué comme déployé avec succès.
-- Les paramètres Ansible contenant les mots de passe sont transmis par un fichier temporaire à accès restreint plutôt que dans les arguments de commande.
-
-### Compatibilité
-- La reprise nécessite les points de contrôle enregistrés par cette version et conservés dans l'historique des jobs Redis. Elle n'est pas disponible pour les anciens jobs, notamment celui du lab #51, ni après suppression de cet historique.
-- Pour Linux, la reprise conserve les VM réussies et relance le playbook des VM incomplètes.
-
----
-
-## [1.7.9] — 2026-09-23
-
-### Corrections
-- Les mots de passe générés par poste de travail sont désormais plus courts : 3 minuscules, 3 chiffres de 1 à 9 et 2 majuscules.
-- Exclusion des caractères pouvant prêter à confusion (`0`, `I`, `i`, `l`, `O` et `o`) dans les mots de passe générés.
-
----
+- Suivi des personnalisations réussies, en attente ou en échec pour chaque VM.
+- Reprise des personnalisations incomplètes sans recommencer les étapes réussies.
 
 ## [1.7.8] — 2026-09-17
 
-### Ajouts
-- Génération de mots de passe alphanumériques par poste de travail, avec au moins une majuscule, une minuscule et un chiffre.
-- Export CSV des informations des VM depuis les détails d'un déploiement, avec les usernames adaptés à l'OS et à la langue.
-- Toggle dans les blueprints pour choisir entre un mot de passe partagé et des mots de passe générés par poste.
-
-### Corrections
-- Rejet et régénération des anciens mots de passe contenant des caractères spéciaux.
-- Correction des erreurs Terraform et des contrôles de readiness lors des déploiements avec des mots de passe par VM.
-- Conservation des valeurs CPU, sockets et mémoire du template Proxmox lors du clonage.
-
----
+- Génération de mots de passe alphanumériques par poste de travail.
+- Export CSV avec les identifiants adaptés au système et à la langue de chaque VM.
 
 ## [1.7.7] — 2026-09-17
 
-### Corrections
-- Upload : vérification de l'espace disponible avant l'envoi et message explicite « Not enough storage space to upload this file. Contact your adminstrator. » en cas de capacité insuffisante ou de disque plein pendant l'écriture.
-- Préservation des réglages CPU et mémoire du template Proxmox lors du clonage Terraform.
-
-### Ajouts
-- Choix, dans un blueprint, entre un mot de passe partagé et un mot de passe généré par poste de travail, avec export CSV des informations de chaque VM depuis les détails du déploiement.
-- Maintenance (admin) : inventaire des fichiers uploadés avec lien vers leur blueprint, taille individuelle, total des fichiers et espace disponible sur le volume de stockage.
-- Plusieurs customizations « Upload File » par VM, avec dossier cible, modification et suppression indépendants pour chaque fichier ; compatibilité avec les fichiers déjà configurés.
-- Customization « Upload File » pour Windows et Linux : création du dossier cible et copie du fichier lors du déploiement.
-- Stockage persistant des fichiers sur disque, partagé avec Ansible, avec nettoyage lors de la suppression du blueprint ou du remplacement du fichier.
-- Envoi en streaming avec progression et limite configurable de 1 Go par fichier.
-
----
+- Ajout de fichiers à copier sur les VM Windows et Linux lors du déploiement.
+- Inventaire des fichiers et de l'espace de stockage pour les administrateurs.
+- Choix entre un mot de passe partagé et un mot de passe par poste, avec export CSV des informations des VM.
 
 ## [1.7.6] — 2026-09-11
 
-### Ajouts
-- Détails du lab : action « Pause updates » pour les VM Windows 11 et Windows Server 2022 démarrées, avec suspension standard de Windows Update pendant 35 jours et reprise automatique.
-- Sélection de plusieurs VM ou de toutes les VM pour exécuter Reset IP, Reset Password ou Pause updates en une seule opération.
-- Suivi de la progression et du résultat par VM : les VM incompatibles sont signalées comme ignorées et un échec n'interrompt pas le traitement des autres VM.
-- Conservation de la sélection pendant les rafraîchissements et à la réouverture des détails du lab.
-
-### Interface
-- Icônes identiques pour les actions individuelles et groupées, avec infobulles indiquant le nombre de VM compatibles pour les actions groupées.
-- Libellé « Pause updates » sans durée sur les boutons.
-
-### Corrections
-- Reset IP et Reset Password sont disponibles pour les VM démarrées d'un lab partiellement démarré ; les actions sont masquées pour les VM arrêtées.
-- L'icône Reset IP est restaurée après l'exécution de l'action.
-
----
+- Suspension des mises à jour Windows pendant 35 jours.
+- Actions sur plusieurs VM à la fois : réinitialisation de l'IP, du mot de passe ou suspension des mises à jour, avec suivi par VM.
 
 ## [1.7.5] — 2026-07-21
 
-### Ajouts
-- Page Labs : ajout du toggle `Show all labs / Show only my labs`, avec affichage de tous les labs par défaut
-- Les labs appartenant à d'autres utilisateurs sont affichés avec un fond grisé dans la liste
-
-### Sécurité
-- Un lab ne peut désormais être déployé, détruit ou supprimé que par son créateur ou par un admin ; les actions Start/Stop restent disponibles
-- Un blueprint utilisé par un lab déployé devient verrouillé en lecture seule et ne peut plus être modifié côté dashboard, API ou base de données
-
----
-
-## [1.7.4] — 2026-06-25
-
-### Corrections
-- **Critique** — Sur un gros lab (66 VM en prod), le verrou Ceph `cfs-lock 'storage-ceph-pool'` expirait pour une vingtaine de VM en plein `terraform apply`, même avec le parallélisme déjà au minimum sûr (10) — Terraform ne réessaie jamais une ressource individuelle qui échoue au sein d'un même apply, donc tout le déploiement échouait à cause de ce sous-ensemble. Ajout d'un retry automatique ciblé : les erreurs `cfs-lock` sont détectées dans la sortie de Terraform, les VMID concernées sont extraites, et un nouveau `plan`+`apply` limité à ces seules VM est relancé après un backoff de 20s (jusqu'à 4 tentatives) — sans toucher aux VM déjà créées avec succès
-
----
+- Filtre pour afficher tous les labs ou uniquement les siens.
+- Gestion des droits sur les labs : déploiement et suppression réservés au propriétaire et aux administrateurs.
+- Verrouillage des blueprints utilisés par un lab déployé.
 
 ## [1.7.3] — 2026-06-25
 
-### Ajouts
-- Indicateur d'état Redis dans la sidebar, au même titre que Postgres/Proxmox/Terraform/Ansible
-- Le redéploiement d'une workstation spécifique (déjà possible quand le lab est `running`) fonctionne désormais aussi quand le déploiement est en `failed` — plus besoin de détruire et refaire tout le lab pour corriger une seule VM en panne
-- L'attente de reconnexion post-redémarrage (phase de personnalisation Windows) est désormais suivie VM par VM au lieu d'attendre une seule exécution Ansible globale — une VM lente à reconnecter ne bloque plus la détection des autres ni l'avancement du déploiement. Nouvel état `waiting for reboot` visible dans le détail du déploiement, avec progression individuelle par VM
-
-### Corrections
-- **Critique** — Les VM Windows (déploiement et reconnexion post-redémarrage) étaient vérifiées par lots : toutes les VM encore en attente partageaient un seul processus `ansible-playbook` par "round". Plusieurs incidents en cascade en ont découlé (timeout par round trop court pour un lot, `forks` retombé à sa valeur par défaut faute du bon répertoire de travail, stratégie `linear` d'Ansible bloquant tout le lot sur la VM la plus lente) — chacun corrigé tour à tour, mais le problème de fond restait : tant que les VM partagent un processus et une fenêtre de temps communs, une VM lente à démarrer (sysprep Windows 11 notamment) peut retarder ou faire perdre la confirmation de VM par ailleurs déjà prêtes. Remplacé par un modèle où chaque VM a son propre cycle de vérification indépendant (son propre `ansible-playbook`, son propre timeout, son propre backoff), toutes lancées en parallèle — à l'image de ce qui existait déjà pour Linux. Une VM qui bloque n'affecte plus aucune autre VM
-- Le délai maximum d'attente d'une VM Windows individuelle (30 min) pouvait être trop court pour un Windows 11 lent à finir son sysprep. Porté à 120 min
-- **Critique** — Quand un déploiement échouait après que les VM aient déjà été créées et démarrées dans Proxmox (ex. une VM jamais devenue prête en WinRM), le dashboard l'affichait quand même comme "deploying" avec l'icône qui tourne, indéfiniment. Cause : le calcul du statut affiché dérivait un statut `running`/`mixed` à partir de l'état Proxmox des VM (qui tournent bel et bien), écrasant le vrai statut `failed` avant même qu'il atteigne l'écran. Le statut `failed` est maintenant préservé tel quel, avec une icône et un badge dédiés (page labs, aperçu du dashboard, et tableau des VM par déploiement — les VM jamais confirmées prêtes s'affichent désormais comme `failed` plutôt que `ready`)
-- **Critique** — La personnalisation Windows (hostname, timezone, disque, reboot — `windows-playbook.yml`) tournait pour tout le lot de VM en une seule fois, sans tolérance de panne : qu'une seule VM devienne injoignable en cours de route faisait échouer toute la tâche de customisation, même quand toutes les autres VM avaient déjà réussi. Ajout de `ignore_errors`/`ignore_unreachable` sur chaque tâche : une VM injoignable n'empêche plus la personnalisation des autres. Elle sera ensuite identifiée individuellement comme `failed` par le check de reconnexion post-redémarrage (déjà découplé VM par VM), au lieu de faire échouer tout le déploiement
-- **Critique** — Le passage à un processus `ansible-playbook` indépendant par VM (ci-dessus) n'a aucune limite de concurrence : sur un lab avec beaucoup de VM Windows, ça peut lancer des dizaines de processus simultanés (~50-60 Mo chacun), ce qui a fait dépasser la limite mémoire du worker (`OOMKilled`, terraform-worker crashé en plein déploiement). Corrigé en augmentant les ressources mémoire des workers plutôt qu'en limitant la concurrence (gitops : terraform-worker 2Gi→4Gi, ansible-worker 3Gi→4Gi)
-- Le redéploiement d'une seule VM (`replaceVmids`) pouvait échouer avec `rbd: ... already exists` si un disque Ceph (cloudinit, disque OS) d'une tentative précédente n'avait pas été correctement nettoyé — Terraform ne sait gérer que les ressources dans son propre état, pas les volumes orphelins que Proxmox aurait laissés. Le nettoyage post-destruction existant (déjà utilisé après un `destroy` complet) est désormais aussi exécuté avant un redéploiement ciblé, uniquement pour les VM dont Proxmox confirme l'absence — sans risque pour un remplacement normal où la VM existe encore
-
----
-
-## [1.7.2] — 2026-06-24
-
-### Corrections
-- **Critique** — Tous les jobs Terraform échouaient instantanément (`abortController.signal.setMaxListeners is not a function`). `AbortSignal` est un `EventTarget` standard et n'a pas de méthode `.setMaxListeners()` comme `EventEmitter`. Remplacé par la fonction utilitaire `events.setMaxListeners(n, target)`, qui fonctionne pour les deux
-
----
-
-## [1.7.1] — 2026-06-24
-
-### Améliorations
-- Icônes harmonisées : Reset IP, Reset Password et Redeploy passent du style "badge coloré incrusté" (3ᵉ langage visuel isolé) au style trait ("feather") utilisé par la navigation et les customisations ; l'action "Deploy" utilise désormais un seul glyphe (`⬆`) partout au lieu de deux différents
-- Indicateurs d'état (sidebar santé système, état des VM, workers) : les pastilles uniquement colorées sont remplacées par des icônes de forme distincte (`✓ ✗ ! ↻ –`), pour rester utilisables par les personnes daltoniennes
-
-### Performance
-- Ansible tournait avec le nombre de forks par défaut (5), limitant la personnalisation des VM (timezone, hostname, jonction domaine, second disque) à 5 hôtes à la fois sur les labs de grande taille. Ajout de `ansible/ansible.cfg` (`forks = 100`)
-- Ressources du pod `ansible-worker` augmentées (CPU/mémoire) pour supporter ce parallélisme plus élevé sans throttling ni OOM
-
-### Corrections
-- **Critique** — Un job Ansible annulé depuis le dashboard pouvait rester indéfiniment en statut "actif" : `lib/runCommand.js` ne tuait que le process `ansible-playbook` lui-même, pas les workers qu'il forke par hôte (jusqu'à 100 avec le nouveau réglage `forks`). Ces processus orphelins gardaient les pipes stdout/stderr ouverts, empêchant l'événement `close` de Node de se déclencher. Le process est désormais lancé dans son propre groupe (`detached: true`) et l'annulation tue tout le groupe (`process.kill(-pid, ...)`), corrigeant le même risque pour `terraform` au passage
-
-### Notes
-- `TERRAFORM_PARALLELISM` a été testé à 64 puis 20 pour accélérer le clonage, mais les deux dépassaient ce que le verrou cluster (`cfs-lock`) de notre pool de stockage Ceph peut sérialiser (`clone failed: cfs-lock 'storage-ceph-pool' error: got lock request timeout`). Revenu à la valeur par défaut du code (10), qui reste la seule valeur confirmée stable sur cette infrastructure
-
----
+- Indicateur de disponibilité de Redis.
+- Redéploiement d'un poste individuel après l'échec d'un lab.
+- Suivi du redémarrage Windows pour chaque VM.
 
 ## [1.7.0] — 2026-06-22
 
-### Ajouts
-- Customisation "Second Disk" (drag & drop, Windows et Linux) : un second disque dur peut être ajouté à une VM depuis le blueprint builder, avec une taille en Go demandée à l'utilisateur
-- Case à cocher "Configure the disk" dans la boîte de dialogue : par défaut le disque est automatiquement partitionné, formaté et monté (`/data` sur Linux, nouvelle lettre sur Windows) ; décochée, le disque est attaché brut et laissé à la charge de l'utilisateur de la VM
-
-### Corrections
-- Sur Windows, la tâche d'initialisation du second disque échouait silencieusement (`Missing condition in if statement after 'if ('`) : `ansible.builtin.raw` fait transiter la commande par un PowerShell externe qui interpolait `$disk` (non défini à ce niveau) en chaîne vide avant l'exécution du script imbriqué. Remplacé par `ansible.windows.win_powershell`, déjà utilisé pour ce même type de cas dans `windows-domain-playbook.yml`
-
-### Infrastructure
-- Ajout de la collection Ansible `ansible.posix` (module `mount`) à l'image `labfactory/worker`, nécessaire au montage automatique du second disque sous Linux
-
----
-
-## [1.6.1] — 2026-06-19
-
-### Corrections
-- **Critique** — Un teacher ne pouvait pas préparer de lab : `GET /api/classrooms` était restreint au rôle `admin` alors que la sélection d'une salle est nécessaire à la préparation d'un lab (page Labs, accessible au teacher). La lecture est désormais ouverte aux rôles `teacher` et `admin` ; la gestion (création/modification/suppression) reste `admin`-only
-- **Critique** — Les actions accessibles au teacher (préparer un lab, déployer/démarrer/arrêter/détruire) déclenchaient ensuite un appel admin-only en arrière-plan (`/api/teachers`, `/api/queues`) qui échouait avec `403 forbidden`, affichant un message d'erreur trompeur alors que l'action principale avait réussi. Ces appels sont désormais conditionnés au rôle admin
-
----
+- Ajout d'un second disque aux VM Windows et Linux, avec configuration automatique ou disque laissé brut.
 
 ## [1.6.0] — 2026-06-19
 
-### Ajouts
-- Gestion des permissions RBAC basée sur deux rôles client Keycloak : `teacher` (accès aux pages du menu Labs) et `admin` (accès complet, y compris Administration)
-- Écran "Access denied" pour les comptes authentifiés ne possédant aucun des deux rôles
-- Badge de rôle (Admin / Teacher / No role) par utilisateur sur la page Users, basé sur le rôle Keycloak constaté lors de sa dernière activité
-
-### Améliorations
-- Interface entièrement traduite en anglais (suppression des dernières chaînes françaises résiduelles)
-- Couleurs codées en dur (icônes Reset IP/Password/Redeploy, bannière dev, indicateurs OS) centralisées dans des variables CSS du design system
-- Messages "Loading…" et messages d'état vide uniformisés
-- Contraste du texte secondaire (`--muted`) renforcé pour la conformité WCAG AA ; `scope="col"` ajouté aux en-têtes de tableaux
-
-### Corrections
-- Extraction des rôles Keycloak corrigée : lecture des rôles **client** (`resource_access`) depuis l'access token au lieu des rôles realm
-- Masquage RBAC inopérant sur `.shell`, le menu Administration et l'écran d'accès refusé — l'attribut `hidden` était neutralisé par des règles CSS `display` explicites sans `!important`
-
----
+- Rôles enseignant et administrateur pour contrôler l'accès aux fonctionnalités.
+- Affichage du rôle de chaque utilisateur dans la page Users.
 
 ## [1.5.0] — 2026-06-16
 
-### Ajouts
-- Réinitialisation du mot de passe administrateur par VM via le guest agent Proxmox (Linux : `chpasswd`, Windows : `Set-LocalUser`)
-- Réinitialisation de l'IP par VM via le guest agent Proxmox — modifie le fichier netplan existant (Linux) ou reconfigure l'interface réseau (Windows)
-- Changelog accessible depuis le dashboard (icône à côté du numéro de version)
-- Numéro de version affiché dans le pied de page : SHA du build en dev, numéro de release en prod
-
-### Améliorations
-- Les boutons Reset IP, Reset Password et Redeploy VMs remplacés par des icônes SVG
-- Le fichier `terraform-settings.json` est monté via un ConfigMap Kubernetes dans le pod worker Terraform
-
-### Corrections
-- Script bash de reset IP réécrit avec `set -e` pour éviter une chaîne `&&` cassée si `grep` ne trouve aucun fichier netplan
-
----
+- Réinitialisation du mot de passe administrateur d'une VM.
+- Consultation du changelog et de la version depuis le dashboard.
 
 ## [1.4.0] — 2026-06-12
 
-### Ajouts
-- Pipeline CI/CD via GitHub Actions : chaque commit sur `main` déploie en dev (tag SHA) ; une GitHub Release déploie en prod (tag semver)
-- Dépôt GitOps (`labfactory-gitops`) avec Kustomize base + overlays dev et prod
-- Applications ArgoCD pour dev (auto-sync) et prod (sync manuel)
-
-### Améliorations
-- Workflow sur branche unique `main` — branche dev supprimée
-- Manifests Kubernetes déplacés dans `labfactory-gitops`
-
----
+- Publication des versions en développement et en production via CI/CD.
 
 ## [1.3.2] — 2026-06-12
 
-### Ajouts
-- Bouton Reset IP par VM (visible uniquement quand le déploiement est en cours)
-- Reset via guest agent Proxmox : Linux (netplan) et Windows (cmdlets `NetIPAddress`)
-- DNS Swisscom (`195.186.4.162`, `195.186.4.163`) appliqués lors du reset IP
-
----
-
-## [1.3.1] — 2026-06-12
-
-### Améliorations
-- Avertissement de conflit de classroom déplacé sur les actions déployer/démarrer
-- Avertissement de conflit limité aux labs actifs
-
----
+- Réinitialisation de l'adresse IP d'une VM Windows ou Linux.
 
 ## [1.3.0] — 2026-06-12
 
-### Ajouts
-- Avertissement de conflit de classroom lors du démarrage d'un lab sur une salle déjà occupée
-- Badge initiales du propriétaire sur chaque carte de lab
-- Propriétaire du lab actif affiché dans la carte classroom
+- Avertissement lorsqu'une salle est déjà occupée par un lab actif.
+- Affichage du propriétaire sur les cartes des labs et des salles.

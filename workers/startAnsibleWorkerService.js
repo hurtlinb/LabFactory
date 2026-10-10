@@ -8,7 +8,7 @@ const STATUS_KEY = `worker:${WORKER_NAME}`;
 
 (async () => {
   const connection = redisConnectionOptions();
-  await resetStalledAnsibleDeployments();
+  await resetStalledAnsibleDeployments(connection);
   const worker = startAnsibleWorker(connection);
   console.log('Ansible worker started');
 

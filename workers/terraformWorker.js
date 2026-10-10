@@ -1,13 +1,15 @@
 import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
+import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
+import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { setMaxListeners } from 'node:events';
 import http from 'node:http';
 import https from 'node:https';
-import { Queue, Worker } from 'bullmq';
+import { DelayedError, Queue, Worker } from 'bullmq';
 import { Pool } from 'pg';
 import { runCommand } from '../lib/runCommand.js';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
@@ -54,10 +56,9 @@ const DEFAULT_TERRAFORM_PARALLELISM = 10;
 const MAX_TERRAFORM_PARALLELISM = 64;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const terraformDir = path.resolve(__dirname, '../terraform');
+const terraformSourceDir = path.resolve(__dirname, '../terraform');
 const ansibleDir = path.resolve(__dirname, '../ansible');
 const terraformVarsPath = path.resolve(__dirname, '../config/terraform-settings.json');
-const sanitizedVarsPath = path.resolve(terraformDir, '.terraform-vars.json');
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
 });
@@ -1423,7 +1424,7 @@ export function startTerraformWorker(connection) {
 
   const worker = new Worker(
     terraformQueueName,
-    async job => {
+    async (job, token) => {
       const abortController = new AbortController();
       // Many VMs are polled concurrently for guest readiness, each holding an abort listener
       // on this shared signal — raise Node's default threshold (10) to match expected concurrency.
@@ -1432,8 +1433,7 @@ export function startTerraformWorker(connection) {
       const readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
         ...process.env,
-        TF_IN_AUTOMATION: '1',
-        TF_DATA_DIR: path.join(terraformDir, '.terraform')
+        TF_IN_AUTOMATION: '1'
       };
       const action =
         job.data.action === 'destroy'
@@ -1445,7 +1445,16 @@ export function startTerraformWorker(connection) {
               : 'deploy';
       const workspaceName = job.data.labInstanceId ? workspaceNameFor(job.data.labInstanceId) : 'default';
       const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.labInstanceId);
+      let lease;
+      let terraformDir;
       try {
+        lease = await acquireJobLocks(dbPool, job, token, abortController, { deploy: action === 'deploy' });
+        lease.assertHeld();
+        terraformDir = await createTerraformJobDirectory(terraformSourceDir);
+        env.TF_DATA_DIR = path.join(terraformDir, '.terraform');
+        delete env.TF_WORKSPACE;
+        delete env.TF_PLUGIN_CACHE_DIR;
+        const sanitizedVarsPath = path.join(terraformDir, '.terraform-vars.json');
         console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
         const terraformParallelism = resolveTerraformParallelism();
         const replaceVmids = normalizeVmids(job.data?.replaceVmids);
@@ -1548,7 +1557,7 @@ export function startTerraformWorker(connection) {
             );
           }
           delete merged.network_gateway;
-          await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2));
+          await writeFile(sanitizedVarsPath, JSON.stringify(merged, null, 2), { mode: 0o600 });
           preparedVarFile = sanitizedVarsPath;
 
           if (action === 'start' || action === 'stop') {
@@ -1585,6 +1594,7 @@ export function startTerraformWorker(connection) {
               );
               const powerActionTargets = blueprintVms.filter(vm => vmNodeByVmid.has(Number(vm.vmid)));
               await runWithConcurrency(powerActionTargets, terraformParallelism, async vm => {
+                lease.assertHeld();
                 await requestVmPowerState(
                   merged,
                   vmNodeByVmid.get(Number(vm.vmid)),
@@ -1669,6 +1679,7 @@ export function startTerraformWorker(connection) {
               });
             }
 
+            lease.assertHeld();
             await safeUpdateLifecycleStatus(
               job.data.labInstanceId,
               action === 'start' ? 'running' : 'stopped',
@@ -1846,6 +1857,7 @@ export function startTerraformWorker(connection) {
               }))
           : [];
 
+        lease.assertHeld();
         if (action === 'deploy' && job.data?.deploymentId && customizationTargets.length > 0) {
           const ansibleJob = await ansibleQueue.add(
             'customize-timezone',
@@ -1892,6 +1904,7 @@ export function startTerraformWorker(connection) {
           runId: job.data.runId
         };
       } catch (error) {
+        if (error instanceof DelayedError) throw error;
         console.error(`Terraform job ${job.id} failed for deployment ${deploymentLabel} (${action})`, error);
         await safeUpdateLifecycleStatus(job.data.labInstanceId, 'failed', {
           action,
@@ -1901,9 +1914,12 @@ export function startTerraformWorker(connection) {
         throw error;
       } finally {
         activeAbortControllers.delete(String(job.id));
+        try {
+          if (terraformDir) await rm(terraformDir, { recursive: true, force: true });
+        } finally { await lease?.release(); }
       }
     },
-    { connection, concurrency: 1 }
+    { connection, concurrency: workerConcurrency(process.env.TERRAFORM_JOB_CONCURRENCY, 4), maxStalledCount: 0 }
   );
 
   worker.on('stalled', async (jobId) => {
@@ -1931,19 +1947,12 @@ export function startTerraformWorker(connection) {
   return worker;
 }
 
-export async function resetStalledTerraformDeployments() {
-  const transient = ['queued', 'deploying', 'destroying', 'starting', 'stopping'];
+export async function resetStalledTerraformDeployments(connection) {
+  const queue = new Queue(terraformQueueName, { connection });
   try {
-    const result = await dbPool.query(
-      `UPDATE lab_deployments
-         SET status = 'failed', last_action = 'worker-restarted', updated_at = NOW()
-       WHERE status = ANY($1::text[])`,
-      [transient]
-    );
-    if (result.rowCount > 0) {
-      console.log(`[startup] ${result.rowCount} déploiement(s) bloqué(s) remis à failed`);
-    }
-  } catch (err) {
-    console.error('[startup] Impossible de réinitialiser les déploiements bloqués:', err);
-  }
+    const count = await recoverDeploymentJobs(dbPool, queue, ['queued', 'deploying', 'destroying', 'starting', 'stopping'], 'worker-restarted');
+    if (count) console.log(`[startup] Recovered ${count} abandoned deployment(s)`);
+  } catch (error) {
+    console.error('[startup] Unable to recover abandoned deployments:', error);
+  } finally { await queue.close(); }
 }
