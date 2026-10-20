@@ -1504,11 +1504,13 @@ function poolApi(settings, lease) {
   return {
     finish,
     prepare: async entry => {
-      if (Date.now() - new Date(entry.preparation_started_at).getTime() > WINDOWS_WINRM_WAIT_TIMEOUT_MS) {
-        throw new Error('Windows preparation timed out: check QEMU Guest Agent and a fresh Cloudbase-Init done.flag in the VM console');
-      }
+      // Keep checking after the preparation deadline so a repaired guest can recover.
+      const overdue = Date.now() - new Date(entry.preparation_started_at).getTime() > WINDOWS_WINRM_WAIT_TIMEOUT_MS;
+      const waiting = reason => {
+        throw new Error(`Pool VM ${entry.vmid}: ${overdue ? 'Windows preparation timed out; ' : ''}${reason}; retrying automatically`);
+      };
       if (!await ownedConfig(entry, true)) throw new Error(`Preparing pool VM ${entry.vmid} is missing`);
-      const vm = await resource(entry);
+      const vm = await fetchVmCurrentStatus(settings, entry.node, entry.vmid);
       if (vm.status === 'stopped') {
         // Also upgrades cold inventory created by the previous worker version.
         await request(`nodes/${entry.node}/qemu/${entry.vmid}/config`, 'PUT', { agent: 1, onboot: 0 });
@@ -1519,18 +1521,30 @@ function poolApi(settings, lease) {
       const route = `nodes/${entry.node}/qemu/${entry.vmid}/agent`;
       try {
         if (entry.guest_probe_pid) {
+          if (!entry.guest_probe_started_at || Date.now() - new Date(entry.guest_probe_started_at).getTime() > 120000) {
+            await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
+            return waiting('QEMU readiness probe expired; starting a new probe next pass');
+          }
           const result = await request(`${route}/exec-status?pid=${entry.guest_probe_pid}`);
-          if (!result?.exited) return false;
-          await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL WHERE vmid = $1', [entry.vmid]);
-          return Number(result.exitcode ?? result['exit-code']) === 0;
+          if (!result?.exited) {
+            if (overdue) return waiting('QEMU readiness probe still running');
+            return false;
+          }
+          await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
+          const code = result.exitcode ?? result['exit-code'];
+          if (code != null && Number(code) === 0) return true;
+          if (Number(code) === 11) return waiting('done.flag missing; check Cloudbase-Init local_scripts_path and 99-finish.ps1');
+          if (Number(code) === 12) return waiting('done.flag predates this clone; check guest clock and Cloudbase-Init execution');
+          return waiting(`QEMU readiness script failed (exit code ${code ?? 'unknown'})`);
         }
         const result = await request(`${route}/exec`, 'POST', { command: powershellCommand(windowsPoolProbe(entry)) });
         if (!result?.pid) throw new Error('QEMU Guest Agent did not return a process ID');
-        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = $2 WHERE vmid = $1', [entry.vmid, result.pid]);
+        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = $2, guest_probe_started_at = NOW() WHERE vmid = $1', [entry.vmid, result.pid]);
       } catch (error) {
         if (error.statusCode === 401 || error.statusCode === 403) throw error;
-        // Agent startup and Windows setup reboots are expected during this phase.
-        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL WHERE vmid = $1', [entry.vmid]);
+        // Agent startup/reboots are retried, but errors must remain visible in Maintenance.
+        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
+        throw error;
       }
       return false;
     },
@@ -1553,7 +1567,7 @@ function poolApi(settings, lease) {
         const stopTask = await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/stop`, 'POST');
         await waitForProxmoxTask(settings, entry.node, stopTask);
       }
-      const upid = await request(`nodes/${entry.node}/qemu/${entry.vmid}`, 'DELETE', { purge: 1 });
+      const upid = await request(`nodes/${entry.node}/qemu/${entry.vmid}?purge=1`, 'DELETE');
       await waitForProxmoxTask(settings, entry.node, upid);
     },
     create: async template => {

@@ -26,6 +26,13 @@ Important:
 Run Sysprep AFTER placing the config and script.
 
 Windows inventory pools:
+- In cloudbase-init.conf, LocalScriptsPlugin also requires this explicit setting:
+  local_scripts_path=C:\Program Files\Cloudbase Solutions\Cloudbase-Init\LocalScripts\
+  Without it, the plugin can finish successfully without running 99-finish.ps1.
+  Apply the corrected config to existing source templates before resealing them;
+  updating the application does not update Windows files inside Proxmox templates.
+  Recreate affected inventory from the repaired template. Do not create done.flag
+  manually to bypass preparation.
 - QEMU Guest Agent must be installed and start automatically. LabFactory uses it
   to observe Windows Setup without an IP address.
 - Sysprep must use the appropriate unattended answer file so specialize/OOBE can

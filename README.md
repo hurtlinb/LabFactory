@@ -136,9 +136,13 @@ an unattended Sysprep/OOBE flow and the supplied Cloudbase-Init completion scrip
 The worker waits only for a `done.flag` written after clone creation, read over
 the QEMU Guest Agent channel without guest networking. Windows setup state,
 processes and service status do not gate pool readiness.
-Probes are persisted between passes; waiting for Windows does not hold the deployment
+Apply migration `027-pool-probe-started-at.sql` before starting the updated worker.
+Missing/stale flags and agent failures are reported in Maintenance. The supplied
+Windows Server config now explicitly sets `local_scripts_path`; existing source
+templates need the same correction and resealing before recreating their inventory.
+Probes are persisted between passes and expire after two minutes; waiting for Windows does not hold the deployment
 lock continuously. A two-hour timeout reports an error instead of lending an unfinished
-VM. Old cold Windows inventory is migrated to the preparation phase automatically.
+VM, while continuing checks so a repaired guest can recover. Old cold Windows inventory is migrated to the preparation phase automatically.
 Windows lab VMs require static IPv4 addresses, as in the existing readiness workflow.
 See [Windows Setup states](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-setup-states?view=windows-11)
 and the [QEMU Guest Agent protocol](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html)

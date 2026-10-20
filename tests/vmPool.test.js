@@ -9,7 +9,7 @@ import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellComm
 const vm = (vmid = 10000) => ({ id: `vm-${vmid}`, vmid, templateId: 'model', cloneSource: '9000', fullClone: true });
 const entry = (vmid = 900000, status = 'ready') => ({
   vmid, template_id: 'model', source_vmid: 9000, full_clone: true, node: 'pve', status, ownership_token: 'owned-token',
-  created_at: new Date().toISOString()
+  created_at: new Date().toISOString(), guest_probe_started_at: new Date().toISOString()
 });
 
 test('inventory uses the Proxmox resource pool corresponding to the environment', () => {
@@ -290,9 +290,11 @@ test('Windows pool readiness only waits for a fresh completion flag', () => {
 });
 
 test('a missing or stale completion flag or a running probe never makes inventory ready', async () => {
-  for (const guestResult of [{ exited: false }, { exited: true, exitcode: 11 }]) {
+  for (const guestResult of [{ exited: false }, { exited: true, exitcode: 11 }, { exited: true, exitcode: 12 }, { exited: true, exitcode: 1 }]) {
     const { api } = proxmoxPoolApi({ status: 'running', guestResult });
-    assert.equal(await api.prepare({ ...entry(), preparation_started_at: new Date().toISOString(), guest_probe_pid: 42 }), false);
+    const pending = api.prepare({ ...entry(), preparation_started_at: new Date().toISOString(), guest_probe_pid: 42 });
+    if (guestResult.exited) await assert.rejects(pending, /done.flag|script failed/);
+    else assert.equal(await pending, false);
   }
   const { db, api, events } = reconciliation([entry(900000, 'preparing')], { size: 1 });
   await reconcileVmPools(db, api);
@@ -316,8 +318,38 @@ test('old cold Windows inventory is sent through preparation instead of being tr
 });
 
 test('Windows preparation timeout is explicit and does not report success', async () => {
-  const { api } = proxmoxPoolApi({ status: 'running' });
-  await assert.rejects(api.prepare({ ...entry(), preparation_started_at: new Date(Date.now() - 7200001) }), /fresh Cloudbase-Init done.flag/);
+  const overdue = { ...entry(), preparation_started_at: new Date(Date.now() - 7200001), guest_probe_pid: 42 };
+  const { api } = proxmoxPoolApi({ status: 'running', guestResult: { exited: true, exitcode: 11 } });
+  await assert.rejects(api.prepare(overdue), /timed out.*done.flag missing/);
+  const repaired = proxmoxPoolApi({ status: 'running' });
+  assert.equal(await repaired.api.prepare(overdue), true, 'repair after the deadline can recover');
+});
+
+test('expired and legacy probes reset their PID instead of blocking preparation forever', async () => {
+  for (const started of [null, new Date(Date.now() - 120001)]) {
+    const { api, queries, requests } = proxmoxPoolApi({ status: 'running' });
+    await assert.rejects(api.prepare({ ...entry(), guest_probe_pid: 42, guest_probe_started_at: started }), /probe expired/);
+    assert(queries.some(sql => sql.includes('guest_probe_pid = NULL')));
+    assert.equal(requests.length, 0);
+  }
+});
+
+test('agent API failures are surfaced and persisted by reconciliation', async () => {
+  const { api, context } = proxmoxPoolApi({ status: 'running' });
+  context.requestJson = async () => { throw new Error('QEMU guest agent is not running'); };
+  const f = reconciliation([entry(900000, 'preparing')], { size: 1 });
+  f.api.prepare = api.prepare;
+  await reconcileVmPools(f.db, f.api);
+  assert(f.events.some(([sql, args]) => sql.includes('SET error = $2') && args[1].includes('guest agent is not running')));
+});
+
+test('every supplied Windows configuration enables the completion script directory', () => {
+  for (const model of ['Win22', 'Win11fr']) {
+    const config = readFileSync(`FilesForTemplates/${model}/cloudbase-init.conf`, 'utf8');
+    assert.match(config, /cloudbaseinit.plugins.common.localscripts.LocalScriptsPlugin/);
+    assert.match(config, /^local_scripts_path=C:\\Program Files\\Cloudbase Solutions\\Cloudbase-Init\\LocalScripts\\?\s*$/m);
+    assert.match(readFileSync(`FilesForTemplates/${model}/99-finish.ps1`, 'utf8'), /done\.flag/);
+  }
 });
 
 test('prepared running Windows inventory can be retained and is stopped before removal', async () => {
@@ -343,6 +375,8 @@ test('cleanup deletes only an identified stopped pool VM after its clone task en
   assert.equal(requests.length, 1);
   assert.equal(requests[0].method, 'DELETE');
   assert.match(requests[0].url.pathname, /\/pve\/qemu\/900000$/);
+  assert.equal(requests[0].url.search, '?purge=1');
+  assert.equal(requests[0].body, undefined, 'Proxmox rejects a body on DELETE');
 });
 
 test('lab assignment configures a prepared Windows guest through QGA and redacts failed guest output', async () => {
