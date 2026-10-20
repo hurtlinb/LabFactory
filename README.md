@@ -133,8 +133,9 @@ VM configuration, power control, guest-agent execution and deletion privileges.
 
 Windows preparation requires QEMU Guest Agent installed and enabled in the source,
 an unattended Sysprep/OOBE flow and the supplied Cloudbase-Init completion script.
-The worker checks `IMAGE_STATE_COMPLETE`, setup/OOBE flags, a fresh `done.flag`
-and stopped Cloudbase-Init services over the agent channel, without guest networking.
+The worker waits only for a `done.flag` written after clone creation, read over
+the QEMU Guest Agent channel without guest networking. Windows setup state,
+processes and service status do not gate pool readiness.
 Probes are persisted between passes; waiting for Windows does not hold the deployment
 lock continuously. A two-hour timeout reports an error instead of lending an unfinished
 VM. Old cold Windows inventory is migrated to the preparation phase automatically.

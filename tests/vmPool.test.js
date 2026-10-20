@@ -186,7 +186,9 @@ function proxmoxPoolApi({ name = 'labfactory-pool-900000', status = 'stopped', l
     proxmoxRequestOptions: () => ({}),
     fetchProxmoxVmResources: async () => resources,
     isProxmoxTemplate: value => value === 1,
-    fetchVmConfig: async () => ({
+    fetchVmCurrentStatus: async () => ({ status }),
+    fetchVmConfig: async (_settings, _node, vmid) => ({
+      name: vmid === 900000 ? name : `labfactory-pool-${vmid}`,
       description,
       net0: 'virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,link_down=0',
       ipconfig0: 'ip=10.0.0.2/24', cipassword: 'secret', ciuser: 'ubuntu',
@@ -200,8 +202,36 @@ function proxmoxPoolApi({ name = 'labfactory-pool-900000', status = 'stopped', l
     } }
   };
   vmModule.runInNewContext(`${code}\nthis.api = poolApi({ proxmox_api_url: 'https://pve/api2/json' }, { assertHeld() {} });`, context);
-  return { api: context.api, requests, queries };
+  return { api: context.api, requests, queries, resources, context };
 }
+
+test('stale cluster name and power state do not reject a verified node configuration', async () => {
+  const { api, resources } = proxmoxPoolApi();
+  resources[0].name = 'source';
+  resources[0].status = 'unknown';
+  resources[0].template = 1;
+  assert.equal(await api.exists(entry()), true);
+});
+
+test('direct node checks still reject renamed VMs, templates and unexpected running guests', async () => {
+  for (const change of ['name', 'template', 'status']) {
+    const { api, context, requests } = proxmoxPoolApi();
+    if (change === 'status') context.fetchVmCurrentStatus = async () => ({ status: 'running' });
+    else {
+      const original = context.fetchVmConfig;
+      context.fetchVmConfig = async (...args) => ({ ...await original(...args), [change]: change === 'name' ? 'other' : 1 });
+    }
+    await assert.rejects(api.exists(entry()), change === 'status' ? /current status: running/ : /changed externally:/);
+    assert.equal(requests.length, 0);
+  }
+});
+
+test('a successful inventory recheck clears the previous error so the VM can be claimed', async () => {
+  const { db, api, events } = reconciliation([{ ...entry(), error: 'temporary inventory mismatch' }], { size: 1 });
+  await reconcileVmPools(db, api);
+  assert(events.some(([sql]) => sql === 'UPDATE vm_pool SET error = NULL WHERE vmid = $1'));
+  assert(!events.some(([event]) => event === 'remove' || event === 'create'));
+});
 
 test('clone requests place inventory directly into the environment-specific Proxmox pool', async () => {
   for (const environment of ['development', 'production']) {
@@ -248,8 +278,19 @@ test('Windows preparation probes use QGA without networking and survive a worker
   assert.match(resumed.requests[0].url.search, /pid=42/);
 });
 
-test('incomplete Windows setup or a running probe never makes inventory ready', async () => {
-  for (const guestResult of [{ exited: false }, { exited: true, exitcode: 10 }, { exited: true, exitcode: 11 }]) {
+test('Windows pool readiness only waits for a fresh completion flag', () => {
+  const row = entry();
+  const script = windowsPoolProbe(row);
+  assert.match(script, /done\.flag/);
+  assert.match(script, /LastWriteTimeUtc/);
+  assert(script.includes(new Date(row.created_at).toISOString()));
+  assert.match(script, /exit 11/);
+  assert.match(script, /labfactory-pool-ready\.flag/);
+  assert.doesNotMatch(script, /Get-ItemProperty|Get-Process|Get-Service|Set-Service|IMAGE_STATE_COMPLETE|OOBE/);
+});
+
+test('a missing or stale completion flag or a running probe never makes inventory ready', async () => {
+  for (const guestResult of [{ exited: false }, { exited: true, exitcode: 11 }]) {
     const { api } = proxmoxPoolApi({ status: 'running', guestResult });
     assert.equal(await api.prepare({ ...entry(), preparation_started_at: new Date().toISOString(), guest_probe_pid: 42 }), false);
   }
@@ -276,7 +317,7 @@ test('old cold Windows inventory is sent through preparation instead of being tr
 
 test('Windows preparation timeout is explicit and does not report success', async () => {
   const { api } = proxmoxPoolApi({ status: 'running' });
-  await assert.rejects(api.prepare({ ...entry(), preparation_started_at: new Date(Date.now() - 7200001) }), /Sysprep\/OOBE/);
+  await assert.rejects(api.prepare({ ...entry(), preparation_started_at: new Date(Date.now() - 7200001) }), /fresh Cloudbase-Init done.flag/);
 });
 
 test('prepared running Windows inventory can be retained and is stopped before removal', async () => {

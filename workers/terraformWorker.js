@@ -1094,9 +1094,8 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
           $prepared = "{{ pool_prepared | default(false) | bool | lower }}" -eq "true"
           if ($prepared) {
             $marker = 'C:\\ProgramData\\cloudbase-init\\labfactory-pool-ready.flag'
-            $image = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State'
-            if ($image.ImageState -ne 'IMAGE_STATE_COMPLETE' -or -not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne "{{ pool_token | default('') }}") {
-              throw 'Prepared Windows pool marker or setup state is invalid'
+            if (-not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne "{{ pool_token | default('') }}") {
+              throw 'Prepared Windows pool marker is invalid'
             }
           }
           if (-not $prepared -and $flagTime -lt $bootTime) {
@@ -1106,7 +1105,7 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
 
           $cloudbaseServices = Get-Service -Name 'cloudbase-init','cloudbaseinit' -ErrorAction SilentlyContinue
           $activeServices = @($cloudbaseServices | Where-Object { $_.Status -in @('StartPending', 'Running', 'ContinuePending') })
-          if ($activeServices.Count -gt 0) {
+          if (-not $prepared -and $activeServices.Count -gt 0) {
             Write-Error "Cloudbase-Init service is still active: $($activeServices.Name -join ', ')"
             exit 1
           }
@@ -1448,14 +1447,25 @@ function poolApi(settings, lease) {
   const ownedConfig = async (entry, allowRunning = false) => {
     const vm = await resource(entry);
     if (!vm) return null;
-    if (vm.name !== `labfactory-pool-${entry.vmid}` || isProxmoxTemplate(vm.template) || vm.node !== entry.node || (!allowRunning && vm.status !== 'stopped')) {
-      throw new Error(`Pool VM ${entry.vmid} changed externally; manual review required`);
+    if (vm.node !== entry.node) {
+      throw new Error(`Pool VM ${entry.vmid} changed externally: node ${vm.node}, expected ${entry.node}; manual review required`);
     }
+    // Cluster inventory can lag behind clone completion and power transitions.
+    // Verify identity and power state directly on the owning node instead.
     const config = await fetchVmConfig(settings, entry.node, entry.vmid);
+    if (config.name !== `labfactory-pool-${entry.vmid}` || isProxmoxTemplate(config.template)) {
+      throw new Error(`Pool VM ${entry.vmid} changed externally: name ${config.name}, template ${config.template ?? 0}; manual review required`);
+    }
     if (config.description !== `LabFactory pool ${entry.ownership_token}`) {
       throw new Error(`Pool VM ${entry.vmid} ownership does not match; manual review required`);
     }
     if (config.lock) throw new Error(`Pool VM ${entry.vmid} is locked (${config.lock})`);
+    if (!allowRunning) {
+      const current = await fetchVmCurrentStatus(settings, entry.node, entry.vmid);
+      if (current.status !== 'stopped') {
+        throw new Error(`Pool VM ${entry.vmid} must be stopped before this operation (current status: ${current.status ?? 'unknown'}); retrying on next reconciliation`);
+      }
+    }
     return config;
   };
   const finish = async (entry, template = {}) => {
@@ -1495,7 +1505,7 @@ function poolApi(settings, lease) {
     finish,
     prepare: async entry => {
       if (Date.now() - new Date(entry.preparation_started_at).getTime() > WINDOWS_WINRM_WAIT_TIMEOUT_MS) {
-        throw new Error('Windows preparation timed out: check Sysprep/OOBE, QEMU Guest Agent and Cloudbase-Init done.flag in the VM console');
+        throw new Error('Windows preparation timed out: check QEMU Guest Agent and a fresh Cloudbase-Init done.flag in the VM console');
       }
       if (!await ownedConfig(entry, true)) throw new Error(`Preparing pool VM ${entry.vmid} is missing`);
       const vm = await resource(entry);

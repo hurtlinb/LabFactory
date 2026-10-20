@@ -38,7 +38,7 @@ Windows inventory pools:
   Get-Service -Name 'cloudbase-init','cloudbaseinit' -ErrorAction SilentlyContinue | Set-Service -StartupType Automatic
 
 LabFactory boots inventory clones with their NICs disconnected. A Windows VM is
-ready only after Windows Setup is complete and a new done.flag has been written.
+ready once a done.flag newer than clone creation has been written.
 It stays powered on. On lab assignment, QEMU Guest Agent applies the lab password
 and static network settings; Cloudbase-Init and Sysprep are not run again.
 
