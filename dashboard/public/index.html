@@ -251,6 +251,15 @@
                   <input type="checkbox" name="fullClone">
                   <span>Use full clone instead of linked clone</span>
                 </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="poolEnabled">
+                  <span>Enable automatic VM pool</span>
+                </label>
+                <label class="field">
+                  <span>VMs to keep ready in the pool</span>
+                  <input type="number" name="poolSize" min="1" max="1000" step="1" value="1" required>
+                </label>
+                <p class="muted">Pool VMs stay powered off, without lab IP or customization. Labs wait for available VMs; used VMs are replenished automatically. Disabling or reducing the pool removes unused VMs.</p>
                 <div class="split">
                   <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
                   <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
@@ -463,6 +472,24 @@
             <div class="inline-actions section-actions">
               <button type="button" id="refreshLabsStateButton" class="btn btn-secondary">Refresh labs state</button>
               <div id="settingsStatus" class="status-message" hidden></div>
+            </div>
+          </article>
+
+          <article class="panel" id="vmPoolsPanel" aria-labelledby="vmPoolsTitle">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">VM inventory</p>
+                <h3 id="vmPoolsTitle">Pool status</h3>
+              </div>
+              <button type="button" id="refreshVmPoolsButton" class="btn btn-secondary">Refresh</button>
+            </div>
+            <p class="muted">Automatic refresh every 30 seconds. Ready VMs are available for labs; assigned VMs are no longer counted in the pool.</p>
+            <p id="vmPoolsStatus" class="muted" role="status" aria-live="polite">Loading pool status...</p>
+            <div class="table-wrap">
+              <table class="queue-table">
+                <thead><tr><th scope="col">Model</th><th scope="col">Status</th><th scope="col">Ready / target</th><th scope="col">Preparing</th><th scope="col">Details</th></tr></thead>
+                <tbody id="vmPoolsBody"><tr><td colspan="5" class="muted">Loading...</td></tr></tbody>
+              </table>
             </div>
           </article>
 

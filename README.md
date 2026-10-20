@@ -80,6 +80,47 @@ VM models are stored in PostgreSQL and include:
 
 The UI exposes OS selection with logos and uses the selected OS in the model cards and blueprint palette.
 
+Each model can enable an automatic VM pool and set its target capacity (1–1000).
+The Terraform worker replenishes it every 30 seconds, with one clone per model per
+pass, when the deployment lock is available. Clones stay on the source template's
+node, powered off, with on-boot disabled, disconnected NICs and no Cloud-Init IP,
+credentials or guest customization. Model cards show ready/preparing counts and
+pool errors.
+Inventory VMs are created in the Proxmox resource pool `pool-dev` when
+`NODE_ENV=development` (or `dev`), and `pool` in production (the default).
+These resource pools must already exist and be accessible to the Proxmox API
+token. The dev/release workflows explicitly set `NODE_ENV` in their ConfigMap.
+Once assigned to a lab, Terraform applies the usual `vm_pool` setting.
+
+When deploying a lab with a pool-enabled model, the worker reserves available
+VMs and **waits for replenishment** if more are needed; it never falls back to
+direct cloning for that model. Reservations are incremental, so a lab can exceed
+the pool's target capacity. Waiting jobs release their execution slot and locks.
+Models without a pool continue to deploy directly. The existing explicit
+workstation replacement action still recreates its VM IDs through Terraform.
+
+Reservations and actual VM IDs are persisted in PostgreSQL. The worker imports
+reserved VMs into the lab's Terraform state before applying networking and guest
+settings, then runs the normal customization pipeline. Start, stop, guest actions,
+CSV exports and destruction use those assigned IDs. Consumed VMs are never
+returned to the pool. A lab with reservations must be destroyed before its record
+can be deleted, including after a failed deployment.
+
+Reducing or disabling a pool removes only unused VMs; changing the source VMID or
+clone mode retires old unused inventory. Pool VMIDs are allocated from a sequence
+starting at 900000 (reserve this range for LabFactory). Only stopped VMs with the
+expected `labfactory-pool-<vmid>` name, node and unique ownership marker may be
+cleaned up. Uncertain clone
+operations, such as a lost task ID, are retained and reported for operator review.
+Apply migration `025-vm-pools.sql` through the dashboard's normal startup migration
+runner before starting the updated workers. The same Proxmox account needs clone,
+VM configuration and deletion privileges.
+
+Pool tests: `node --test tests/vmPool.test.js tests/jobConcurrency.test.js`.
+On restricted Windows environments use `--test-isolation=none`. Live validation
+should cover clone/import/apply for both linked and full clones and the Windows
+and Linux templates before enabling pools in production.
+
 ### Blueprints
 Blueprints are created with drag and drop:
 - drag VM models from the palette

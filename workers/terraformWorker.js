@@ -1,7 +1,8 @@
 import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
-import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
+import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
+import { claimPoolVms, reconcileVmPools, proxmoxInventoryPool } from '../lib/vmPool.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -110,7 +111,7 @@ const encodeRequestBody = body => {
   };
 };
 
-const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null }) =>
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null, timeoutMs = 60000 }) =>
   new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
@@ -149,6 +150,7 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
       }
     );
     request.on('error', reject);
+    request.setTimeout(timeoutMs, () => request.destroy(new Error(`Proxmox request timed out after ${timeoutMs}ms`)));
     if (requestBody) {
       request.write(requestBody.content);
     }
@@ -1417,6 +1419,101 @@ const createDeploymentReadinessReporter = job => {
 
 export const terraformQueueName = 'terraform-workflows';
 
+function poolApi(settings, lease) {
+  const request = async (route, method = 'GET', body) => {
+    lease.assertHeld();
+    const payload = await requestJson({
+      url: new URL(route, `${settings.proxmox_api_url.replace(/\/+$/, '')}/`),
+      method, body, ...proxmoxRequestOptions(settings)
+    });
+    return payload?.data;
+  };
+  const resource = async entry => (await fetchProxmoxVmResources(settings)).find(vm => Number(vm.vmid) === Number(entry.vmid));
+  const ownedConfig = async entry => {
+    const vm = await resource(entry);
+    if (!vm) return null;
+    if (vm.name !== `labfactory-pool-${entry.vmid}` || isProxmoxTemplate(vm.template) || vm.node !== entry.node || vm.status !== 'stopped') {
+      throw new Error(`Pool VM ${entry.vmid} changed externally; manual review required`);
+    }
+    const config = await fetchVmConfig(settings, entry.node, entry.vmid);
+    if (config.description !== `LabFactory pool ${entry.ownership_token}`) {
+      throw new Error(`Pool VM ${entry.vmid} ownership does not match; manual review required`);
+    }
+    if (config.lock) throw new Error(`Pool VM ${entry.vmid} is locked (${config.lock})`);
+    return config;
+  };
+  const finish = async entry => {
+    if (entry.task_id) {
+      try {
+        await waitForProxmoxTask(settings, entry.node, entry.task_id);
+      } catch (error) {
+        const task = await fetchProxmoxTaskStatus(settings, entry.node, entry.task_id);
+        if (task.status === 'stopped' && task.exitstatus && task.exitstatus !== 'OK') {
+          await dbPool.query("UPDATE vm_pool SET status = 'error' WHERE vmid = $1", [entry.vmid]);
+        }
+        throw error;
+      }
+    }
+    // An interrupted HTTP request can have created a task without returning its ID.
+    // Never assume that such a clone completed successfully.
+    if (!entry.task_id) throw new Error(`Pool VM ${entry.vmid}: clone task ID missing; manual review required`);
+    const config = await ownedConfig(entry);
+    if (!config) throw new Error(`Pool VM ${entry.vmid} missing after clone`);
+    const remove = Object.keys(config).filter(key => /^ipconfig\d+$/.test(key) || ['ciuser', 'cipassword', 'sshkeys', 'nameserver', 'searchdomain', 'cicustom'].includes(key));
+    const body = { onboot: 0 };
+    if (remove.length) body.delete = remove.join(',');
+    for (const key of Object.keys(config).filter(key => /^net\d+$/.test(key))) {
+      body[key] = `${String(config[key]).replace(/,link_down=[^,]+/g, '')},link_down=1`;
+    }
+    await request(`nodes/${entry.node}/qemu/${entry.vmid}/config`, 'PUT', body);
+  };
+  return {
+    finish,
+    exists: async entry => Boolean(await ownedConfig(entry)),
+    remove: async entry => {
+      if (entry.task_id) {
+        const task = await fetchProxmoxTaskStatus(settings, entry.node, entry.task_id);
+        if (task.status !== 'stopped') throw new Error(`Pool VM ${entry.vmid}: clone still running`);
+      } else if (entry.status === 'creating') {
+        throw new Error(`Pool VM ${entry.vmid}: uncertain clone; manual review required`);
+      }
+      if (!await ownedConfig(entry)) return;
+      const upid = await request(`nodes/${entry.node}/qemu/${entry.vmid}`, 'DELETE', { purge: 1 });
+      await waitForProxmoxTask(settings, entry.node, upid);
+    },
+    create: async template => {
+      const resources = await fetchProxmoxVmResources(settings);
+      const source = resources.find(vm => Number(vm.vmid) === template.proxmox_template_vmid && isProxmoxTemplate(vm.template));
+      if (!source) throw new Error(`Pool source template ${template.proxmox_template_vmid} not found`);
+      let vmid;
+      do {
+        const next = await dbPool.query("SELECT nextval('vm_pool_vmid_seq') AS vmid");
+        vmid = Number(next.rows[0].vmid);
+      } while (resources.some(vm => Number(vm.vmid) === vmid));
+      const result = await dbPool.query(
+        `INSERT INTO vm_pool (vmid, template_id, source_vmid, full_clone, node, status)
+         VALUES ($1, $2, $3, $4, $5, 'creating') RETURNING *`,
+        [vmid, template.id, template.proxmox_template_vmid, template.full_clone, source.node]
+      );
+      const entry = result.rows[0];
+      try {
+        entry.task_id = await request(`nodes/${source.node}/qemu/${template.proxmox_template_vmid}/clone`, 'POST', {
+          newid: vmid, name: `labfactory-pool-${vmid}`, full: template.full_clone ? 1 : 0,
+          pool: proxmoxInventoryPool(), description: `LabFactory pool ${entry.ownership_token}`
+        });
+        await dbPool.query('UPDATE vm_pool SET task_id = $2 WHERE vmid = $1', [vmid, entry.task_id]);
+        await finish(entry);
+        await dbPool.query("UPDATE vm_pool SET status = 'ready', error = NULL WHERE vmid = $1", [vmid]);
+      } catch (error) {
+        if (error.statusCode >= 400 && error.statusCode < 500 && !entry.task_id) {
+          await dbPool.query("UPDATE vm_pool SET status = 'error' WHERE vmid = $1", [vmid]);
+        }
+        await dbPool.query('UPDATE vm_pool SET error = $2 WHERE vmid = $1', [vmid, String(error.message).slice(0, 2000)]);
+      }
+    }
+  };
+}
+
 export function startTerraformWorker(connection) {
   const activeAbortControllers = new Map();
   const ansibleQueue = new Queue(ansibleQueueName, { connection });
@@ -1430,7 +1527,7 @@ export function startTerraformWorker(connection) {
       // on this shared signal — raise Node's default threshold (10) to match expected concurrency.
       setMaxListeners(128, abortController.signal);
       activeAbortControllers.set(String(job.id), abortController);
-      const readinessReporter = createDeploymentReadinessReporter(job);
+      let readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
         ...process.env,
         TF_IN_AUTOMATION: '1'
@@ -1503,6 +1600,20 @@ export function startTerraformWorker(connection) {
           assertRequiredTerraformEnvSettings(merged);
           merged.proxmox_nodes = await resolveProxmoxTargetNodes(merged);
           merged.proxmox_parallel = terraformParallelism;
+          if (action === 'deploy' && job.data.deploymentId && !replaceVmids.length) {
+            const resources = await fetchProxmoxVmResources(merged);
+            const { vms, waiting } = await claimPoolVms(dbPool, job.data.deploymentId, job.data.blueprint.vms,
+              new Set(resources.map(vm => Number(vm.vmid))));
+            await job.updateData({ ...job.data, blueprint: { ...job.data.blueprint, vms } });
+            if (waiting.length) {
+              await job.updateProgress({ type: 'pool-wait', waitingCount: waiting.length, totalVmCount: vms.length });
+              await safeUpdateLifecycleStatus(job.data.labInstanceId, 'queued', { action, jobId: String(job.id), runId: job.data.runId });
+              await job.moveToDelayed(Date.now() + 30000, token);
+              throw new DelayedError();
+            }
+            readinessReporter = createDeploymentReadinessReporter(job);
+            await readinessReporter.publish();
+          }
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
@@ -1513,6 +1624,7 @@ export function startTerraformWorker(connection) {
             );
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
               vmid: Number(vm.vmid),
+              target_node: vm.poolNode ?? null,
               name: vm.name,
               hostname: vm.customNameEnabled ? String(vm.hostname ?? '').trim() || null : null,
               os_type: vm.osType ?? 'other',
@@ -1698,6 +1810,7 @@ export function startTerraformWorker(connection) {
             };
           }
         } catch (err) {
+          if (err instanceof DelayedError) throw err;
           throw new Error(
             `Unable to prepare terraform vars (looked at ${terraformVarsPath}): ${err.message}`
           );
@@ -1729,6 +1842,32 @@ export function startTerraformWorker(connection) {
         }
 
         let planOutput = '';
+        // Import is idempotent across worker restarts. Keep the reservation until lab destruction.
+        if (blueprintVms.some(vm => vm.poolNode)) {
+          const state = await runCommand('terraform', ['state', 'list'], { cwd: terraformDir, env, signal: abortController.signal });
+          const addresses = new Set(String(state).trim().split(/\r?\n/));
+          const resources = await fetchProxmoxVmResources(merged);
+          for (const vm of blueprintVms.filter(vm => vm.poolNode)) {
+            const address = `proxmox_vm_qemu.lab_vm["${vm.vmid}"]`;
+            if (addresses.has(address)) continue;
+            const resource = resources.find(item => Number(item.vmid) === Number(vm.vmid));
+            if (!resource) {
+              if (action === 'destroy') continue;
+              throw new Error(`Assigned pool VM ${vm.vmid} is missing`);
+            }
+            const reservation = await dbPool.query(
+              "SELECT ownership_token FROM vm_pool WHERE vmid = $1 AND deployment_id = $2 AND status = 'assigned'",
+              [vm.vmid, job.data.deploymentId]
+            );
+            const config = await fetchVmConfig(merged, resource.node, vm.vmid);
+            if (!reservation.rows[0] || config.description !== `LabFactory pool ${reservation.rows[0].ownership_token}`) {
+              throw new Error(`Assigned pool VM ${vm.vmid} ownership does not match; refusing import`);
+            }
+            lease.assertHeld();
+            await runCommand('terraform', ['import', '-input=false', `-var-file=${preparedVarFile}`, address, `${resource.node}/qemu/${vm.vmid}`],
+              { cwd: terraformDir, env, signal: abortController.signal });
+          }
+        }
         if (action === 'destroy') {
           planOutput = await runCommand(
             'terraform',
@@ -1942,6 +2081,35 @@ export function startTerraformWorker(connection) {
     for (const controller of activeAbortControllers.values()) {
       controller.abort(new Error('Job cancelled from dashboard clear history action'));
     }
+  };
+
+  let poolWork = null;
+  let poolClosing = false;
+  const replenish = () => {
+    if (poolClosing || poolWork || worker.isPaused()) return;
+    poolWork = (async () => {
+      // Use the same lock as foreground deployments to avoid clone/import races.
+      const lease = await tryJobLocks(dbPool, ['global:terraform-deploy']);
+      if (!lease) return;
+      try {
+        const raw = JSON.parse(await readFile(terraformVarsPath, 'utf8'));
+        const settings = { ...defaultTerraformSettings, ...sanitizeSettingsInput(raw), ...readTerraformEnvSettings() };
+        assertRequiredTerraformEnvSettings(settings);
+        await reconcileVmPools(dbPool, poolApi(settings, lease));
+      } finally { await lease.release(); }
+    })().catch(error => console.error('VM pool replenishment failed:', error.message))
+      .finally(() => { poolWork = null; });
+  };
+  const poolTimer = setInterval(replenish, 30000);
+  poolTimer.unref();
+  const closeWorker = worker.close.bind(worker);
+  worker.close = async (...args) => {
+    poolClosing = true;
+    clearInterval(poolTimer);
+    await poolWork;
+    await closeWorker(...args);
+    await ansibleQueue.close();
+    await terraformQueue.close();
   };
 
   return worker;

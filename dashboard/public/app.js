@@ -272,7 +272,10 @@ async function setActiveView(view, { fromRoute = false } = {}) {
   document.body.classList.remove('nav-open');
   document.getElementById('menuToggle')?.setAttribute('aria-expanded', 'false');
   document.getElementById('pageTitle')?.focus({ preventScroll: true });
-  if (view === 'admin-settings') void loadUploadedFiles();
+  if (view === 'admin-settings') {
+    void loadUploadedFiles();
+    void loadPoolStatus();
+  }
   if (view !== 'blueprint') {
     state.isBlueprintWorkspaceVisible = false;
     renderBlueprintWorkspace();
@@ -755,6 +758,8 @@ function renderModelList() {
           <div class="panel-head">
             <div class="template-meta">
               <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
+              <span class="mini-pill">Pool: ${template.poolEnabled ? `${template.poolReady ?? 0}/${template.poolSize ?? 0} ready, ${template.poolPending ?? 0} preparing` : 'disabled'}</span>
+              ${template.poolError ? `<span class="mini-pill" title="${escapeHtml(template.poolError)}">Pool error</span>` : ''}
             </div>
             <button class="icon-btn delete-model-button" type="button" data-template-id="${template.id}" aria-label="Delete VM model">${uiIcon('delete')}</button>
           </div>
@@ -1290,7 +1295,7 @@ function renderLifecycleLabs() {
             </div>
           </div>
           ${renderLifecycleSteps(deployment.status)}
-          ${actions.busy ? `<p class="deployment-progress" role="status">Created: ${Number(deployment.createdCount || 0)}/${totalVmCount} · Started: ${Number(deployment.startedCount || 0)}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}. ${escapeHtml(labStatusLabel(deployment.status))}.</p>` : ''}
+          ${actions.busy ? `<p class="deployment-progress" role="status">${deployment.poolWaitingCount ? `Waiting for pool: ${Number(deployment.poolWaitingCount)} VM(s). ` : ''}Created: ${Number(deployment.createdCount || 0)}/${totalVmCount} · Started: ${Number(deployment.startedCount || 0)}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}. ${escapeHtml(labStatusLabel(deployment.status))}.</p>` : ''}
           <div class="lc-actions">
             ${actionButtons}
             ${deployment.canResumeCustomization ? `<button class="btn lifecycle-action" type="button" data-action="resume-customization" data-deployment-id="${deployment.id}">Resume incomplete customizations</button>` : ''}
@@ -2419,8 +2424,62 @@ function firstFieldError(errors) {
 async function loadTemplates() {
   state.templates = await fetchJson('/api/templates');
   renderTemplates();
+  renderPoolStatus();
   renderDashboard();
 }
+
+function renderPoolStatus() {
+  const body = document.getElementById('vmPoolsBody');
+  if (!body || !state.isAdmin) return;
+  body.innerHTML = state.templates.length ? state.templates.map(template => {
+    const ready = Number(template.poolReady || 0);
+    const pending = Number(template.poolPending || 0);
+    const target = template.poolEnabled ? Number(template.poolSize || 0) : 0;
+    const unused = Number(template.poolUnused ?? ready + pending);
+    let label, tone, details;
+    if (template.poolError) {
+      label = 'Error'; tone = 'warning-pill'; details = template.poolError;
+    } else if ((!template.poolEnabled && unused > 0) || unused > target) {
+      label = 'Cleanup pending'; tone = 'warning-pill'; details = 'Unused surplus VMs will be removed automatically.';
+    } else if (!template.poolEnabled) {
+      label = 'Disabled'; tone = 'lock-pill'; details = 'Enable the pool in VM Models.';
+    } else if (pending > 0) {
+      label = 'Preparing'; tone = 'status-pill-busy'; details = 'VM creation is in progress.';
+    } else if (ready >= target) {
+      label = 'Ready'; tone = 'status-pill-running'; details = 'Target capacity reached.';
+    } else {
+      label = 'Waiting'; tone = 'warning-pill'; details = 'Waiting for the background worker to replenish the pool.';
+    }
+    return `<tr><td>${escapeHtml(template.name)}</td><td><span class="pill ${tone}">${label}</span></td><td>${ready} / ${target}</td><td>${pending}</td><td>${escapeHtml(details)}</td></tr>`;
+  }).join('') : '<tr><td colspan="5" class="muted">No VM models configured.</td></tr>';
+  const status = document.getElementById('vmPoolsStatus');
+  status.textContent = 'Updated ' + new Date().toLocaleTimeString();
+  status.style.color = '';
+}
+
+let poolStatusLoading = false;
+async function loadPoolStatus() {
+  if (!state.isAdmin || poolStatusLoading) return;
+  const panel = document.getElementById('vmPoolsPanel');
+  if (!panel) return;
+  const button = document.getElementById('refreshVmPoolsButton');
+  const status = document.getElementById('vmPoolsStatus');
+  poolStatusLoading = true;
+  button.disabled = true;
+  panel.setAttribute('aria-busy', 'true');
+  try {
+    await loadTemplates();
+  } catch (error) {
+    status.textContent = 'Unable to refresh pools; displayed data may be outdated. ' + error.message;
+    status.style.color = 'var(--danger)';
+  } finally {
+    poolStatusLoading = false;
+    button.disabled = false;
+    panel.setAttribute('aria-busy', 'false');
+  }
+}
+
+document.getElementById('refreshVmPoolsButton')?.addEventListener('click', loadPoolStatus);
 
 function populateTemplateForm(template) {
   templateForm.elements.name.value = template.name || '';
@@ -2428,6 +2487,8 @@ function populateTemplateForm(template) {
   templateForm.elements.proxmoxTemplateVmid.value = String(template.proxmoxTemplateVmid || '');
   templateForm.elements.language.value = template.language || 'en';
   templateForm.elements.fullClone.checked = Boolean(template.fullClone);
+  templateForm.elements.poolEnabled.checked = Boolean(template.poolEnabled);
+  templateForm.elements.poolSize.value = String(template.poolSize || 1);
   const osRadio = templateForm.querySelector(`input[name="osType"][value="${template.osType}"]`);
   if (osRadio) {
     osRadio.checked = true;
@@ -3236,7 +3297,9 @@ templateForm.addEventListener('submit', async event => {
     osType: String(form.get('osType') || 'ubuntu'),
     language: String(form.get('language') || 'en').trim().toLowerCase(),
     proxmoxTemplateVmid: Number(form.get('proxmoxTemplateVmid') || 0),
-    fullClone: form.get('fullClone') === 'on'
+    fullClone: form.get('fullClone') === 'on',
+    poolEnabled: form.get('poolEnabled') === 'on',
+    poolSize: Number(form.get('poolSize') || 0)
   };
 
   try {
@@ -3913,6 +3976,7 @@ async function bootstrap() {
   }, 5000);
   setInterval(() => {
     loadConnectionStatuses();
+    if (state.isAdmin) void loadPoolStatus();
   }, 30000);
 }
 

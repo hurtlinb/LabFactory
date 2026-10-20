@@ -83,6 +83,11 @@ jobs:
             labfactory/worker=hurtlinb/labfactory:worker-${SHA}
 
           # Update runner images in ConfigMap
+          if grep -q '^  NODE_ENV:' configmap-patch.yaml; then
+            sed -i 's|^  NODE_ENV:.*|  NODE_ENV: "development"|' configmap-patch.yaml
+          else
+            printf '\n  NODE_ENV: "development"\n' >> configmap-patch.yaml
+          fi
           sed -i "s|TERRAFORM_RUNNER_IMAGE:.*|TERRAFORM_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${SHA}\"|" configmap-patch.yaml
           sed -i "s|ANSIBLE_RUNNER_IMAGE:.*|ANSIBLE_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${SHA}\"|" configmap-patch.yaml
 

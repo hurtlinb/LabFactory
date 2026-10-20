@@ -54,6 +54,22 @@ function setup(t) {
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
+test('model form saves pool activation and capacity', async t => {
+  const { api, document, w, requests } = setup(t);
+  await api.bootstrap();
+  const form = document.getElementById('templateForm');
+  form.elements.name.value = 'Pooled Ubuntu';
+  form.elements.proxmoxTemplateVmid.value = '9000';
+  form.elements.poolEnabled.checked = true;
+  form.elements.poolSize.value = '5';
+  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
+  await tick();
+  const saved = requests.find(request => request.url === '/api/templates' && request.method === 'POST');
+  assert(saved);
+  assert.equal(JSON.parse(saved.body).poolEnabled, true);
+  assert.equal(JSON.parse(saved.body).poolSize, 5);
+});
+
 test('network preview and status labels describe real operations', () => {
   assert.equal(helpers.labStatusLabel('mixed'), 'Partially running');
   assert.equal(helpers.labStatusLabel('deployed'), 'Ready');
