@@ -2445,9 +2445,9 @@ function renderPoolStatus() {
       label = 'Disabled'; tone = 'lock-pill'; details = 'Enable the pool in VM Models.';
     } else if (pending > 0) {
       label = 'Preparing'; tone = 'status-pill-busy';
-      details = template.poolBooting > 0
+      details = template.poolPreparationMessage || (template.poolBooting > 0
         ? `${Number(template.poolBooting)} Windows VM(s) completing Sysprep / first boot; network disconnected.`
-        : 'VM cloning is in progress.';
+        : 'VM cloning is in progress.');
     } else if (ready >= target) {
       label = 'Ready'; tone = 'status-pill-running'; details = 'Target capacity reached.';
     } else {

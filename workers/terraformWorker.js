@@ -4,6 +4,7 @@ import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { claimPoolVms, reconcileVmPools, proxmoxInventoryPool, clearPoolPreparationForReplacement } from '../lib/vmPool.js';
 import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand } from '../lib/windowsPool.js';
+import { adoptPoolVm } from '../lib/adoptPoolVm.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1507,7 +1508,9 @@ function poolApi(settings, lease) {
       // Keep checking after the preparation deadline so a repaired guest can recover.
       const overdue = Date.now() - new Date(entry.preparation_started_at).getTime() > WINDOWS_WINRM_WAIT_TIMEOUT_MS;
       const waiting = reason => {
-        throw new Error(`Pool VM ${entry.vmid}: ${overdue ? 'Windows preparation timed out; ' : ''}${reason}; retrying automatically`);
+        const error = new Error(`Pool VM ${entry.vmid}: ${overdue ? 'Windows preparation timed out; ' : ''}${reason}; retrying automatically`);
+        error.poolWaiting = !overdue;
+        throw error;
       };
       if (!await ownedConfig(entry, true)) throw new Error(`Preparing pool VM ${entry.vmid} is missing`);
       const vm = await fetchVmCurrentStatus(settings, entry.node, entry.vmid);
@@ -1535,7 +1538,7 @@ function poolApi(settings, lease) {
           if (code != null && Number(code) === 0) return true;
           if (Number(code) === 11) return waiting('done.flag missing; check Cloudbase-Init local_scripts_path and 99-finish.ps1');
           if (Number(code) === 12) return waiting('done.flag predates this clone; check guest clock and Cloudbase-Init execution');
-          return waiting(`QEMU readiness script failed (exit code ${code ?? 'unknown'})`);
+          throw new Error(`Pool VM ${entry.vmid}: QEMU readiness script failed (exit code ${code ?? 'unknown'})`);
         }
         const result = await request(`${route}/exec`, 'POST', { command: powershellCommand(windowsPoolProbe(entry)) });
         if (!result?.pid) throw new Error('QEMU Guest Agent did not return a process ID');
@@ -1544,6 +1547,9 @@ function poolApi(settings, lease) {
         if (error.statusCode === 401 || error.statusCode === 403) throw error;
         // Agent startup/reboots are retried, but errors must remain visible in Maintenance.
         await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
+        if (/QEMU guest agent is not running|guest-ping.*timeout|guest-exec-status.*(?:not found|not exist)|PID.*(?:not found|not exist)/i.test(error.message)) {
+          return waiting('Waiting for QEMU Guest Agent to become available');
+        }
         throw error;
       }
       return false;
@@ -2008,6 +2014,14 @@ export function startTerraformWorker(connection) {
               throw new Error(`Assigned pool VM ${vm.vmid} ownership does not match; refusing import`);
             }
             lease.assertHeld();
+            if (action === 'deploy') {
+              await adoptPoolVm({ vm, resource, config, token: reservation.rows[0].ownership_token,
+                targetPool: merged.vm_pool, inventoryPool: proxmoxInventoryPool(), assertHeld: () => lease.assertHeld(),
+                request: (route, body) => requestJson({
+                  url: new URL(route, `${merged.proxmox_api_url.replace(/\/+$/, '')}/`),
+                  method: 'PUT', body, ...proxmoxRequestOptions(merged)
+                }) });
+            }
             await runCommand('terraform', ['import', '-input=false', `-var-file=${preparedVarFile}`, address, `${resource.node}/qemu/${vm.vmid}`],
               { cwd: terraformDir, env, signal: abortController.signal });
           }

@@ -843,6 +843,7 @@ const mapTemplate = row => ({
   poolBooting: Number(row.pool_booting ?? 0),
   poolUnused: Number(row.pool_unused ?? 0),
   poolError: row.pool_error ?? null,
+  poolPreparationMessage: row.pool_preparation_message ?? null,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -3253,7 +3254,8 @@ app.get(
       (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status IN ('creating', 'preparing')) AS pool_pending,
       (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'preparing') AS pool_booting,
       (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned') AS pool_unused,
-      (SELECT error FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned' AND p.error IS NOT NULL LIMIT 1) AS pool_error
+      (SELECT error FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned' AND p.error IS NOT NULL LIMIT 1) AS pool_error,
+      (SELECT preparation_message FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'preparing' AND p.preparation_message IS NOT NULL ORDER BY p.created_at LIMIT 1) AS pool_preparation_message
       FROM vm_templates t ORDER BY name ASC`);
     res.json(result.rows.map(mapTemplate));
   })

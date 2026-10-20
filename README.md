@@ -94,7 +94,13 @@ Inventory VMs are created in the Proxmox resource pool `pool-dev` when
 `NODE_ENV=development` (or `dev`), and `pool` in production (the default).
 These resource pools must already exist and be accessible to the Proxmox API
 token. The dev/release workflows explicitly set `NODE_ENV` in their ConfigMap.
-Once assigned to a lab, Terraform applies the usual `vm_pool` setting.
+When the worker takes a reserved VM into a lab, it moves it to the configured
+`vm_pool` and applies the lab's Proxmox VM name before Terraform import and guest
+customization. If `vm_pool` is empty, it removes the VM from the inventory pool.
+The VMID is preserved; retries reuse the reservation and complete any interrupted
+transfer. The lab pool must differ from the inventory pool, and the API token
+needs permission to modify both pool memberships and the VM name. Guest hostname
+customization remains part of the normal lab deployment.
 
 Maintenance → Danger zone → **Empty VM pool** previews actual Proxmox membership
 in `pool-dev` (development) or `pool` (production) before confirmation. It stops
@@ -136,8 +142,10 @@ an unattended Sysprep/OOBE flow and the supplied Cloudbase-Init completion scrip
 The worker waits only for a `done.flag` written after clone creation, read over
 the QEMU Guest Agent channel without guest networking. Windows setup state,
 processes and service status do not gate pool readiness.
-Apply migration `027-pool-probe-started-at.sql` before starting the updated worker.
-Missing/stale flags and agent failures are reported in Maintenance. The supplied
+Apply migrations `027-pool-probe-started-at.sql` and `028-pool-preparation-message.sql`
+before starting the updated worker. Missing/stale flags and an agent still starting
+remain **Preparing**, with the reason shown in Maintenance. Script/permission failures
+and waits exceeding two hours show **Error**. The supplied
 Windows Server config now explicitly sets `local_scripts_path`; existing source
 templates need the same correction and resealing before recreating their inventory.
 Probes are persisted between passes and expire after two minutes; waiting for Windows does not hold the deployment

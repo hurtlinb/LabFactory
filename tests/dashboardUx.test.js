@@ -50,9 +50,25 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
+  w.eval(source + '\nwindow.uxTest = { state, renderPoolStatus, renderDashboard, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
+
+test('pool startup reasons retain Preparing, but real failures show Error', t => {
+  const { api, document } = setup(t);
+  api.state.isAdmin = true;
+  const model = { name: 'Windows 2022 v2', poolEnabled: true, poolSize: 1, poolPending: 1, poolBooting: 1,
+    poolPreparationMessage: 'done.flag missing; retrying automatically' };
+  api.state.templates = [model];
+  api.renderPoolStatus();
+  const body = document.getElementById('vmPoolsBody');
+  assert.equal(body.querySelector('.pill').textContent, 'Preparing');
+  assert.match(body.textContent, /done.flag missing/);
+  model.poolError = 'Windows preparation timed out';
+  api.renderPoolStatus();
+  assert.equal(body.querySelector('.pill').textContent, 'Error');
+  assert.match(body.textContent, /timed out/);
+});
 
 test('pool cleanup previews actual inventory and cancellation sends no deletion', async t => {
   const { document, w } = setup(t);

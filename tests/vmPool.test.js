@@ -334,13 +334,30 @@ test('expired and legacy probes reset their PID instead of blocking preparation 
   }
 });
 
-test('agent API failures are surfaced and persisted by reconciliation', async () => {
+test('agent startup is persisted as preparation information, not an error', async () => {
   const { api, context } = proxmoxPoolApi({ status: 'running' });
   context.requestJson = async () => { throw new Error('QEMU guest agent is not running'); };
   const f = reconciliation([entry(900000, 'preparing')], { size: 1 });
   f.api.prepare = api.prepare;
   await reconcileVmPools(f.db, f.api);
-  assert(f.events.some(([sql, args]) => sql.includes('SET error = $2') && args[1].includes('guest agent is not running')));
+  assert(f.events.some(([sql, args]) => sql.includes('SET error = NULL, preparation_message = $2') && args[1].includes('Waiting for QEMU Guest Agent')));
+});
+
+test('missing flags stay preparing until the deadline, while script and permission failures are errors', async () => {
+  for (const [code, overdue, waiting] of [[11, false, true], [12, false, true], [11, true, false], [1, false, false]]) {
+    const f = reconciliation([{ ...entry(900000, 'preparing'), guest_probe_pid: 42,
+      preparation_started_at: new Date(Date.now() - (overdue ? 7200001 : 1000)) }], { size: 1 });
+    f.api.prepare = proxmoxPoolApi({ status: 'running', guestResult: { exited: true, exitcode: code } }).api.prepare;
+    await reconcileVmPools(f.db, f.api);
+    assert(f.events.some(([sql]) => sql.includes(waiting ? 'SET error = NULL, preparation_message = $2' : 'SET error = $2, preparation_message = NULL')));
+    assert(!f.events.some(([event]) => event === 'remove' || event === 'create'));
+  }
+  const f = reconciliation([entry(900000, 'preparing')], { size: 1 });
+  const p = proxmoxPoolApi({ status: 'running' });
+  p.context.requestJson = async () => { const error = new Error('Permission denied'); error.statusCode = 403; throw error; };
+  f.api.prepare = p.api.prepare;
+  await reconcileVmPools(f.db, f.api);
+  assert(f.events.some(([sql]) => sql.includes('SET error = $2, preparation_message = NULL')));
 });
 
 test('every supplied Windows configuration enables the completion script directory', () => {
