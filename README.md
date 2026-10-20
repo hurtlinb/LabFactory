@@ -81,16 +81,29 @@ VM models are stored in PostgreSQL and include:
 The UI exposes OS selection with logos and uses the selected OS in the model cards and blueprint palette.
 
 Each model can enable an automatic VM pool and set its target capacity (1–1000).
+
 The Terraform worker replenishes it every 30 seconds, with one clone per model per
 pass, when the deployment lock is available. Clones stay on the source template's
-node, powered off, with on-boot disabled, disconnected NICs and no Cloud-Init IP,
-credentials or guest customization. Model cards show ready/preparing counts and
-pool errors.
+node, with on-boot disabled and disconnected NICs. Windows clones boot in the
+pool and remain powered on: they finish the specialize/OOBE phases of the
+Sysprep-prepared template and Cloudbase-Init before becoming available.
+Other operating systems remain powered off. No lab IP, password, hostname or
+customization is supplied while in inventory. Model cards show ready/preparing
+counts and pool errors; Maintenance distinguishes cloning from Windows first boot.
 Inventory VMs are created in the Proxmox resource pool `pool-dev` when
 `NODE_ENV=development` (or `dev`), and `pool` in production (the default).
 These resource pools must already exist and be accessible to the Proxmox API
 token. The dev/release workflows explicitly set `NODE_ENV` in their ConfigMap.
 Once assigned to a lab, Terraform applies the usual `vm_pool` setting.
+
+Maintenance → Danger zone → **Empty VM pool** previews actual Proxmox membership
+in `pool-dev` (development) or `pool` (production) before confirmation. It stops
+and deletes unused inventory VMs and their disks, including VMs absent from the
+application database, and clears verified missing inventory records. Assigned lab
+VMs, templates, locked VMs and uncertain clone tasks are protected. Cleanup shares
+the deployment/replenishment lock; retry if another operation is running.
+Automatic replenishment resumes after cleanup. Disable model pools first if
+they should remain empty.
 
 When deploying a lab with a pool-enabled model, the worker reserves available
 VMs and **waits for replenishment** if more are needed; it never falls back to
@@ -100,21 +113,35 @@ Models without a pool continue to deploy directly. The existing explicit
 workstation replacement action still recreates its VM IDs through Terraform.
 
 Reservations and actual VM IDs are persisted in PostgreSQL. The worker imports
-reserved VMs into the lab's Terraform state before applying networking and guest
-settings, then runs the normal customization pipeline. Start, stop, guest actions,
+reserved VMs into the lab's Terraform state. For prepared Windows guests it applies
+the lab password and static IPv4 configuration through QEMU Guest Agent while the
+NIC is still disconnected, before Terraform connects it and the normal customization
+pipeline runs. Cloudbase-Init is not rerun and Sysprep is not restarted. Start, stop, guest actions,
 CSV exports and destruction use those assigned IDs. Consumed VMs are never
 returned to the pool. A lab with reservations must be destroyed before its record
 can be deleted, including after a failed deployment.
 
 Reducing or disabling a pool removes only unused VMs; changing the source VMID or
 clone mode retires old unused inventory. Pool VMIDs are allocated from a sequence
-starting at 900000 (reserve this range for LabFactory). Only stopped VMs with the
+starting at 900000 (reserve this range for LabFactory). Only VMs with the
 expected `labfactory-pool-<vmid>` name, node and unique ownership marker may be
-cleaned up. Uncertain clone
+cleaned up (prepared Windows VMs are stopped before removal). Uncertain clone
 operations, such as a lost task ID, are retained and reported for operator review.
-Apply migration `025-vm-pools.sql` through the dashboard's normal startup migration
+Apply migrations `025-vm-pools.sql` and `026-windows-pool-preparation.sql` through the dashboard's normal startup migration
 runner before starting the updated workers. The same Proxmox account needs clone,
-VM configuration and deletion privileges.
+VM configuration, power control, guest-agent execution and deletion privileges.
+
+Windows preparation requires QEMU Guest Agent installed and enabled in the source,
+an unattended Sysprep/OOBE flow and the supplied Cloudbase-Init completion script.
+The worker checks `IMAGE_STATE_COMPLETE`, setup/OOBE flags, a fresh `done.flag`
+and stopped Cloudbase-Init services over the agent channel, without guest networking.
+Probes are persisted between passes; waiting for Windows does not hold the deployment
+lock continuously. A two-hour timeout reports an error instead of lending an unfinished
+VM. Old cold Windows inventory is migrated to the preparation phase automatically.
+Windows lab VMs require static IPv4 addresses, as in the existing readiness workflow.
+See [Windows Setup states](https://learn.microsoft.com/en-us/windows-hardware/manufacture/desktop/windows-setup-states?view=windows-11)
+and the [QEMU Guest Agent protocol](https://www.qemu.org/docs/master/interop/qemu-ga-ref.html)
+for the preparation checks and offline execution channel.
 
 Pool tests: `node --test tests/vmPool.test.js tests/jobConcurrency.test.js`.
 On restricted Windows environments use `--test-isolation=none`. Live validation

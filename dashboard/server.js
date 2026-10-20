@@ -1,4 +1,6 @@
-import { applyPoolAssignments } from '../lib/vmPool.js';
+import { applyPoolAssignments, proxmoxInventoryPool } from '../lib/vmPool.js';
+import { listVmPoolCleanup, emptyVmPool } from '../lib/vmPoolCleanup.js';
+import { tryJobLocks } from '../lib/jobConcurrency.js';
 import 'dotenv/config';
 import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
 import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes, blueprintFileDirectory } from '../lib/blueprintFiles.js';
@@ -838,6 +840,7 @@ const mapTemplate = row => ({
   poolSize: Number(row.pool_size ?? 0),
   poolReady: Number(row.pool_ready ?? 0),
   poolPending: Number(row.pool_pending ?? 0),
+  poolBooting: Number(row.pool_booting ?? 0),
   poolUnused: Number(row.pool_unused ?? 0),
   poolError: row.pool_error ?? null,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
@@ -3245,8 +3248,10 @@ app.get(
   wrapAsync(async (req, res) => {
     const result = await dbPool.query(`SELECT t.*,
       (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'ready'
-        AND p.source_vmid = t.proxmox_template_vmid AND p.full_clone = t.full_clone AND p.error IS NULL) AS pool_ready,
-      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'creating') AS pool_pending,
+        AND p.source_vmid = t.proxmox_template_vmid AND p.full_clone = t.full_clone AND p.error IS NULL
+        AND (t.os_type NOT IN ('windows11', 'windows-server') OR p.prepared_at IS NOT NULL)) AS pool_ready,
+      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status IN ('creating', 'preparing')) AS pool_pending,
+      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'preparing') AS pool_booting,
       (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned') AS pool_unused,
       (SELECT error FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned' AND p.error IS NOT NULL LIMIT 1) AS pool_error
       FROM vm_templates t ORDER BY name ASC`);
@@ -3921,6 +3926,64 @@ app.post('/api/settings/terraform', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY
     res.status(400).json({ error: err.message ?? 'unable to persist terraform settings' });
   }
 });
+
+const poolCleanupApi = () => {
+  const settings = readTerraformEnvSettings();
+  assertRequiredTerraformEnvSettings(settings);
+  const request = async (route, options = {}) =>
+    (await requestProxmoxJson(settings, route, { timeoutMs: 30000, ...options }))?.data;
+  const vmRoute = (node, vmid) => `nodes/${encodeURIComponent(node)}/qemu/${vmid}`;
+  const operation = async (node, route, method) => {
+    const task = await request(route, { method });
+    if (!task) throw new Error('Proxmox did not return a task ID');
+    await waitForProxmoxTask(settings, node, task);
+  };
+  return {
+    pools: () => request('pools'),
+    members: async pool => (await request(`pools/${encodeURIComponent(pool)}`))?.members ?? [],
+    resources: () => request('cluster/resources?type=vm'),
+    config: (node, vmid) => request(`${vmRoute(node, vmid)}/config`),
+    status: (node, vmid) => request(`${vmRoute(node, vmid)}/status/current`),
+    task: (node, upid) => request(`nodes/${encodeURIComponent(node)}/tasks/${encodeURIComponent(upid)}/status`),
+    stop: (node, vmid) => operation(node, `${vmRoute(node, vmid)}/status/stop`, 'POST'),
+    remove: (node, vmid) => operation(node, `${vmRoute(node, vmid)}?purge=1`, 'DELETE')
+  };
+};
+
+const protectedLabVmids = async () => {
+  const ids = new Set();
+  for (const row of await fetchDeploymentRows()) {
+    const deployment = mapDeployment(row);
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const plan = buildTerraformDeploymentPayload({ deploymentId: deployment.id,
+      poolAssignments: deployment.poolAssignments, blueprint, classroom, teacher: deployment.teacher });
+    plan.vms.forEach(vm => ids.add(Number(vm.vmid)));
+  }
+  return ids;
+};
+
+app.get('/api/maintenance/vm-pools/cleanup', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await listVmPoolCleanup({ db: dbPool, api: poolCleanupApi(),
+    pool: proxmoxInventoryPool(), protectedVmids: await protectedLabVmids() }));
+}));
+
+app.post('/api/maintenance/vm-pools/cleanup', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  const parsed = z.object({ selected: z.array(z.object({
+    kind: z.enum(['vm', 'record']), vmid: z.number().int().positive(),
+    node: z.string().min(1), name: z.string().min(1), digest: z.string().min(1)
+  })).min(1).max(10000) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Invalid pool cleanup selection' });
+  const lease = await tryJobLocks(dbPool, ['global:terraform-deploy']);
+  if (!lease) return res.status(409).json({ error: 'A deployment or pool replenishment is in progress. Retry when it finishes.' });
+  try {
+    const result = await emptyVmPool({ db: dbPool, api: poolCleanupApi(),
+      pool: proxmoxInventoryPool(), protectedVmids: await protectedLabVmids(),
+      selected: parsed.data.selected, assertHeld: () => lease.assertHeld() });
+    res.json(result);
+  } finally { await lease.release(); }
+}));
 
 app.post(
   '/api/settings/clean-orphaned-disks',

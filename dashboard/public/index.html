@@ -259,7 +259,7 @@
                   <span>VMs to keep ready in the pool</span>
                   <input type="number" name="poolSize" min="1" max="1000" step="1" value="1" required>
                 </label>
-                <p class="muted">Pool VMs stay powered off, without lab IP or customization. Labs wait for available VMs; used VMs are replenished automatically. Disabling or reducing the pool removes unused VMs.</p>
+                <p class="muted">Windows pool VMs boot offline to finish Sysprep and remain powered on when ready. Lab IP and customization are applied only when assigned. Other OS pools stay powered off. Used VMs are replenished automatically; disabling or reducing the pool removes unused VMs.</p>
                 <div class="split">
                   <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
                   <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
@@ -522,6 +522,7 @@
             <div class="inline-actions section-actions danger-actions">
               <button type="button" id="clearJobHistoryButton" class="btn btn-danger">Clear finished job history</button><button type="button" id="cancelJobsButton" class="btn btn-danger">Cancel all jobs</button>
               <button type="button" id="cleanOrphanedDisksButton" class="btn btn-danger">Clean orphaned disks</button>
+              <button type="button" id="emptyVmPoolButton" class="btn btn-danger">Empty VM pool</button>
               <div id="dangerZoneStatus" class="status-message" hidden></div>
             </div>
           </article>
@@ -647,6 +648,24 @@
   </div><!-- /.shell -->
 
   <!-- ── Access denied (no recognized Keycloak role) ──────────── -->
+  <dialog id="emptyVmPoolDialog" class="modal-dialog" aria-labelledby="emptyVmPoolTitle">
+    <form method="dialog" class="modal-card">
+      <h3 id="emptyVmPoolTitle">Empty VM pool</h3>
+      <p id="emptyVmPoolSummary"></p>
+      <p class="muted">Listed inventory VMs will be stopped and permanently deleted, including their disks. Missing inventory records will be cleared. Automatic replenishment resumes after cleanup.</p>
+      <div class="table-wrap uploaded-files-table-wrap">
+        <table class="queue-table">
+          <thead><tr><th scope="col">VMID</th><th scope="col">Name</th><th scope="col">Node</th><th scope="col">Action</th></tr></thead>
+          <tbody id="emptyVmPoolBody"></tbody>
+        </table>
+      </div>
+      <div class="inline-actions">
+        <button type="submit" value="cancel" class="btn btn-secondary">Cancel</button>
+        <button id="confirmEmptyVmPoolButton" type="submit" value="confirm" class="btn btn-danger">Empty pool</button>
+      </div>
+    </form>
+  </dialog>
+
   <div id="accessDeniedScreen" class="access-denied-screen" hidden>
     <div class="panel access-denied-card">
       <p class="eyebrow">Access denied</p>

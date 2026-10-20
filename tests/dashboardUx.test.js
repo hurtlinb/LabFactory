@@ -54,6 +54,49 @@ function setup(t) {
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
+test('pool cleanup previews actual inventory and cancellation sends no deletion', async t => {
+  const { document, w } = setup(t);
+  const calls = [];
+  w.fetch = async (url, options = {}) => {
+    calls.push({ url, ...options });
+    return { ok: true, json: async () => ({ pool: 'pool-dev', entries: [
+      { kind: 'vm', vmid: 900000, node: 'pve', name: '<orphan>', digest: 'abc', reason: null }
+    ] }) };
+  };
+  document.getElementById('emptyVmPoolButton').click();
+  await tick();
+  const dialog = document.getElementById('emptyVmPoolDialog');
+  assert(dialog.open);
+  assert.match(dialog.textContent, /pool-dev/);
+  assert.match(dialog.textContent, /<orphan>/);
+  assert.equal(dialog.querySelector('orphan'), null);
+  dialog.close('cancel');
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].method, undefined);
+  assert.equal(document.getElementById('emptyVmPoolButton').disabled, false);
+});
+
+test('pool cleanup confirmation submits only eligible preview entries', async t => {
+  const { document, w } = setup(t);
+  const calls = [];
+  const eligible = { kind: 'vm', vmid: 900000, node: 'pve', name: 'orphan', digest: 'abc', reason: null };
+  w.fetch = async (url, options = {}) => {
+    calls.push({ url, ...options });
+    const data = options.method === 'POST' ? { deleted: [eligible], skipped: [], errors: [] }
+      : url === '/api/templates' ? []
+      : { pool: 'pool-dev', entries: [eligible, { ...eligible, vmid: 900001, reason: 'Assigned to a lab' }] };
+    return { ok: true, json: async () => data };
+  };
+  document.getElementById('emptyVmPoolButton').click();
+  await tick();
+  document.getElementById('emptyVmPoolDialog').close('confirm');
+  await tick();
+  const request = calls.find(call => call.method === 'POST');
+  assert.deepEqual(JSON.parse(request.body).selected, [eligible]);
+  assert.equal(document.getElementById('emptyVmPoolButton').disabled, false);
+});
+
 test('model form saves pool activation and capacity', async t => {
   const { api, document, w, requests } = setup(t);
   await api.bootstrap();

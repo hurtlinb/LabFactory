@@ -2,7 +2,8 @@ import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
-import { claimPoolVms, reconcileVmPools, proxmoxInventoryPool } from '../lib/vmPool.js';
+import { claimPoolVms, reconcileVmPools, proxmoxInventoryPool, clearPoolPreparationForReplacement } from '../lib/vmPool.js';
+import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand } from '../lib/windowsPool.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +101,9 @@ const encodeRequestBody = body => {
   }
   if (typeof body === 'string') {
     return { content: body, contentType: null };
+  }
+  if (Object.values(body).some(Array.isArray)) {
+    return { content: JSON.stringify(body), contentType: 'application/json' };
   }
   return {
     content: new URLSearchParams(
@@ -1087,7 +1091,15 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
 
           $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
           $flagTime = (Get-Item -LiteralPath $flag).LastWriteTime
-          if ($flagTime -lt $bootTime) {
+          $prepared = "{{ pool_prepared | default(false) | bool | lower }}" -eq "true"
+          if ($prepared) {
+            $marker = 'C:\\ProgramData\\cloudbase-init\\labfactory-pool-ready.flag'
+            $image = Get-ItemProperty 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State'
+            if ($image.ImageState -ne 'IMAGE_STATE_COMPLETE' -or -not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne "{{ pool_token | default('') }}") {
+              throw 'Prepared Windows pool marker or setup state is invalid'
+            }
+          }
+          if (-not $prepared -and $flagTime -lt $bootTime) {
             Write-Error "Cloudbase-Init done flag is stale: $flagTime is before boot $bootTime"
             exit 1
           }
@@ -1107,6 +1119,8 @@ const buildWindowsReadinessInventory = (target, password) => `all:
     windows_readiness_targets:
       hosts:
         vm_${target.vmid}:
+          pool_prepared: ${Boolean(target.poolPrepared)}
+          pool_token: ${JSON.stringify(target.poolToken ?? '')}
           ansible_host: ${JSON.stringify(target.host)}
           ansible_user: ${JSON.stringify(target.user)}
           ansible_password: ${JSON.stringify(password)}
@@ -1225,6 +1239,8 @@ const buildWindowsReadinessTargets = blueprintVms =>
     .filter(vm => isWindowsOsType(vm.osType))
     .map(vm => ({
       vmid: vm.vmid,
+      poolPrepared: Boolean(vm.poolPrepared),
+      poolToken: vm.poolToken,
       name: vm.name,
       host: buildStaticVmIpAddress(vm),
       user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language),
@@ -1429,10 +1445,10 @@ function poolApi(settings, lease) {
     return payload?.data;
   };
   const resource = async entry => (await fetchProxmoxVmResources(settings)).find(vm => Number(vm.vmid) === Number(entry.vmid));
-  const ownedConfig = async entry => {
+  const ownedConfig = async (entry, allowRunning = false) => {
     const vm = await resource(entry);
     if (!vm) return null;
-    if (vm.name !== `labfactory-pool-${entry.vmid}` || isProxmoxTemplate(vm.template) || vm.node !== entry.node || vm.status !== 'stopped') {
+    if (vm.name !== `labfactory-pool-${entry.vmid}` || isProxmoxTemplate(vm.template) || vm.node !== entry.node || (!allowRunning && vm.status !== 'stopped')) {
       throw new Error(`Pool VM ${entry.vmid} changed externally; manual review required`);
     }
     const config = await fetchVmConfig(settings, entry.node, entry.vmid);
@@ -1442,7 +1458,7 @@ function poolApi(settings, lease) {
     if (config.lock) throw new Error(`Pool VM ${entry.vmid} is locked (${config.lock})`);
     return config;
   };
-  const finish = async entry => {
+  const finish = async (entry, template = {}) => {
     if (entry.task_id) {
       try {
         await waitForProxmoxTask(settings, entry.node, entry.task_id);
@@ -1460,16 +1476,61 @@ function poolApi(settings, lease) {
     const config = await ownedConfig(entry);
     if (!config) throw new Error(`Pool VM ${entry.vmid} missing after clone`);
     const remove = Object.keys(config).filter(key => /^ipconfig\d+$/.test(key) || ['ciuser', 'cipassword', 'sshkeys', 'nameserver', 'searchdomain', 'cicustom'].includes(key));
-    const body = { onboot: 0 };
+    const body = { onboot: 0, agent: 1 };
     if (remove.length) body.delete = remove.join(',');
     for (const key of Object.keys(config).filter(key => /^net\d+$/.test(key))) {
       body[key] = `${String(config[key]).replace(/,link_down=[^,]+/g, '')},link_down=1`;
     }
     await request(`nodes/${entry.node}/qemu/${entry.vmid}/config`, 'PUT', body);
+    if (windowsPoolOs(template.os_type)) {
+      await request(`nodes/${entry.node}/qemu/${entry.vmid}/cloudinit`, 'PUT');
+      // Persist the boot phase before starting: restart reconciliation must not reset networking.
+      await dbPool.query("UPDATE vm_pool SET status = 'preparing', preparation_started_at = NOW(), error = NULL WHERE vmid = $1", [entry.vmid]);
+      await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/start`, 'POST');
+      return false;
+    }
+    return true;
   };
   return {
     finish,
-    exists: async entry => Boolean(await ownedConfig(entry)),
+    prepare: async entry => {
+      if (Date.now() - new Date(entry.preparation_started_at).getTime() > WINDOWS_WINRM_WAIT_TIMEOUT_MS) {
+        throw new Error('Windows preparation timed out: check Sysprep/OOBE, QEMU Guest Agent and Cloudbase-Init done.flag in the VM console');
+      }
+      if (!await ownedConfig(entry, true)) throw new Error(`Preparing pool VM ${entry.vmid} is missing`);
+      const vm = await resource(entry);
+      if (vm.status === 'stopped') {
+        // Also upgrades cold inventory created by the previous worker version.
+        await request(`nodes/${entry.node}/qemu/${entry.vmid}/config`, 'PUT', { agent: 1, onboot: 0 });
+        await request(`nodes/${entry.node}/qemu/${entry.vmid}/cloudinit`, 'PUT');
+        await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/start`, 'POST');
+        return false;
+      }
+      const route = `nodes/${entry.node}/qemu/${entry.vmid}/agent`;
+      try {
+        if (entry.guest_probe_pid) {
+          const result = await request(`${route}/exec-status?pid=${entry.guest_probe_pid}`);
+          if (!result?.exited) return false;
+          await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL WHERE vmid = $1', [entry.vmid]);
+          return Number(result.exitcode ?? result['exit-code']) === 0;
+        }
+        const result = await request(`${route}/exec`, 'POST', { command: powershellCommand(windowsPoolProbe(entry)) });
+        if (!result?.pid) throw new Error('QEMU Guest Agent did not return a process ID');
+        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = $2 WHERE vmid = $1', [entry.vmid, result.pid]);
+      } catch (error) {
+        if (error.statusCode === 401 || error.statusCode === 403) throw error;
+        // Agent startup and Windows setup reboots are expected during this phase.
+        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL WHERE vmid = $1', [entry.vmid]);
+      }
+      return false;
+    },
+    exists: async entry => {
+      if (!await ownedConfig(entry, Boolean(entry.prepared_at))) return false;
+      if (entry.prepared_at && (await resource(entry)).status === 'stopped') {
+        await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/start`, 'POST');
+      }
+      return true;
+    },
     remove: async entry => {
       if (entry.task_id) {
         const task = await fetchProxmoxTaskStatus(settings, entry.node, entry.task_id);
@@ -1477,7 +1538,11 @@ function poolApi(settings, lease) {
       } else if (entry.status === 'creating') {
         throw new Error(`Pool VM ${entry.vmid}: uncertain clone; manual review required`);
       }
-      if (!await ownedConfig(entry)) return;
+      if (!await ownedConfig(entry, Boolean(entry.preparation_started_at))) return;
+      if ((await resource(entry)).status !== 'stopped') {
+        const stopTask = await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/stop`, 'POST');
+        await waitForProxmoxTask(settings, entry.node, stopTask);
+      }
       const upid = await request(`nodes/${entry.node}/qemu/${entry.vmid}`, 'DELETE', { purge: 1 });
       await waitForProxmoxTask(settings, entry.node, upid);
     },
@@ -1502,8 +1567,9 @@ function poolApi(settings, lease) {
           pool: proxmoxInventoryPool(), description: `LabFactory pool ${entry.ownership_token}`
         });
         await dbPool.query('UPDATE vm_pool SET task_id = $2 WHERE vmid = $1', [vmid, entry.task_id]);
-        await finish(entry);
-        await dbPool.query("UPDATE vm_pool SET status = 'ready', error = NULL WHERE vmid = $1", [vmid]);
+        if (await finish(entry, template)) {
+          await dbPool.query("UPDATE vm_pool SET status = 'ready', error = NULL WHERE vmid = $1", [vmid]);
+        }
       } catch (error) {
         if (error.statusCode >= 400 && error.statusCode < 500 && !entry.task_id) {
           await dbPool.query("UPDATE vm_pool SET status = 'error' WHERE vmid = $1", [vmid]);
@@ -1512,6 +1578,54 @@ function poolApi(settings, lease) {
       }
     }
   };
+}
+
+async function configurePreparedWindows(settings, vm, definition, lease, signal) {
+  const request = async (suffix, method = 'GET', body) => {
+    lease.assertHeld();
+    signal.throwIfAborted();
+    const result = await requestJson({
+      url: new URL(`nodes/${vm.poolNode}/qemu/${vm.vmid}/${suffix}`, `${settings.proxmox_api_url.replace(/\/+$/, '')}/`),
+      method, body, ...proxmoxRequestOptions(settings)
+    });
+    return result?.data;
+  };
+  const config = await fetchVmConfig(settings, vm.poolNode, vm.vmid);
+  const mac = /(?:^|,)(?:virtio|e1000|e1000e|rtl8139|vmxnet3)=([0-9a-f:]+)/i.exec(config.net0 ?? '')?.[1];
+  const command = powershellCommand(windowsPoolLabSettings({
+    token: vm.poolToken, mac,
+    username: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language),
+    password: definition.windows_admin_password || settings.windows_admin_password,
+    ipconfig: definition.ipconfig0
+  }));
+  const resource = (await fetchProxmoxVmResources(settings)).find(item => Number(item.vmid) === Number(vm.vmid));
+  if (resource?.status === 'stopped') await request('status/start', 'POST');
+  const deadline = Date.now() + 5 * 60 * 1000;
+  let pid;
+  while (Date.now() < deadline) {
+    signal.throwIfAborted();
+    try {
+      if (!pid) {
+        const result = await request('agent/exec', 'POST', { command });
+        pid = result?.pid;
+      } else {
+        const result = await request(`agent/exec-status?pid=${pid}`);
+        if (result?.exited) {
+          if (Number(result.exitcode ?? result['exit-code']) !== 0) {
+            // Do not include command/output: the script contains the guest password.
+            throw Object.assign(new Error(`Guest configuration failed for prepared VM ${vm.vmid}`), { terminal: true });
+          }
+          return;
+        }
+      }
+    } catch (error) {
+      if (error.terminal) throw error;
+      if (error.statusCode === 401 || error.statusCode === 403) throw new Error(`Guest agent access denied for VM ${vm.vmid}`);
+      pid = null;
+    }
+    await sleep(2000);
+  }
+  throw new Error(`Timed out configuring prepared VM ${vm.vmid} through QEMU Guest Agent`);
 }
 
 export function startTerraformWorker(connection) {
@@ -1580,6 +1694,12 @@ export function startTerraformWorker(connection) {
           };
         }
         if (action === 'deploy') {
+          if (replaceVmids.length && job.data.deploymentId) {
+            await clearPoolPreparationForReplacement(dbPool, job.data.deploymentId, replaceVmids);
+            await job.updateData({ ...job.data, blueprint: { ...job.data.blueprint,
+              vms: job.data.blueprint.vms.map(vm => replaceVmids.includes(Number(vm.vmid)) ? { ...vm, poolPrepared: false } : vm)
+            } });
+          }
           await readinessReporter.publish();
         }
 
@@ -1878,6 +1998,11 @@ export function startTerraformWorker(connection) {
             console.warn(`Post-destroy volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
           });
         } else {
+          // The Windows first boot already happened offline. Apply lab credentials
+          // and network settings through QGA before Terraform connects its NIC.
+          for (const vm of scopedBlueprintVms.filter(vm => vm.poolPrepared && windowsPoolOs(vm.osType) && !replaceVmids.includes(Number(vm.vmid)))) {
+            await configurePreparedWindows(merged, vm, merged.vm_definitions.find(item => item.vmid === Number(vm.vmid)), lease, abortController.signal);
+          }
           if (replaceVmids.length > 0) {
             const replaceVmDefinitions = (Array.isArray(merged.vm_definitions) ? merged.vm_definitions : [])
               .filter(vm => replaceVmids.includes(Number(vm.vmid)));

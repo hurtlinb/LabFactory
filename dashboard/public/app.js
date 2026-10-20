@@ -2444,7 +2444,10 @@ function renderPoolStatus() {
     } else if (!template.poolEnabled) {
       label = 'Disabled'; tone = 'lock-pill'; details = 'Enable the pool in VM Models.';
     } else if (pending > 0) {
-      label = 'Preparing'; tone = 'status-pill-busy'; details = 'VM creation is in progress.';
+      label = 'Preparing'; tone = 'status-pill-busy';
+      details = template.poolBooting > 0
+        ? `${Number(template.poolBooting)} Windows VM(s) completing Sysprep / first boot; network disconnected.`
+        : 'VM cloning is in progress.';
     } else if (ready >= target) {
       label = 'Ready'; tone = 'status-pill-running'; details = 'Target capacity reached.';
     } else {
@@ -3629,6 +3632,38 @@ cleanOrphanedDisksButton?.addEventListener('click', async () => {
   } finally {
     cleanOrphanedDisksButton.disabled = false;
   }
+});
+
+document.getElementById('emptyVmPoolButton')?.addEventListener('click', async event => {
+  const button = event.currentTarget;
+  const targetStatus = dangerZoneStatus || globalStatus;
+  button.disabled = true;
+  try {
+    const preview = await fetchJson('/api/maintenance/vm-pools/cleanup');
+    const selected = preview.entries.filter(entry => !entry.reason && entry.digest);
+    const dialog = document.getElementById('emptyVmPoolDialog');
+    document.getElementById('emptyVmPoolSummary').textContent =
+      `Proxmox pool: ${preview.pool}. ${selected.filter(entry => entry.kind === 'vm').length} VM(s) to delete, ${selected.filter(entry => entry.kind === 'record').length} missing record(s) to clear.`;
+    document.getElementById('emptyVmPoolBody').innerHTML = preview.entries.length
+      ? preview.entries.map(entry => `<tr><td>${Number(entry.vmid)}</td><td>${escapeHtml(entry.name)}</td><td>${escapeHtml(entry.node)}</td><td>${escapeHtml(entry.reason || (!entry.digest ? 'Identity unavailable' : entry.kind === 'record' ? 'Clear missing record' : 'Delete VM and disks'))}</td></tr>`).join('')
+      : '<tr><td colspan="4" class="muted">The pool is empty.</td></tr>';
+    document.getElementById('confirmEmptyVmPoolButton').disabled = selected.length === 0;
+    dialog.returnValue = '';
+    const choice = new Promise(resolve => dialog.addEventListener('close', () => resolve(dialog.returnValue), { once: true }));
+    dialog.showModal();
+    if (await choice !== 'confirm' || !selected.length) return;
+    showMessage(targetStatus, `Emptying Proxmox pool ${preview.pool}...`, 'success', 120000);
+    const result = await fetchJson('/api/maintenance/vm-pools/cleanup', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ selected })
+    });
+    const details = [...result.skipped, ...result.errors].map(item => `VM ${item.vmid}: ${item.reason}`).join('; ');
+    showMessage(targetStatus,
+      `${result.deleted.length} VM(s)/record(s) removed; ${result.skipped.length} skipped; ${result.errors.length} errors. ${details} Automatic replenishment resumes.`,
+      result.errors.length || result.skipped.length ? 'warning' : 'success', 30000);
+    await loadPoolStatus();
+  } catch (error) {
+    showMessage(targetStatus, error.message, 'danger', 15000);
+  } finally { button.disabled = false; }
 });
 
 closeDeploymentDetailsButton?.addEventListener('click', () => {

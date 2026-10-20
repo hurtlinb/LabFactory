@@ -4,10 +4,12 @@ import { readFileSync } from 'node:fs';
 import vmModule from 'node:vm';
 import { z } from 'zod';
 import { applyPoolAssignments, claimPoolVms, reconcileVmPools, proxmoxInventoryPool } from '../lib/vmPool.js';
+import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand } from '../lib/windowsPool.js';
 
 const vm = (vmid = 10000) => ({ id: `vm-${vmid}`, vmid, templateId: 'model', cloneSource: '9000', fullClone: true });
 const entry = (vmid = 900000, status = 'ready') => ({
-  vmid, template_id: 'model', source_vmid: 9000, full_clone: true, node: 'pve', status, ownership_token: 'owned-token'
+  vmid, template_id: 'model', source_vmid: 9000, full_clone: true, node: 'pve', status, ownership_token: 'owned-token',
+  created_at: new Date().toISOString()
 });
 
 test('inventory uses the Proxmox resource pool corresponding to the environment', () => {
@@ -92,16 +94,17 @@ test('all lifecycle plans preserve assigned VM IDs and nodes without mutating th
   assert.equal(original[0].vmid, 10000);
 });
 
-function reconciliation(entries, { enabled = true, size = 2, failure = false } = {}) {
+function reconciliation(entries, { enabled = true, size = 2, failure = false, prepared = false, osType = 'ubuntu' } = {}) {
   const events = [];
   const db = { async query(sql, args) {
-    if (sql.startsWith('SELECT * FROM vm_templates')) return { rows: [{ id: 'model', pool_enabled: enabled, pool_size: size, proxmox_template_vmid: 9000, full_clone: true }] };
+    if (sql.startsWith('SELECT * FROM vm_templates')) return { rows: [{ id: 'model', pool_enabled: enabled, pool_size: size, proxmox_template_vmid: 9000, full_clone: true, os_type: osType }] };
     if (sql.startsWith('SELECT * FROM vm_pool')) return { rows: entries.filter(row => row.status !== 'assigned') };
     events.push([sql, args]);
     return { rows: [] };
   } };
   const api = {
     finish: async row => { events.push(['finish', row.vmid]); if (failure) throw new Error('clone running'); },
+    prepare: async row => { events.push(['prepare', row.vmid]); return prepared; },
     exists: async () => true,
     remove: async row => events.push(['remove', row.vmid]),
     create: async () => events.push(['create'])
@@ -157,22 +160,27 @@ test('model validation rejects enabled zero-capacity pools, fractions and excess
   assert.equal(context.schema.safeParse({ ...base, poolEnabled: false, poolSize: 0 }).success, true);
 });
 
-function proxmoxPoolApi({ name = 'labfactory-pool-900000', status = 'stopped', locked = false, taskStatus = 'stopped', description = 'LabFactory pool owned-token', environment = 'production' } = {}) {
+function proxmoxPoolApi({ name = 'labfactory-pool-900000', status = 'stopped', locked = false, taskStatus = 'stopped', description = 'LabFactory pool owned-token', environment = 'production', guestResult = { exited: true, exitcode: 0 } } = {}) {
   const source = readFileSync('workers/terraformWorker.js', 'utf8');
   const code = source.slice(source.indexOf('function poolApi('), source.indexOf('export function startTerraformWorker'));
   const requests = [];
+  const queries = [];
   const resources = [
     { vmid: 900000, name, status, node: 'pve', template: 0 },
     { vmid: 9000, name: 'source', status: 'stopped', node: 'pve', template: 1 }
   ];
   const context = {
     URL,
+    windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand,
+    WINDOWS_WINRM_WAIT_TIMEOUT_MS: 7200000,
     proxmoxInventoryPool: () => proxmoxInventoryPool(environment),
     requestJson: async request => {
       requests.push(request);
       if (request.url.pathname.endsWith('/clone')) {
         resources.push({ vmid: request.body.newid, name: request.body.name, status: 'stopped', node: 'pve', template: 0 });
       }
+      if (request.url.pathname.endsWith('/exec')) return { data: { pid: 42 } };
+      if (request.url.pathname.endsWith('/exec-status')) return { data: guestResult };
       return { data: 'task' };
     },
     proxmoxRequestOptions: () => ({}),
@@ -186,12 +194,13 @@ function proxmoxPoolApi({ name = 'labfactory-pool-900000', status = 'stopped', l
     }),
     waitForProxmoxTask: async () => {},
     fetchProxmoxTaskStatus: async () => ({ status: taskStatus }),
-    dbPool: { query: async sql => ({
-      rows: sql.includes('nextval') ? [{ vmid: 900001 }] : sql.includes('INSERT INTO vm_pool') ? [entry(900001, 'creating')] : []
-    }) }
+    dbPool: { query: async sql => {
+      queries.push(sql);
+      return { rows: sql.includes('nextval') ? [{ vmid: 900001 }] : sql.includes('INSERT INTO vm_pool') ? [entry(900001, 'creating')] : [] };
+    } }
   };
   vmModule.runInNewContext(`${code}\nthis.api = poolApi({ proxmox_api_url: 'https://pve/api2/json' }, { assertHeld() {} });`, context);
-  return { api: context.api, requests };
+  return { api: context.api, requests, queries };
 }
 
 test('clone requests place inventory directly into the environment-specific Proxmox pool', async () => {
@@ -206,7 +215,7 @@ test('clone requests place inventory directly into the environment-specific Prox
   }
 });
 
-test('pool preparation disconnects networking, clears guest settings and never boots the VM', async () => {
+test('non-Windows pool preparation disconnects networking, clears guest settings and keeps the VM off', async () => {
   const { api, requests } = proxmoxPoolApi();
   await api.finish({ ...entry(), task_id: 'clone-task' });
   assert.equal(requests.length, 1);
@@ -215,6 +224,68 @@ test('pool preparation disconnects networking, clears guest settings and never b
   assert.equal(requests[0].body.onboot, 0);
   assert.match(requests[0].body.net0, /link_down=1$/);
   assert.deepEqual(requests[0].body.delete.split(',').sort(), ['cipassword', 'ciuser', 'ipconfig0']);
+});
+
+test('Windows clones enter the durable preparing phase and boot only after network isolation and cloud-init regeneration', async () => {
+  const { api, requests, queries } = proxmoxPoolApi();
+  const ready = await api.finish({ ...entry(), task_id: 'clone-task' }, { os_type: 'windows11' });
+  assert.equal(ready, false);
+  assert.deepEqual(requests.map(request => request.url.pathname.split('/').at(-1)), ['config', 'cloudinit', 'start']);
+  assert.match(requests[0].body.net0, /link_down=1$/);
+  assert(queries.some(sql => sql.includes("status = 'preparing'")));
+  assert(!queries.some(sql => sql.includes("status = 'ready'")));
+});
+
+test('Windows preparation probes use QGA without networking and survive a worker restart with a stored PID', async () => {
+  const first = proxmoxPoolApi({ status: 'running' });
+  const preparing = { ...entry(900000, 'preparing'), preparation_started_at: new Date().toISOString() };
+  assert.equal(await first.api.prepare(preparing), false);
+  assert.match(first.requests[0].url.pathname, /\/agent\/exec$/);
+  assert(first.queries.some(sql => sql.includes('guest_probe_pid = $2')));
+  const resumed = proxmoxPoolApi({ status: 'running' });
+  assert.equal(await resumed.api.prepare({ ...preparing, guest_probe_pid: 42 }), true);
+  assert.equal(resumed.requests.length, 1);
+  assert.match(resumed.requests[0].url.search, /pid=42/);
+});
+
+test('incomplete Windows setup or a running probe never makes inventory ready', async () => {
+  for (const guestResult of [{ exited: false }, { exited: true, exitcode: 10 }, { exited: true, exitcode: 11 }]) {
+    const { api } = proxmoxPoolApi({ status: 'running', guestResult });
+    assert.equal(await api.prepare({ ...entry(), preparation_started_at: new Date().toISOString(), guest_probe_pid: 42 }), false);
+  }
+  const { db, api, events } = reconciliation([entry(900000, 'preparing')], { size: 1 });
+  await reconcileVmPools(db, api);
+  assert(!events.some(([event]) => event.includes("status = 'ready'") || event === 'create'));
+});
+
+test('successful Windows preparation is persisted before the VM can be claimed', async () => {
+  const { db, api, events } = reconciliation([entry(900000, 'preparing')], { size: 1, prepared: true });
+  await reconcileVmPools(db, api);
+  assert(events.some(([event]) => event.includes("status = 'ready', prepared_at = NOW()")));
+  const claimed = await claimPoolVms(claimDatabase({ entries: [{ ...entry(), prepared_at: new Date() }] }), 'lab', [vm()]);
+  assert.equal(claimed.vms[0].poolPrepared, true);
+  assert.equal(claimed.vms[0].poolToken, 'owned-token');
+});
+
+test('old cold Windows inventory is sent through preparation instead of being treated as ready', async () => {
+  const { db, api, events } = reconciliation([entry()], { size: 1, osType: 'windows11' });
+  await reconcileVmPools(db, api);
+  assert(events.some(([event]) => event.includes("status = 'preparing'")));
+  assert(!events.some(([event]) => event === 'remove' || event === 'create'));
+});
+
+test('Windows preparation timeout is explicit and does not report success', async () => {
+  const { api } = proxmoxPoolApi({ status: 'running' });
+  await assert.rejects(api.prepare({ ...entry(), preparation_started_at: new Date(Date.now() - 7200001) }), /Sysprep\/OOBE/);
+});
+
+test('prepared running Windows inventory can be retained and is stopped before removal', async () => {
+  const { api, requests } = proxmoxPoolApi({ status: 'running' });
+  const prepared = { ...entry(), prepared_at: new Date(), preparation_started_at: new Date(), task_id: 'clone-task' };
+  assert.equal(await api.exists(prepared), true);
+  await api.remove(prepared);
+  assert.deepEqual(requests.map(request => request.method), ['POST', 'DELETE']);
+  assert.match(requests[0].url.pathname, /\/status\/stop$/);
 });
 
 test('cleanup refuses externally renamed, running, locked or still-cloning VMs', async () => {
@@ -231,4 +302,38 @@ test('cleanup deletes only an identified stopped pool VM after its clone task en
   assert.equal(requests.length, 1);
   assert.equal(requests[0].method, 'DELETE');
   assert.match(requests[0].url.pathname, /\/pve\/qemu\/900000$/);
+});
+
+test('lab assignment configures a prepared Windows guest through QGA and redacts failed guest output', async () => {
+  const source = readFileSync('workers/terraformWorker.js', 'utf8');
+  const code = source.slice(source.indexOf('async function configurePreparedWindows('), source.indexOf('export function startTerraformWorker'));
+  for (const exitcode of [0, 1]) {
+    const requests = [];
+    const context = {
+      URL, Date, powershellCommand, windowsPoolLabSettings,
+      sleep: async () => {}, proxmoxRequestOptions: () => ({}),
+      fetchVmConfig: async () => ({ net0: 'virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,link_down=1' }),
+      fetchProxmoxVmResources: async () => [{ vmid: 900000, status: 'stopped' }],
+      requestJson: async request => {
+        requests.push(request);
+        return { data: request.url.pathname.endsWith('/exec') ? { pid: 5 } : { exited: true, exitcode, 'err-data': 'sensitive-password' } };
+      }
+    };
+    vmModule.runInNewContext(`${code}\nthis.configure = configurePreparedWindows;`, context);
+    const call = context.configure(
+      { proxmox_api_url: 'https://pve/api2/json', windows_admin_password: 'sensitive-password' },
+      { vmid: 900000, poolNode: 'pve', poolToken: 'unique-token', windowsAdminUsername: 'Administrateur' },
+      { ipconfig0: 'ip=10.0.1.2/24,gw=10.0.1.1' },
+      { assertHeld() {} }, new AbortController().signal
+    );
+    if (exitcode === 0) await call;
+    else await assert.rejects(call, error => /Guest configuration failed/.test(error.message) && !error.message.includes('sensitive-password'));
+    assert.match(requests[0].url.pathname, /\/status\/start$/);
+    assert.match(requests[1].url.pathname, /\/agent\/exec$/);
+    const script = Buffer.from(requests[1].body.command.at(-1), 'base64').toString('utf16le');
+    assert.match(script, /unique-token/);
+    assert.match(script, /10\.0\.1\.2/);
+    assert.match(script, /AA:BB:CC:DD:EE:FF/);
+    assert(!requests.some(request => /\/config$/.test(request.url.pathname)), 'NIC remains disconnected until Terraform apply');
+  }
 });
