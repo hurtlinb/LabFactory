@@ -3,7 +3,7 @@ import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { claimPoolVms, reconcileVmPools, proxmoxInventoryPool, clearPoolPreparationForReplacement } from '../lib/vmPool.js';
-import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand } from '../lib/windowsPool.js';
+import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand, poolLabNetwork } from '../lib/windowsPool.js';
 import { adoptPoolVm } from '../lib/adoptPoolVm.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import path from 'node:path';
@@ -1628,6 +1628,10 @@ async function configurePreparedWindows(settings, vm, definition, lease, signal)
     password: definition.windows_admin_password || settings.windows_admin_password,
     ipconfig: definition.ipconfig0
   }));
+  await request('config', 'PUT', {
+    net0: poolLabNetwork(config.net0, settings, definition),
+    ...(config.digest ? { digest: config.digest } : {})
+  });
   const resource = (await fetchProxmoxVmResources(settings)).find(item => Number(item.vmid) === Number(vm.vmid));
   if (resource?.status === 'stopped') await request('status/start', 'POST');
   const deadline = Date.now() + 5 * 60 * 1000;
@@ -1643,7 +1647,8 @@ async function configurePreparedWindows(settings, vm, definition, lease, signal)
         if (result?.exited) {
           if (Number(result.exitcode ?? result['exit-code']) !== 0) {
             // Do not include command/output: the script contains the guest password.
-            throw Object.assign(new Error(`Guest configuration failed for prepared VM ${vm.vmid}`), { terminal: true });
+            const detail = Number(result.exitcode ?? result['exit-code']) === 21 ? ': lab network link did not become available' : '';
+            throw Object.assign(new Error(`Guest configuration failed for prepared VM ${vm.vmid}${detail}`), { terminal: true });
           }
           return;
         }
@@ -2036,8 +2041,8 @@ export function startTerraformWorker(connection) {
             console.warn(`Post-destroy volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
           });
         } else {
-          // The Windows first boot already happened offline. Apply lab credentials
-          // and network settings through QGA before Terraform connects its NIC.
+          // Windows first boot is complete. Connect to the lab network first,
+          // then apply credentials and static IP through QGA.
           for (const vm of scopedBlueprintVms.filter(vm => vm.poolPrepared && windowsPoolOs(vm.osType) && !replaceVmids.includes(Number(vm.vmid)))) {
             await configurePreparedWindows(merged, vm, merged.vm_definitions.find(item => item.vmid === Number(vm.vmid)), lease, abortController.signal);
           }

@@ -119,9 +119,10 @@ Models without a pool continue to deploy directly. The existing explicit
 workstation replacement action still recreates its VM IDs through Terraform.
 
 Reservations and actual VM IDs are persisted in PostgreSQL. The worker imports
-reserved VMs into the lab's Terraform state. For prepared Windows guests it applies
-the lab password and static IPv4 configuration through QEMU Guest Agent while the
-NIC is still disconnected, before Terraform connects it and the normal customization
+reserved VMs into the lab's Terraform state. For prepared Windows guests it first
+applies the lab bridge/VLAN and connects the NIC. After the guest sees the link up,
+it applies the lab password and static IPv4 configuration through QEMU Guest Agent,
+then Terraform and the normal customization
 pipeline runs. Cloudbase-Init is not rerun and Sysprep is not restarted. Start, stop, guest actions,
 CSV exports and destruction use those assigned IDs. Consumed VMs are never
 returned to the pool. A lab with reservations must be destroyed before its record

@@ -46,7 +46,8 @@ Windows inventory pools:
 
 LabFactory boots inventory clones with their NICs disconnected. A Windows VM is
 ready once a done.flag newer than clone creation has been written.
-It stays powered on. On lab assignment, QEMU Guest Agent applies the lab password
+It stays powered on. On lab assignment, the NIC is connected to the lab bridge
+and VLAN before QEMU Guest Agent applies the lab password
 and static network settings; Cloudbase-Init and Sysprep are not run again.
 
 Command:

@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 import vmModule from 'node:vm';
 import { z } from 'zod';
 import { applyPoolAssignments, claimPoolVms, reconcileVmPools, proxmoxInventoryPool } from '../lib/vmPool.js';
-import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand } from '../lib/windowsPool.js';
+import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand, poolLabNetwork } from '../lib/windowsPool.js';
 
 const vm = (vmid = 10000) => ({ id: `vm-${vmid}`, vmid, templateId: 'model', cloneSource: '9000', fullClone: true });
 const entry = (vmid = 900000, status = 'ready') => ({
@@ -399,10 +399,10 @@ test('cleanup deletes only an identified stopped pool VM after its clone task en
 test('lab assignment configures a prepared Windows guest through QGA and redacts failed guest output', async () => {
   const source = readFileSync('workers/terraformWorker.js', 'utf8');
   const code = source.slice(source.indexOf('async function configurePreparedWindows('), source.indexOf('export function startTerraformWorker'));
-  for (const exitcode of [0, 1]) {
+  for (const exitcode of [0, 1, 21]) {
     const requests = [];
     const context = {
-      URL, Date, powershellCommand, windowsPoolLabSettings,
+      URL, Date, powershellCommand, windowsPoolLabSettings, poolLabNetwork,
       sleep: async () => {}, proxmoxRequestOptions: () => ({}),
       fetchVmConfig: async () => ({ net0: 'virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0,link_down=1' }),
       fetchProxmoxVmResources: async () => [{ vmid: 900000, status: 'stopped' }],
@@ -419,13 +419,28 @@ test('lab assignment configures a prepared Windows guest through QGA and redacts
       { assertHeld() {} }, new AbortController().signal
     );
     if (exitcode === 0) await call;
-    else await assert.rejects(call, error => /Guest configuration failed/.test(error.message) && !error.message.includes('sensitive-password'));
-    assert.match(requests[0].url.pathname, /\/status\/start$/);
-    assert.match(requests[1].url.pathname, /\/agent\/exec$/);
-    const script = Buffer.from(requests[1].body.command.at(-1), 'base64').toString('utf16le');
+    else await assert.rejects(call, error => /Guest configuration failed/.test(error.message)
+      && !error.message.includes('sensitive-password')
+      && (exitcode !== 21 || error.message.includes('lab network link did not become available')));
+    assert.match(requests[0].url.pathname, /\/config$/);
+    assert.equal(requests[0].method, 'PUT');
+    assert.match(requests[0].body.net0, /bridge=vmbr0,firewall=0,link_down=0$/);
+    assert.match(requests[1].url.pathname, /\/status\/start$/);
+    assert.match(requests[2].url.pathname, /\/agent\/exec$/);
+    const script = Buffer.from(requests[2].body.command.at(-1), 'base64').toString('utf16le');
     assert.match(script, /unique-token/);
     assert.match(script, /10\.0\.1\.2/);
     assert.match(script, /AA:BB:CC:DD:EE:FF/);
-    assert(!requests.some(request => /\/config$/.test(request.url.pathname)), 'NIC remains disconnected until Terraform apply');
+    assert(script.indexOf("Status -eq 'Up'") < script.indexOf('Set-NetIPInterface'), 'wait for link before applying the static IP');
   }
+});
+
+test('pool adoption connects directly to the lab network while preserving the MAC', () => {
+  const original = 'virtio=AA:BB:CC:DD:EE:FF,bridge=old,tag=10,trunks=20;30,firewall=1,link_down=1';
+  assert.equal(poolLabNetwork(original, { network_bridge: 'lan', network_firewall: true }, { vlan_tag: 250 }),
+    'virtio=AA:BB:CC:DD:EE:FF,bridge=lan,firewall=1,tag=250,link_down=0');
+  assert.equal(poolLabNetwork(original, { network_bridge: 'lan' }, { vlan_tag: 0 }),
+    'virtio=AA:BB:CC:DD:EE:FF,bridge=lan,firewall=0,link_down=0');
+  assert.throws(() => poolLabNetwork(original, { network_bridge: 'lan,tag=1' }, {}));
+  assert.throws(() => poolLabNetwork(original, {}, { vlan_tag: 4095 }));
 });
