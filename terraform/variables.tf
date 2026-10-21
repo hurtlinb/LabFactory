@@ -98,7 +98,6 @@ variable "vm_definitions" {
   description = "Optional list of VMs to create for a lab blueprint deployment."
   type = list(object({
     vmid         = number
-    target_node  = optional(string)
     name         = string
     hostname     = optional(string)
     os_type      = optional(string)

@@ -1,6 +1,3 @@
-import { applyPoolAssignments, proxmoxInventoryPool } from '../lib/vmPool.js';
-import { listVmPoolCleanup, emptyVmPool } from '../lib/vmPoolCleanup.js';
-import { tryJobLocks } from '../lib/jobConcurrency.js';
 import 'dotenv/config';
 import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
 import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes, blueprintFileDirectory } from '../lib/blueprintFiles.js';
@@ -199,10 +196,6 @@ const templateSchema = z.object({
   language: z.enum(['fr', 'en']).optional().default('en'),
   proxmoxTemplateVmid: z.number().int().positive(),
   fullClone: z.boolean().optional().default(false),
-  poolEnabled: z.boolean().optional().default(false),
-  poolSize: z.number().int().min(0).max(1000).optional().default(0),
-}).refine(data => !data.poolEnabled || data.poolSize > 0, {
-  message: 'An enabled pool must contain at least one VM', path: ['poolSize']
 });
 
 const blueprintVmSchema = z
@@ -836,14 +829,6 @@ const mapTemplate = row => ({
   language: row.language ?? 'en',
   proxmoxTemplateVmid: row.proxmox_template_vmid,
   fullClone: Boolean(row.full_clone),
-  poolEnabled: Boolean(row.pool_enabled),
-  poolSize: Number(row.pool_size ?? 0),
-  poolReady: Number(row.pool_ready ?? 0),
-  poolPending: Number(row.pool_pending ?? 0),
-  poolBooting: Number(row.pool_booting ?? 0),
-  poolUnused: Number(row.pool_unused ?? 0),
-  poolError: row.pool_error ?? null,
-  poolPreparationMessage: row.pool_preparation_message ?? null,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -993,7 +978,6 @@ const mapCourse = row => ({
 });
 
 const mapDeployment = row => ({
-  poolAssignments: row.pool_assignments ?? {},
   id: row.id,
   deploymentNumber: Number(row.deployment_number ?? 0),
   teacherEmail: row.teacher_email ?? '',
@@ -1269,7 +1253,6 @@ const buildTerraformBlueprintPayload = blueprint => {
         name: sanitizeVmName(`${namePrefix}-${labName}-${hostnameToken}`),
         tags: teacherTag || null,
         hostname: resolveVmCustomHostname(vm),
-        templateId: vm.template.id,
         vmid: baseVmid + index,
         osType: vm.template.osType,
         language: vm.template.language ?? 'en',
@@ -1379,7 +1362,7 @@ const updateDeploymentState = async ({ deploymentId, action, status, jobId = nul
   return fetchDeploymentById(result.rows[0].id);
 };
 
-const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, teacher = null, workstationPasswords = {}, poolAssignments = {} }) => {
+const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, teacher = null, workstationPasswords = {} }) => {
   const baseVmid = computeBlueprintBaseVmid(deploymentId);
   const labName = sanitizeVmName(blueprint.name);
   const effectiveTeacher = teacher ?? blueprint.teacher;
@@ -1405,7 +1388,6 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         name: sanitizeVmName(`${namePrefix}-${labName}-${workstationNumber}-${hostnameToken}`),
         tags: teacherTag || null,
         hostname: resolveVmCustomHostname(vm),
-        templateId: vm.template.id,
         vmid: baseVmid + vms.length,
         osType: vm.template.osType,
         language: vm.template.language ?? 'en',
@@ -1442,7 +1424,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
     linuxDefaultUsername: blueprint.linuxDefaultUsername ?? 'ubuntu',
     networkGateway: classroom.networkGateway,
     networkVlanMask: classroom.networkVlanMask,
-    vms: applyPoolAssignments(vms, poolAssignments)
+    vms
   };
 };
 
@@ -1597,9 +1579,6 @@ const fetchDeploymentReadinessProgress = async deployment => {
     }
 
     const progress = job?.progress;
-    if (progress?.type === 'pool-wait' && hasActiveJob) {
-      return { ...emptyReadinessProgress({ jobState, hasActiveJob }), poolWaitingCount: Number(progress.waitingCount) };
-    }
     const targetVmids = Array.isArray(progress?.targetVmids) ? parseVmidsToSet(progress.targetVmids) : null;
     const readyVmids = parseVmidsToSet(progress?.readyVmids);
     const startedVmids = parseVmidsToSet(progress?.startedVmids);
@@ -1669,7 +1648,6 @@ const resolveDeploymentDisplayStatus = (status, readinessProgress) =>
   readinessProgress?.jobState === 'waiting' ? `${status} - queued` : status;
 
 const applyReadinessStatusOverride = (deployment, status, readinessProgress) => {
-  if (readinessProgress?.poolWaitingCount > 0 && readinessProgress.hasActiveJob) return 'queued';
   const action = resolveReadinessAction(deployment);
   if (!action) {
     return status;
@@ -2288,7 +2266,7 @@ app.get(
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, poolAssignments: deployment.poolAssignments, blueprint, classroom, teacher: deployment.teacher });
+      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
       const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
       const customizationProgress = (deployment.lastAction === 'customize' && ['customizing', 'failed', 'deployed', 'running', 'stopped', 'mixed'].includes(deployment.status))
         ? await fetchAnsibleCustomizationProgress(deployment)
@@ -2310,7 +2288,6 @@ app.get(
       };
       deployments.push({
         ...runtimeDeployment,
-        poolWaitingCount: readinessProgress.poolWaitingCount ?? 0,
         customizationResults: customizationProgress?.results ?? null,
         canResumeCustomization: deployment.status === 'failed' && Boolean(customizationProgress?.canResume) && canManageDeployment(req, deployment),
         displayStatus: resolveDeploymentDisplayStatus(effectiveDeploymentStatus, readinessProgress),
@@ -2353,7 +2330,7 @@ app.post(
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmids = buildTerraformDeploymentPayload({
-        deploymentId: deployment.id, poolAssignments: deployment.poolAssignments,
+        deploymentId: deployment.id,
         blueprint,
         classroom,
         teacher: deployment.teacher
@@ -2363,7 +2340,7 @@ app.post(
         deployment.status,
         vmids,
         resourceByVmid,
-        { reconcileTransient: !(deploymentBusyStatuses.has(deployment.status) && (await fetchDeploymentReadinessProgress(deployment)).hasActiveJob) }
+        { reconcileTransient: true }
       );
 
       await dbPool.query(
@@ -2443,7 +2420,7 @@ app.get(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const vmPlan = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id, poolAssignments: deployment.poolAssignments,
+      deploymentId: deployment.id,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -2495,7 +2472,6 @@ app.get(
         id: deployment.id,
         deploymentNumber: deployment.deploymentNumber,
         status: effectiveDeploymentStatus,
-        poolWaitingCount: readinessProgress.poolWaitingCount ?? 0,
         lastAction: deployment.lastAction,
         teacher: deployment.teacher,
         teacherEmail: deployment.teacherEmail,
@@ -2554,7 +2530,7 @@ app.get(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const vmPlan = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id, poolAssignments: deployment.poolAssignments,
+      deploymentId: deployment.id,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -2616,7 +2592,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, poolAssignments: deployment.poolAssignments, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -2752,7 +2728,7 @@ app.post(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const vmPlan = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id, poolAssignments: deployment.poolAssignments,
+      deploymentId: deployment.id,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -2879,7 +2855,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, poolAssignments: deployment.poolAssignments, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -3009,7 +2985,7 @@ app.post(
     const classroom = await fetchClassroomById(deployment.classroom.id);
     await ensureDeploymentWorkstationPasswords(deployment, classroom, blueprint.guestPasswordMode);
     const terraformBlueprintPayload = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id, poolAssignments: deployment.poolAssignments,
+      deploymentId: deployment.id,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -3166,7 +3142,7 @@ app.post(
           ? 'destroy'
           : action;
     const terraformBlueprintPayload = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id, poolAssignments: deployment.poolAssignments,
+      deploymentId: deployment.id,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -3233,11 +3209,6 @@ app.delete(
       return;
     }
 
-    if (Object.keys(deployment.poolAssignments ?? {}).length) {
-      res.status(409).json({ error: 'This lab owns pool VMs. Use Destroy before deleting it.' });
-      return;
-    }
-
     const result = await dbPool.query('DELETE FROM lab_deployments WHERE id = $1 RETURNING id', [req.params.id]);
     res.json({ ok: true, id: result.rows[0].id });
   })
@@ -3247,16 +3218,7 @@ app.get(
   '/api/templates',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
-    const result = await dbPool.query(`SELECT t.*,
-      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'ready'
-        AND p.source_vmid = t.proxmox_template_vmid AND p.full_clone = t.full_clone AND p.error IS NULL
-        AND (t.os_type NOT IN ('windows11', 'windows-server') OR p.prepared_at IS NOT NULL)) AS pool_ready,
-      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status IN ('creating', 'preparing')) AS pool_pending,
-      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'preparing') AS pool_booting,
-      (SELECT COUNT(*) FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned') AS pool_unused,
-      (SELECT error FROM vm_pool p WHERE p.template_id = t.id AND p.status <> 'assigned' AND p.error IS NOT NULL LIMIT 1) AS pool_error,
-      (SELECT preparation_message FROM vm_pool p WHERE p.template_id = t.id AND p.status = 'preparing' AND p.preparation_message IS NOT NULL ORDER BY p.created_at LIMIT 1) AS pool_preparation_message
-      FROM vm_templates t ORDER BY name ASC`);
+    const result = await dbPool.query('SELECT * FROM vm_templates ORDER BY name ASC');
     res.json(result.rows.map(mapTemplate));
   })
 );
@@ -3274,8 +3236,8 @@ app.post(
     const id = uuidv4();
     const result = await dbPool.query(
       `INSERT INTO vm_templates
-        (id, name, description, os_type, language, proxmox_template_vmid, full_clone, pool_enabled, pool_size, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+        (id, name, description, os_type, language, proxmox_template_vmid, full_clone, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
        RETURNING *`,
       [
         id,
@@ -3284,9 +3246,7 @@ app.post(
         parsed.data.osType,
         parsed.data.language,
         parsed.data.proxmoxTemplateVmid,
-        parsed.data.fullClone,
-        parsed.data.poolEnabled,
-        parsed.data.poolSize
+        parsed.data.fullClone
       ]
     );
 
@@ -3312,8 +3272,6 @@ app.put(
               language = $5,
               proxmox_template_vmid = $6,
               full_clone = $7,
-              pool_enabled = $8,
-              pool_size = $9,
               updated_at = NOW()
         WHERE id = $1
         RETURNING *`,
@@ -3324,9 +3282,7 @@ app.put(
         parsed.data.osType,
         parsed.data.language,
         parsed.data.proxmoxTemplateVmid,
-        parsed.data.fullClone,
-        parsed.data.poolEnabled,
-        parsed.data.poolSize
+        parsed.data.fullClone
       ]
     );
 
@@ -3358,7 +3314,7 @@ app.delete(
       res.json({ ok: true, id: result.rows[0].id });
     } catch (error) {
       if (error?.code === '23503') {
-        res.status(409).json({ error: 'vm model is used by an existing blueprint or has pool VMs; disable its pool and wait for cleanup first' });
+        res.status(409).json({ error: 'vm model is used by an existing blueprint' });
         return;
       }
       throw error;
@@ -3928,64 +3884,6 @@ app.post('/api/settings/terraform', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY
     res.status(400).json({ error: err.message ?? 'unable to persist terraform settings' });
   }
 });
-
-const poolCleanupApi = () => {
-  const settings = readTerraformEnvSettings();
-  assertRequiredTerraformEnvSettings(settings);
-  const request = async (route, options = {}) =>
-    (await requestProxmoxJson(settings, route, { timeoutMs: 30000, ...options }))?.data;
-  const vmRoute = (node, vmid) => `nodes/${encodeURIComponent(node)}/qemu/${vmid}`;
-  const operation = async (node, route, method) => {
-    const task = await request(route, { method });
-    if (!task) throw new Error('Proxmox did not return a task ID');
-    await waitForProxmoxTask(settings, node, task);
-  };
-  return {
-    pools: () => request('pools'),
-    members: async pool => (await request(`pools/${encodeURIComponent(pool)}`))?.members ?? [],
-    resources: () => request('cluster/resources?type=vm'),
-    config: (node, vmid) => request(`${vmRoute(node, vmid)}/config`),
-    status: (node, vmid) => request(`${vmRoute(node, vmid)}/status/current`),
-    task: (node, upid) => request(`nodes/${encodeURIComponent(node)}/tasks/${encodeURIComponent(upid)}/status`),
-    stop: (node, vmid) => operation(node, `${vmRoute(node, vmid)}/status/stop`, 'POST'),
-    remove: (node, vmid) => operation(node, `${vmRoute(node, vmid)}?purge=1`, 'DELETE')
-  };
-};
-
-const protectedLabVmids = async () => {
-  const ids = new Set();
-  for (const row of await fetchDeploymentRows()) {
-    const deployment = mapDeployment(row);
-    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
-    const classroom = await fetchClassroomById(deployment.classroom.id);
-    const plan = buildTerraformDeploymentPayload({ deploymentId: deployment.id,
-      poolAssignments: deployment.poolAssignments, blueprint, classroom, teacher: deployment.teacher });
-    plan.vms.forEach(vm => ids.add(Number(vm.vmid)));
-  }
-  return ids;
-};
-
-app.get('/api/maintenance/vm-pools/cleanup', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (_req, res) => {
-  res.set('Cache-Control', 'no-store');
-  res.json(await listVmPoolCleanup({ db: dbPool, api: poolCleanupApi(),
-    pool: proxmoxInventoryPool(), protectedVmids: await protectedLabVmids() }));
-}));
-
-app.post('/api/maintenance/vm-pools/cleanup', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
-  const parsed = z.object({ selected: z.array(z.object({
-    kind: z.enum(['vm', 'record']), vmid: z.number().int().positive(),
-    node: z.string().min(1), name: z.string().min(1), digest: z.string().min(1)
-  })).min(1).max(10000) }).safeParse(req.body);
-  if (!parsed.success) return res.status(400).json({ error: 'Invalid pool cleanup selection' });
-  const lease = await tryJobLocks(dbPool, ['global:terraform-deploy']);
-  if (!lease) return res.status(409).json({ error: 'A deployment or pool replenishment is in progress. Retry when it finishes.' });
-  try {
-    const result = await emptyVmPool({ db: dbPool, api: poolCleanupApi(),
-      pool: proxmoxInventoryPool(), protectedVmids: await protectedLabVmids(),
-      selected: parsed.data.selected, assertHeld: () => lease.assertHeld() });
-    res.json(result);
-  } finally { await lease.release(); }
-}));
 
 app.post(
   '/api/settings/clean-orphaned-disks',

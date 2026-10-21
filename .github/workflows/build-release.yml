@@ -84,11 +84,6 @@ jobs:
             labfactory/worker=hurtlinb/labfactory:worker-${VERSION}
 
           # Update runner images in ConfigMap
-          if grep -q '^  NODE_ENV:' configmap-patch.yaml; then
-            sed -i 's|^  NODE_ENV:.*|  NODE_ENV: "production"|' configmap-patch.yaml
-          else
-            printf '\n  NODE_ENV: "production"\n' >> configmap-patch.yaml
-          fi
           sed -i "s|TERRAFORM_RUNNER_IMAGE:.*|TERRAFORM_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${VERSION}\"|" configmap-patch.yaml
           sed -i "s|ANSIBLE_RUNNER_IMAGE:.*|ANSIBLE_RUNNER_IMAGE: \"hurtlinb/labfactory:worker-${VERSION}\"|" configmap-patch.yaml
 

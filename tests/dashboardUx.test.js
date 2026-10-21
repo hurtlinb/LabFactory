@@ -50,84 +50,9 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, renderPoolStatus, renderDashboard, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
+  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
-
-test('pool startup reasons retain Preparing, but real failures show Error', t => {
-  const { api, document } = setup(t);
-  api.state.isAdmin = true;
-  const model = { name: 'Windows 2022 v2', poolEnabled: true, poolSize: 1, poolPending: 1, poolBooting: 1,
-    poolPreparationMessage: 'done.flag missing; retrying automatically' };
-  api.state.templates = [model];
-  api.renderPoolStatus();
-  const body = document.getElementById('vmPoolsBody');
-  assert.equal(body.querySelector('.pill').textContent, 'Preparing');
-  assert.match(body.textContent, /done.flag missing/);
-  model.poolError = 'Windows preparation timed out';
-  api.renderPoolStatus();
-  assert.equal(body.querySelector('.pill').textContent, 'Error');
-  assert.match(body.textContent, /timed out/);
-});
-
-test('pool cleanup previews actual inventory and cancellation sends no deletion', async t => {
-  const { document, w } = setup(t);
-  const calls = [];
-  w.fetch = async (url, options = {}) => {
-    calls.push({ url, ...options });
-    return { ok: true, json: async () => ({ pool: 'pool-dev', entries: [
-      { kind: 'vm', vmid: 900000, node: 'pve', name: '<orphan>', digest: 'abc', reason: null }
-    ] }) };
-  };
-  document.getElementById('emptyVmPoolButton').click();
-  await tick();
-  const dialog = document.getElementById('emptyVmPoolDialog');
-  assert(dialog.open);
-  assert.match(dialog.textContent, /pool-dev/);
-  assert.match(dialog.textContent, /<orphan>/);
-  assert.equal(dialog.querySelector('orphan'), null);
-  dialog.close('cancel');
-  await tick();
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].method, undefined);
-  assert.equal(document.getElementById('emptyVmPoolButton').disabled, false);
-});
-
-test('pool cleanup confirmation submits only eligible preview entries', async t => {
-  const { document, w } = setup(t);
-  const calls = [];
-  const eligible = { kind: 'vm', vmid: 900000, node: 'pve', name: 'orphan', digest: 'abc', reason: null };
-  w.fetch = async (url, options = {}) => {
-    calls.push({ url, ...options });
-    const data = options.method === 'POST' ? { deleted: [eligible], skipped: [], errors: [] }
-      : url === '/api/templates' ? []
-      : { pool: 'pool-dev', entries: [eligible, { ...eligible, vmid: 900001, reason: 'Assigned to a lab' }] };
-    return { ok: true, json: async () => data };
-  };
-  document.getElementById('emptyVmPoolButton').click();
-  await tick();
-  document.getElementById('emptyVmPoolDialog').close('confirm');
-  await tick();
-  const request = calls.find(call => call.method === 'POST');
-  assert.deepEqual(JSON.parse(request.body).selected, [eligible]);
-  assert.equal(document.getElementById('emptyVmPoolButton').disabled, false);
-});
-
-test('model form saves pool activation and capacity', async t => {
-  const { api, document, w, requests } = setup(t);
-  await api.bootstrap();
-  const form = document.getElementById('templateForm');
-  form.elements.name.value = 'Pooled Ubuntu';
-  form.elements.proxmoxTemplateVmid.value = '9000';
-  form.elements.poolEnabled.checked = true;
-  form.elements.poolSize.value = '5';
-  form.dispatchEvent(new w.Event('submit', { bubbles: true, cancelable: true }));
-  await tick();
-  const saved = requests.find(request => request.url === '/api/templates' && request.method === 'POST');
-  assert(saved);
-  assert.equal(JSON.parse(saved.body).poolEnabled, true);
-  assert.equal(JSON.parse(saved.body).poolSize, 5);
-});
 
 test('network preview and status labels describe real operations', () => {
   assert.equal(helpers.labStatusLabel('mixed'), 'Partially running');

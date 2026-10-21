@@ -33,8 +33,6 @@ function lockPool() {
 }
 const jobFor = (id, action = 'start') => ({
   id: `${id}-${action}`, data: { labInstanceId: id, deploymentId: id, action, runId: `run-${id}`, blueprint: { vms: [] } },
-  async updateData(data) { this.data = data; },
-  async updateProgress(progress) { this.progress = progress; },
   async moveToDelayed(timestamp, token) { this.delayed = { timestamp, token }; }
 });
 
@@ -110,13 +108,10 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   let waiting = 0, releasePower;
   const powerGate = new Promise(resolve => { releasePower = resolve; });
   const sandbox = {
-    Worker: class { constructor(_name, fn, config) { processor = fn; options = config; } on() {} async close() {} },
+    Worker: class { constructor(_name, fn, config) { processor = fn; options = config; } on() {} },
     Queue: class { async add() { return { id: 'child' }; } },
     terraformQueueName: 'tf', ansibleQueueName: 'ansible', dbPool: pool,
     AbortController, DelayedError, acquireJobLocks, workerConcurrency, setMaxListeners() {},
-    setInterval: () => ({ unref() {} }), clearInterval() {},
-    fetchProxmoxVmResources: async () => [],
-    claimPoolVms: async (_db, _id, vms) => ({ vms, waiting: [] }),
     process: { env: {} }, path, console: { log() {}, warn() {}, error() {} },
     terraformSourceDir: path.resolve('terraform'), terraformVarsPath: 'config.json',
     createTerraformJobDirectory: async source => { const dir = await createTerraformJobDirectory(source); directories.push(dir); return dir; },
@@ -151,17 +146,6 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   await processor(jobFor('d', 'deploy'), 'd');
   assert(commands.some(({ args }) => args.join(' ') === 'workspace select blueprint-d'));
   assert(commands.every(({ cwd, env }) => env.TF_DATA_DIR === path.join(cwd, '.terraform')));
-  const commandCount = commands.length;
-  sandbox.claimPoolVms = async (_db, _id, vms) => ({ vms, waiting: ['pending-vm'] });
-  const poolWaiting = jobFor('pool', 'deploy');
-  await assert.rejects(processor(poolWaiting, 'pool-token'), DelayedError);
-  assert.equal(poolWaiting.progress.type, 'pool-wait');
-  assert.equal(poolWaiting.progress.waitingCount, 1);
-  assert.equal(poolWaiting.delayed.token, 'pool-token');
-  assert.equal(commands.length, commandCount, 'no Terraform clone while waiting for pool');
-  assert.equal(pool.locks.size, 0, 'replenishment can acquire the deployment lock');
-  assert(!transitions.some(([id, status]) => id === 'pool' && status === 'failed'));
-  sandbox.claimPoolVms = async (_db, _id, vms) => ({ vms, waiting: [] });
   sandbox.runCommand = async () => { throw new Error('Terraform failed'); };
   await assert.rejects(processor(jobFor('failed', 'deploy'), 'failed'), /Terraform failed/);
   assert(transitions.some(([id, status]) => id === 'failed' && status === 'failed'));

@@ -1,10 +1,7 @@
 import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
-import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
-import { claimPoolVms, reconcileVmPools, proxmoxInventoryPool, clearPoolPreparationForReplacement } from '../lib/vmPool.js';
-import { windowsPoolOs, windowsPoolProbe, windowsPoolLabSettings, powershellCommand, poolLabNetwork } from '../lib/windowsPool.js';
-import { adoptPoolVm } from '../lib/adoptPoolVm.js';
+import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -103,9 +100,6 @@ const encodeRequestBody = body => {
   if (typeof body === 'string') {
     return { content: body, contentType: null };
   }
-  if (Object.values(body).some(Array.isArray)) {
-    return { content: JSON.stringify(body), contentType: 'application/json' };
-  }
   return {
     content: new URLSearchParams(
       Object.entries(body)
@@ -116,7 +110,7 @@ const encodeRequestBody = body => {
   };
 };
 
-const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null, timeoutMs = 60000 }) =>
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null }) =>
   new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
@@ -155,7 +149,6 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
       }
     );
     request.on('error', reject);
-    request.setTimeout(timeoutMs, () => request.destroy(new Error(`Proxmox request timed out after ${timeoutMs}ms`)));
     if (requestBody) {
       request.write(requestBody.content);
     }
@@ -188,23 +181,14 @@ const resolveTerraformParallelism = () => {
 const runWithConcurrency = async (items, concurrency, handler) => {
   const queue = [...items];
   const workerCount = Math.min(Math.max(1, Number(concurrency) || 1), queue.length);
-  let failed = false;
-  let firstError;
-  // Drain already-started operations before releasing the job's locks on failure.
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
-      while (queue.length && !failed) {
+      while (queue.length) {
         const item = queue.shift();
-        try {
-          await handler(item);
-        } catch (error) {
-          if (!failed) firstError = error;
-          failed = true;
-        }
+        await handler(item);
       }
     })
   );
-  if (failed) throw firstError;
 };
 
 const mergeVmTags = (...tagValues) => {
@@ -1101,21 +1085,14 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
 
           $bootTime = (Get-CimInstance Win32_OperatingSystem).LastBootUpTime
           $flagTime = (Get-Item -LiteralPath $flag).LastWriteTime
-          $prepared = "{{ pool_prepared | default(false) | bool | lower }}" -eq "true"
-          if ($prepared) {
-            $marker = 'C:\\ProgramData\\cloudbase-init\\labfactory-pool-ready.flag'
-            if (-not (Test-Path $marker) -or (Get-Content $marker -Raw).Trim() -ne "{{ pool_token | default('') }}") {
-              throw 'Prepared Windows pool marker is invalid'
-            }
-          }
-          if (-not $prepared -and $flagTime -lt $bootTime) {
+          if ($flagTime -lt $bootTime) {
             Write-Error "Cloudbase-Init done flag is stale: $flagTime is before boot $bootTime"
             exit 1
           }
 
           $cloudbaseServices = Get-Service -Name 'cloudbase-init','cloudbaseinit' -ErrorAction SilentlyContinue
           $activeServices = @($cloudbaseServices | Where-Object { $_.Status -in @('StartPending', 'Running', 'ContinuePending') })
-          if (-not $prepared -and $activeServices.Count -gt 0) {
+          if ($activeServices.Count -gt 0) {
             Write-Error "Cloudbase-Init service is still active: $($activeServices.Name -join ', ')"
             exit 1
           }
@@ -1128,8 +1105,6 @@ const buildWindowsReadinessInventory = (target, password) => `all:
     windows_readiness_targets:
       hosts:
         vm_${target.vmid}:
-          pool_prepared: ${Boolean(target.poolPrepared)}
-          pool_token: ${JSON.stringify(target.poolToken ?? '')}
           ansible_host: ${JSON.stringify(target.host)}
           ansible_user: ${JSON.stringify(target.user)}
           ansible_password: ${JSON.stringify(password)}
@@ -1248,8 +1223,6 @@ const buildWindowsReadinessTargets = blueprintVms =>
     .filter(vm => isWindowsOsType(vm.osType))
     .map(vm => ({
       vmid: vm.vmid,
-      poolPrepared: Boolean(vm.poolPrepared),
-      poolToken: vm.poolToken,
       name: vm.name,
       host: buildStaticVmIpAddress(vm),
       user: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language),
@@ -1444,234 +1417,6 @@ const createDeploymentReadinessReporter = job => {
 
 export const terraformQueueName = 'terraform-workflows';
 
-function poolApi(settings, lease) {
-  const request = async (route, method = 'GET', body) => {
-    lease.assertHeld();
-    const payload = await requestJson({
-      url: new URL(route, `${settings.proxmox_api_url.replace(/\/+$/, '')}/`),
-      method, body, ...proxmoxRequestOptions(settings)
-    });
-    return payload?.data;
-  };
-  const resource = async entry => (await fetchProxmoxVmResources(settings)).find(vm => Number(vm.vmid) === Number(entry.vmid));
-  const ownedConfig = async (entry, allowRunning = false) => {
-    const vm = await resource(entry);
-    if (!vm) return null;
-    if (vm.node !== entry.node) {
-      throw new Error(`Pool VM ${entry.vmid} changed externally: node ${vm.node}, expected ${entry.node}; manual review required`);
-    }
-    // Cluster inventory can lag behind clone completion and power transitions.
-    // Verify identity and power state directly on the owning node instead.
-    const config = await fetchVmConfig(settings, entry.node, entry.vmid);
-    if (config.name !== `labfactory-pool-${entry.vmid}` || isProxmoxTemplate(config.template)) {
-      throw new Error(`Pool VM ${entry.vmid} changed externally: name ${config.name}, template ${config.template ?? 0}; manual review required`);
-    }
-    if (config.description !== `LabFactory pool ${entry.ownership_token}`) {
-      throw new Error(`Pool VM ${entry.vmid} ownership does not match; manual review required`);
-    }
-    if (config.lock) throw new Error(`Pool VM ${entry.vmid} is locked (${config.lock})`);
-    if (!allowRunning) {
-      const current = await fetchVmCurrentStatus(settings, entry.node, entry.vmid);
-      if (current.status !== 'stopped') {
-        throw new Error(`Pool VM ${entry.vmid} must be stopped before this operation (current status: ${current.status ?? 'unknown'}); retrying on next reconciliation`);
-      }
-    }
-    return config;
-  };
-  const finish = async (entry, template = {}) => {
-    if (entry.task_id) {
-      try {
-        await waitForProxmoxTask(settings, entry.node, entry.task_id);
-      } catch (error) {
-        const task = await fetchProxmoxTaskStatus(settings, entry.node, entry.task_id);
-        if (task.status === 'stopped' && task.exitstatus && task.exitstatus !== 'OK') {
-          await dbPool.query("UPDATE vm_pool SET status = 'error' WHERE vmid = $1", [entry.vmid]);
-        }
-        throw error;
-      }
-    }
-    // An interrupted HTTP request can have created a task without returning its ID.
-    // Never assume that such a clone completed successfully.
-    if (!entry.task_id) throw new Error(`Pool VM ${entry.vmid}: clone task ID missing; manual review required`);
-    const config = await ownedConfig(entry);
-    if (!config) throw new Error(`Pool VM ${entry.vmid} missing after clone`);
-    const remove = Object.keys(config).filter(key => /^ipconfig\d+$/.test(key) || ['ciuser', 'cipassword', 'sshkeys', 'nameserver', 'searchdomain', 'cicustom'].includes(key));
-    const body = { onboot: 0, agent: 1 };
-    if (remove.length) body.delete = remove.join(',');
-    for (const key of Object.keys(config).filter(key => /^net\d+$/.test(key))) {
-      body[key] = `${String(config[key]).replace(/,link_down=[^,]+/g, '')},link_down=1`;
-    }
-    await request(`nodes/${entry.node}/qemu/${entry.vmid}/config`, 'PUT', body);
-    if (windowsPoolOs(template.os_type)) {
-      await request(`nodes/${entry.node}/qemu/${entry.vmid}/cloudinit`, 'PUT');
-      // Persist the boot phase before starting: restart reconciliation must not reset networking.
-      await dbPool.query("UPDATE vm_pool SET status = 'preparing', preparation_started_at = NOW(), error = NULL WHERE vmid = $1", [entry.vmid]);
-      await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/start`, 'POST');
-      return false;
-    }
-    return true;
-  };
-  return {
-    finish,
-    prepare: async entry => {
-      // Keep checking after the preparation deadline so a repaired guest can recover.
-      const overdue = Date.now() - new Date(entry.preparation_started_at).getTime() > WINDOWS_WINRM_WAIT_TIMEOUT_MS;
-      const waiting = reason => {
-        const error = new Error(`Pool VM ${entry.vmid}: ${overdue ? 'Windows preparation timed out; ' : ''}${reason}; retrying automatically`);
-        error.poolWaiting = !overdue;
-        throw error;
-      };
-      if (!await ownedConfig(entry, true)) throw new Error(`Preparing pool VM ${entry.vmid} is missing`);
-      const vm = await fetchVmCurrentStatus(settings, entry.node, entry.vmid);
-      if (vm.status === 'stopped') {
-        // Also upgrades cold inventory created by the previous worker version.
-        await request(`nodes/${entry.node}/qemu/${entry.vmid}/config`, 'PUT', { agent: 1, onboot: 0 });
-        await request(`nodes/${entry.node}/qemu/${entry.vmid}/cloudinit`, 'PUT');
-        await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/start`, 'POST');
-        return false;
-      }
-      const route = `nodes/${entry.node}/qemu/${entry.vmid}/agent`;
-      try {
-        if (entry.guest_probe_pid) {
-          if (!entry.guest_probe_started_at || Date.now() - new Date(entry.guest_probe_started_at).getTime() > 120000) {
-            await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
-            return waiting('QEMU readiness probe expired; starting a new probe next pass');
-          }
-          const result = await request(`${route}/exec-status?pid=${entry.guest_probe_pid}`);
-          if (!result?.exited) {
-            if (overdue) return waiting('QEMU readiness probe still running');
-            return false;
-          }
-          await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
-          const code = result.exitcode ?? result['exit-code'];
-          if (code != null && Number(code) === 0) return true;
-          if (Number(code) === 11) return waiting('done.flag missing; check Cloudbase-Init local_scripts_path and 99-finish.ps1');
-          if (Number(code) === 12) return waiting('done.flag predates this clone; check guest clock and Cloudbase-Init execution');
-          throw new Error(`Pool VM ${entry.vmid}: QEMU readiness script failed (exit code ${code ?? 'unknown'})`);
-        }
-        const result = await request(`${route}/exec`, 'POST', { command: powershellCommand(windowsPoolProbe(entry)) });
-        if (!result?.pid) throw new Error('QEMU Guest Agent did not return a process ID');
-        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = $2, guest_probe_started_at = NOW() WHERE vmid = $1', [entry.vmid, result.pid]);
-      } catch (error) {
-        if (error.statusCode === 401 || error.statusCode === 403) throw error;
-        // Agent startup/reboots are retried, but errors must remain visible in Maintenance.
-        await dbPool.query('UPDATE vm_pool SET guest_probe_pid = NULL, guest_probe_started_at = NULL WHERE vmid = $1', [entry.vmid]);
-        if (/QEMU guest agent is not running|guest-ping.*timeout|guest-exec-status.*(?:not found|not exist)|PID.*(?:not found|not exist)/i.test(error.message)) {
-          return waiting('Waiting for QEMU Guest Agent to become available');
-        }
-        throw error;
-      }
-      return false;
-    },
-    exists: async entry => {
-      if (!await ownedConfig(entry, Boolean(entry.prepared_at))) return false;
-      if (entry.prepared_at && (await resource(entry)).status === 'stopped') {
-        await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/start`, 'POST');
-      }
-      return true;
-    },
-    remove: async entry => {
-      if (entry.task_id) {
-        const task = await fetchProxmoxTaskStatus(settings, entry.node, entry.task_id);
-        if (task.status !== 'stopped') throw new Error(`Pool VM ${entry.vmid}: clone still running`);
-      } else if (entry.status === 'creating') {
-        throw new Error(`Pool VM ${entry.vmid}: uncertain clone; manual review required`);
-      }
-      if (!await ownedConfig(entry, Boolean(entry.preparation_started_at))) return;
-      if ((await resource(entry)).status !== 'stopped') {
-        const stopTask = await request(`nodes/${entry.node}/qemu/${entry.vmid}/status/stop`, 'POST');
-        await waitForProxmoxTask(settings, entry.node, stopTask);
-      }
-      const upid = await request(`nodes/${entry.node}/qemu/${entry.vmid}?purge=1`, 'DELETE');
-      await waitForProxmoxTask(settings, entry.node, upid);
-    },
-    create: async template => {
-      const resources = await fetchProxmoxVmResources(settings);
-      const source = resources.find(vm => Number(vm.vmid) === template.proxmox_template_vmid && isProxmoxTemplate(vm.template));
-      if (!source) throw new Error(`Pool source template ${template.proxmox_template_vmid} not found`);
-      let vmid;
-      do {
-        const next = await dbPool.query("SELECT nextval('vm_pool_vmid_seq') AS vmid");
-        vmid = Number(next.rows[0].vmid);
-      } while (resources.some(vm => Number(vm.vmid) === vmid));
-      const result = await dbPool.query(
-        `INSERT INTO vm_pool (vmid, template_id, source_vmid, full_clone, node, status)
-         VALUES ($1, $2, $3, $4, $5, 'creating') RETURNING *`,
-        [vmid, template.id, template.proxmox_template_vmid, template.full_clone, source.node]
-      );
-      const entry = result.rows[0];
-      try {
-        entry.task_id = await request(`nodes/${source.node}/qemu/${template.proxmox_template_vmid}/clone`, 'POST', {
-          newid: vmid, name: `labfactory-pool-${vmid}`, full: template.full_clone ? 1 : 0,
-          pool: proxmoxInventoryPool(), description: `LabFactory pool ${entry.ownership_token}`
-        });
-        await dbPool.query('UPDATE vm_pool SET task_id = $2 WHERE vmid = $1', [vmid, entry.task_id]);
-        if (await finish(entry, template)) {
-          await dbPool.query("UPDATE vm_pool SET status = 'ready', error = NULL WHERE vmid = $1", [vmid]);
-        }
-      } catch (error) {
-        if (error.statusCode >= 400 && error.statusCode < 500 && !entry.task_id) {
-          await dbPool.query("UPDATE vm_pool SET status = 'error' WHERE vmid = $1", [vmid]);
-        }
-        await dbPool.query('UPDATE vm_pool SET error = $2 WHERE vmid = $1', [vmid, String(error.message).slice(0, 2000)]);
-      }
-    }
-  };
-}
-
-async function configurePreparedWindows(settings, vm, definition, lease, signal) {
-  const request = async (suffix, method = 'GET', body) => {
-    lease.assertHeld();
-    signal.throwIfAborted();
-    const result = await requestJson({
-      url: new URL(`nodes/${vm.poolNode}/qemu/${vm.vmid}/${suffix}`, `${settings.proxmox_api_url.replace(/\/+$/, '')}/`),
-      method, body, ...proxmoxRequestOptions(settings)
-    });
-    return result?.data;
-  };
-  const config = await fetchVmConfig(settings, vm.poolNode, vm.vmid);
-  const mac = /(?:^|,)(?:virtio|e1000|e1000e|rtl8139|vmxnet3)=([0-9a-f:]+)/i.exec(config.net0 ?? '')?.[1];
-  const command = powershellCommand(windowsPoolLabSettings({
-    token: vm.poolToken, mac,
-    username: String(vm.windowsAdminUsername ?? '').trim() || getWindowsAdminUsername(vm.language),
-    password: definition.windows_admin_password || settings.windows_admin_password,
-    ipconfig: definition.ipconfig0
-  }));
-  await request('config', 'PUT', {
-    net0: poolLabNetwork(config.net0, settings, definition),
-    ...(config.digest ? { digest: config.digest } : {})
-  });
-  const resource = (await fetchProxmoxVmResources(settings)).find(item => Number(item.vmid) === Number(vm.vmid));
-  if (resource?.status === 'stopped') await request('status/start', 'POST');
-  const deadline = Date.now() + 5 * 60 * 1000;
-  let pid;
-  while (Date.now() < deadline) {
-    signal.throwIfAborted();
-    try {
-      if (!pid) {
-        const result = await request('agent/exec', 'POST', { command });
-        pid = result?.pid;
-      } else {
-        const result = await request(`agent/exec-status?pid=${pid}`);
-        if (result?.exited) {
-          if (Number(result.exitcode ?? result['exit-code']) !== 0) {
-            // Do not include command/output: the script contains the guest password.
-            const detail = Number(result.exitcode ?? result['exit-code']) === 21 ? ': lab network link did not become available' : '';
-            throw Object.assign(new Error(`Guest configuration failed for prepared VM ${vm.vmid}${detail}`), { terminal: true });
-          }
-          return;
-        }
-      }
-    } catch (error) {
-      if (error.terminal) throw error;
-      if (error.statusCode === 401 || error.statusCode === 403) throw new Error(`Guest agent access denied for VM ${vm.vmid}`);
-      pid = null;
-    }
-    await sleep(2000);
-  }
-  throw new Error(`Timed out configuring prepared VM ${vm.vmid} through QEMU Guest Agent`);
-}
-
 export function startTerraformWorker(connection) {
   const activeAbortControllers = new Map();
   const ansibleQueue = new Queue(ansibleQueueName, { connection });
@@ -1685,7 +1430,7 @@ export function startTerraformWorker(connection) {
       // on this shared signal — raise Node's default threshold (10) to match expected concurrency.
       setMaxListeners(128, abortController.signal);
       activeAbortControllers.set(String(job.id), abortController);
-      let readinessReporter = createDeploymentReadinessReporter(job);
+      const readinessReporter = createDeploymentReadinessReporter(job);
       const env = {
         ...process.env,
         TF_IN_AUTOMATION: '1'
@@ -1738,12 +1483,6 @@ export function startTerraformWorker(connection) {
           };
         }
         if (action === 'deploy') {
-          if (replaceVmids.length && job.data.deploymentId) {
-            await clearPoolPreparationForReplacement(dbPool, job.data.deploymentId, replaceVmids);
-            await job.updateData({ ...job.data, blueprint: { ...job.data.blueprint,
-              vms: job.data.blueprint.vms.map(vm => replaceVmids.includes(Number(vm.vmid)) ? { ...vm, poolPrepared: false } : vm)
-            } });
-          }
           await readinessReporter.publish();
         }
 
@@ -1764,20 +1503,6 @@ export function startTerraformWorker(connection) {
           assertRequiredTerraformEnvSettings(merged);
           merged.proxmox_nodes = await resolveProxmoxTargetNodes(merged);
           merged.proxmox_parallel = terraformParallelism;
-          if (action === 'deploy' && job.data.deploymentId && !replaceVmids.length) {
-            const resources = await fetchProxmoxVmResources(merged);
-            const { vms, waiting } = await claimPoolVms(dbPool, job.data.deploymentId, job.data.blueprint.vms,
-              new Set(resources.map(vm => Number(vm.vmid))));
-            await job.updateData({ ...job.data, blueprint: { ...job.data.blueprint, vms } });
-            if (waiting.length) {
-              await job.updateProgress({ type: 'pool-wait', waitingCount: waiting.length, totalVmCount: vms.length });
-              await safeUpdateLifecycleStatus(job.data.labInstanceId, 'queued', { action, jobId: String(job.id), runId: job.data.runId });
-              await job.moveToDelayed(Date.now() + 30000, token);
-              throw new DelayedError();
-            }
-            readinessReporter = createDeploymentReadinessReporter(job);
-            await readinessReporter.publish();
-          }
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
@@ -1788,7 +1513,6 @@ export function startTerraformWorker(connection) {
             );
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
               vmid: Number(vm.vmid),
-              target_node: vm.poolNode ?? null,
               name: vm.name,
               hostname: vm.customNameEnabled ? String(vm.hostname ?? '').trim() || null : null,
               os_type: vm.osType ?? 'other',
@@ -1974,7 +1698,6 @@ export function startTerraformWorker(connection) {
             };
           }
         } catch (err) {
-          if (err instanceof DelayedError) throw err;
           throw new Error(
             `Unable to prepare terraform vars (looked at ${terraformVarsPath}): ${err.message}`
           );
@@ -2006,40 +1729,6 @@ export function startTerraformWorker(connection) {
         }
 
         let planOutput = '';
-        // Import is idempotent across worker restarts. Keep the reservation until lab destruction.
-        if (blueprintVms.some(vm => vm.poolNode)) {
-          const state = await runCommand('terraform', ['state', 'list'], { cwd: terraformDir, env, signal: abortController.signal });
-          const addresses = new Set(String(state).trim().split(/\r?\n/));
-          const resources = await fetchProxmoxVmResources(merged);
-          for (const vm of blueprintVms.filter(vm => vm.poolNode)) {
-            const address = `proxmox_vm_qemu.lab_vm["${vm.vmid}"]`;
-            if (addresses.has(address)) continue;
-            const resource = resources.find(item => Number(item.vmid) === Number(vm.vmid));
-            if (!resource) {
-              if (action === 'destroy') continue;
-              throw new Error(`Assigned pool VM ${vm.vmid} is missing`);
-            }
-            const reservation = await dbPool.query(
-              "SELECT ownership_token FROM vm_pool WHERE vmid = $1 AND deployment_id = $2 AND status = 'assigned'",
-              [vm.vmid, job.data.deploymentId]
-            );
-            const config = await fetchVmConfig(merged, resource.node, vm.vmid);
-            if (!reservation.rows[0] || config.description !== `LabFactory pool ${reservation.rows[0].ownership_token}`) {
-              throw new Error(`Assigned pool VM ${vm.vmid} ownership does not match; refusing import`);
-            }
-            lease.assertHeld();
-            if (action === 'deploy') {
-              await adoptPoolVm({ vm, resource, config, token: reservation.rows[0].ownership_token,
-                targetPool: merged.vm_pool, inventoryPool: proxmoxInventoryPool(), assertHeld: () => lease.assertHeld(),
-                request: (route, body) => requestJson({
-                  url: new URL(route, `${merged.proxmox_api_url.replace(/\/+$/, '')}/`),
-                  method: 'PUT', body, ...proxmoxRequestOptions(merged)
-                }) });
-            }
-            await runCommand('terraform', ['import', '-input=false', `-var-file=${preparedVarFile}`, address, `${resource.node}/qemu/${vm.vmid}`],
-              { cwd: terraformDir, env, signal: abortController.signal });
-          }
-        }
         if (action === 'destroy') {
           planOutput = await runCommand(
             'terraform',
@@ -2050,18 +1739,6 @@ export function startTerraformWorker(connection) {
             console.warn(`Post-destroy volume cleanup failed for deployment ${deploymentLabel} (${formatProxmoxError(error)})`);
           });
         } else {
-          // Windows first boot is complete. Connect to the lab network first,
-          // then apply credentials and static IP through QGA.
-          const preparedWindows = scopedBlueprintVms.filter(vm => vm.poolPrepared && windowsPoolOs(vm.osType) && !replaceVmids.includes(Number(vm.vmid)));
-          let configuredWindows = 0;
-          await runWithConcurrency(preparedWindows, Math.min(terraformParallelism, 10), async vm => {
-            abortController.signal.throwIfAborted();
-            lease.assertHeld();
-            console.log(`Configuring prepared Windows VM ${vm.vmid} for deployment ${deploymentLabel}`);
-            await configurePreparedWindows(merged, vm, merged.vm_definitions.find(item => item.vmid === Number(vm.vmid)), lease, abortController.signal);
-            configuredWindows += 1;
-            console.log(`Configured prepared Windows VM ${vm.vmid} (${configuredWindows}/${preparedWindows.length}) for deployment ${deploymentLabel}`);
-          });
           if (replaceVmids.length > 0) {
             const replaceVmDefinitions = (Array.isArray(merged.vm_definitions) ? merged.vm_definitions : [])
               .filter(vm => replaceVmids.includes(Number(vm.vmid)));
@@ -2265,35 +1942,6 @@ export function startTerraformWorker(connection) {
     for (const controller of activeAbortControllers.values()) {
       controller.abort(new Error('Job cancelled from dashboard clear history action'));
     }
-  };
-
-  let poolWork = null;
-  let poolClosing = false;
-  const replenish = () => {
-    if (poolClosing || poolWork || worker.isPaused()) return;
-    poolWork = (async () => {
-      // Use the same lock as foreground deployments to avoid clone/import races.
-      const lease = await tryJobLocks(dbPool, ['global:terraform-deploy']);
-      if (!lease) return;
-      try {
-        const raw = JSON.parse(await readFile(terraformVarsPath, 'utf8'));
-        const settings = { ...defaultTerraformSettings, ...sanitizeSettingsInput(raw), ...readTerraformEnvSettings() };
-        assertRequiredTerraformEnvSettings(settings);
-        await reconcileVmPools(dbPool, poolApi(settings, lease));
-      } finally { await lease.release(); }
-    })().catch(error => console.error('VM pool replenishment failed:', error.message))
-      .finally(() => { poolWork = null; });
-  };
-  const poolTimer = setInterval(replenish, 30000);
-  poolTimer.unref();
-  const closeWorker = worker.close.bind(worker);
-  worker.close = async (...args) => {
-    poolClosing = true;
-    clearInterval(poolTimer);
-    await poolWork;
-    await closeWorker(...args);
-    await ansibleQueue.close();
-    await terraformQueue.close();
   };
 
   return worker;

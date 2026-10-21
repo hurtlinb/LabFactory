@@ -55,7 +55,7 @@ locals {
 
   vm_target_nodes = {
     for index, vm in local.vm_definitions :
-    tostring(vm.vmid) => coalesce(try(vm.target_node, null), local.target_nodes[index % length(local.target_nodes)])
+    tostring(vm.vmid) => local.target_nodes[index % length(local.target_nodes)]
   }
 
   windows_vm_definitions = {
@@ -75,12 +75,6 @@ locals {
 
 resource "proxmox_vm_qemu" "lab_vm" {
   for_each = local.vm_definitions_by_id
-
-  # Clone provenance is not returned by Proxmox on import. It is a creation-only
-  # setting; explicit workstation replacement still clones the configured source.
-  lifecycle {
-    ignore_changes = [clone, full_clone]
-  }
 
   name        = each.value.name
   target_node = local.vm_target_nodes[each.key]
