@@ -325,6 +325,20 @@ Main SQL migrations:
 
 The dashboard keeps track of applied migrations with `schema_migrations`.
 
+### VM pool rollback cleanup
+
+Migration `029-remove-vm-pools.sql` removes the pool inventory table and sequence,
+the `pool_enabled` / `pool_size` template columns and deployment `pool_assignments`.
+It is safe to run again or on an installation that never had pools. Existing lab
+and template rows, Terraform state and migration history are retained.
+
+Before starting the rollback dashboard (which applies migrations automatically),
+stop workers running the pool implementation and let active jobs finish. Deploy
+the rollback workers before resuming jobs. Back up the database before migration.
+Proxmox inventory VMs are not deleted by this SQL cleanup; list and clean up any
+unused inventory separately before discarding its database records. VMs already
+assigned to labs must be retained.
+
 ## Repository Layout
 - [dashboard/](./dashboard): UI and API server
 - [workers/](./workers): BullMQ workers
