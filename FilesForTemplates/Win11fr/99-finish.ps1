@@ -1,6 +1,8 @@
 # 99-finish.ps1
 # This script runs at the end of Cloudbase-Init via LocalScriptsPlugin
-# It creates a flag file that Terraform can wait for.
+# LabFactory reads this flag through QEMU Guest Agent, without a network connection.
+# Fail instead of reporting success if writing the marker fails.
+$ErrorActionPreference = 'Stop'
 
 New-Item -ItemType Directory -Force -Path "C:\ProgramData\cloudbase-init" | Out-Null
 

@@ -52,3 +52,22 @@ and static network settings; Cloudbase-Init and Sysprep are not run again.
 
 Command:
 sysprep /generalize /oobe /shutdown /mode:vm /unattend:C:\path\to\unattend.xml
+
+Windows 11 French template (Win11fr):
+1. Install Cloudbase-Init and QEMU Guest Agent in the source VM. Ensure the
+   QEMU Guest Agent service starts automatically and is enabled in Proxmox.
+2. Copy Win11fr/cloudbase-init.conf into the Cloudbase-Init conf directory,
+   and Win11fr/99-finish.ps1 into its LocalScripts directory (paths above).
+3. Copy Win11fr/unattend.xml to C:\unattend.xml. Use this file, not
+   unattend_old.xml. The local account is Administrateur, matching the config.
+   WinRM commands run in oobeSystem, the supported FirstLogonCommands pass.
+4. Remove both old markers and re-enable Cloudbase-Init using the commands
+   above, immediately before sealing. Do not run 99-finish.ps1 manually.
+5. Run from an elevated console:
+   C:\Windows\System32\Sysprep\Sysprep.exe /generalize /oobe /shutdown /mode:vm /unattend:C:\unattend.xml
+6. Convert the stopped VM to a Proxmox template without booting it again.
+   Recreate existing inventory clones so they receive the updated files.
+
+Validate with a pool size of one: the clone must start, create a fresh
+done.flag automatically, and become Ready while remaining powered on.
+These file checks do not replace a first-boot test of the rebuilt template.

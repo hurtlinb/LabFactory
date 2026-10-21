@@ -188,14 +188,23 @@ const resolveTerraformParallelism = () => {
 const runWithConcurrency = async (items, concurrency, handler) => {
   const queue = [...items];
   const workerCount = Math.min(Math.max(1, Number(concurrency) || 1), queue.length);
+  let failed = false;
+  let firstError;
+  // Drain already-started operations before releasing the job's locks on failure.
   await Promise.all(
     Array.from({ length: workerCount }, async () => {
-      while (queue.length) {
+      while (queue.length && !failed) {
         const item = queue.shift();
-        await handler(item);
+        try {
+          await handler(item);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+        }
       }
     })
   );
+  if (failed) throw firstError;
 };
 
 const mergeVmTags = (...tagValues) => {
@@ -2043,9 +2052,16 @@ export function startTerraformWorker(connection) {
         } else {
           // Windows first boot is complete. Connect to the lab network first,
           // then apply credentials and static IP through QGA.
-          for (const vm of scopedBlueprintVms.filter(vm => vm.poolPrepared && windowsPoolOs(vm.osType) && !replaceVmids.includes(Number(vm.vmid)))) {
+          const preparedWindows = scopedBlueprintVms.filter(vm => vm.poolPrepared && windowsPoolOs(vm.osType) && !replaceVmids.includes(Number(vm.vmid)));
+          let configuredWindows = 0;
+          await runWithConcurrency(preparedWindows, Math.min(terraformParallelism, 10), async vm => {
+            abortController.signal.throwIfAborted();
+            lease.assertHeld();
+            console.log(`Configuring prepared Windows VM ${vm.vmid} for deployment ${deploymentLabel}`);
             await configurePreparedWindows(merged, vm, merged.vm_definitions.find(item => item.vmid === Number(vm.vmid)), lease, abortController.signal);
-          }
+            configuredWindows += 1;
+            console.log(`Configured prepared Windows VM ${vm.vmid} (${configuredWindows}/${preparedWindows.length}) for deployment ${deploymentLabel}`);
+          });
           if (replaceVmids.length > 0) {
             const replaceVmDefinitions = (Array.isArray(merged.vm_definitions) ? merged.vm_definitions : [])
               .filter(vm => replaceVmids.includes(Number(vm.vmid)));
