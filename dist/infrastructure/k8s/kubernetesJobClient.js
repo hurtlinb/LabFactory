@@ -59,25 +59,25 @@ export class KubernetesJobClient {
                 }
             }
         };
-        const result = await this.batchApi.createNamespacedJob(this.namespace, jobManifest);
+        const result = await this.batchApi.createNamespacedJob({ namespace: this.namespace, body: jobManifest });
         const name = result?.body?.metadata?.name ?? result?.metadata?.name ?? options.jobName;
         logger.info({ job: name, executionId: options.executionId }, 'Created Kubernetes job');
         return result?.body ?? result;
     }
     async readJob(jobName) {
-        const result = await this.batchApi.readNamespacedJob(jobName, this.namespace);
+        const result = await this.batchApi.readNamespacedJob({ name: jobName, namespace: this.namespace });
         return result?.body ?? result;
     }
     async listJobPodNames(jobName) {
         const labelSelector = `job-name=${jobName}`;
-        const result = await this.coreApi.listNamespacedPod(this.namespace, undefined, undefined, undefined, undefined, labelSelector);
+        const result = await this.coreApi.listNamespacedPod({ namespace: this.namespace, labelSelector });
         const items = result?.items ?? result?.body?.items ?? [];
         return items
             .map((item) => item?.metadata?.name)
             .filter((name) => Boolean(name));
     }
     async readPodLogs(podName, containerName = 'run') {
-        const result = await this.coreApi.readNamespacedPodLog(podName, this.namespace, containerName, undefined, false, undefined, undefined, undefined, undefined, false);
+        const result = await this.coreApi.readNamespacedPodLog({ name: podName, namespace: this.namespace, container: containerName, follow: false, previous: false });
         return typeof result === 'string' ? result : (result?.body ?? '');
     }
 }

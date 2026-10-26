@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
+import { KubeConfig, BatchV1Api, CoreV1Api } from '@kubernetes/client-node';
 import { runKubernetesTaskBlock as execute, taskJobManifest } from '../lib/runKubernetesTasks.js';
 import { buildTaskInventory } from '../lib/runAnsibleTasks.js';
 
@@ -9,13 +12,13 @@ function fakeApi(states = [{ containerStatuses: [{ state: { terminated: { exitCo
   const events = [];
   let lastJob;
   return { events, namespace: 'test', batch: {
-    async createNamespacedJob(namespace, job) { events.push(['job', job]); lastJob = job; return { body: { metadata: { ...job.metadata, uid: 'job-uid' } } }; },
-    async readNamespacedJob() { return { body: { status: {} } }; },
+    async createNamespacedJob({ namespace, body: job }) { assert.equal(namespace, 'test'); events.push(['job', job]); lastJob = job; return { metadata: { ...job.metadata, uid: 'job-uid' } }; },
+    async readNamespacedJob() { return { status: {} }; },
     async deleteNamespacedJob(...args) { events.push(['deleteJob', ...args]); }
   }, core: {
-    async createNamespacedSecret(namespace, secret) { events.push(['secret', secret]); },
-    async listNamespacedPod() { return { body: { items: [{ metadata: { name: lastJob.metadata.name + '-pod' }, status: states.length > 1 ? states.shift() : states[0] }] } }; },
-    async readNamespacedPodLog() { return { body: 'Ansible output' }; },
+    async createNamespacedSecret({ namespace, body: secret }) { assert.equal(namespace, 'test'); events.push(['secret', secret]); },
+    async listNamespacedPod() { return { items: [{ metadata: { name: lastJob.metadata.name + '-pod' }, status: states.length > 1 ? states.shift() : states[0] }] }; },
+    async readNamespacedPodLog() { return 'Ansible output'; },
     async deleteNamespacedSecret(...args) { events.push(['deleteSecret', ...args]); }
   } };
 }
@@ -81,4 +84,85 @@ test('API failures never expose request bodies and cleanup follows a Secret crea
 test('image pull failures produce actionable errors rather than hanging', async t => {
   const api = fakeApi([{ containerStatuses: [{ state: { waiting: { reason: 'ImagePullBackOff', message: 'image not found' } } }] }]);
   await assert.rejects(runKubernetesTaskBlock({ playbook: '', inventory: '', api }), /ImagePullBackOff: image not found/);
+});
+
+test('real SDK serializes requests, reads logs, sanitizes errors and cleans up after cancellation', async t => {
+  for (const scenario of ['success', 'forbidden', 'cancel', 'timeout']) {
+    await t.test(scenario, async t => {
+      const requests = [];
+      const controller = new AbortController();
+      let jobName;
+      const server = createServer(async (req, res) => {
+        const chunks = [];
+        for await (const chunk of req) chunks.push(chunk);
+        const payload = Buffer.concat(chunks).toString();
+        const url = new URL(req.url, 'http://localhost');
+        requests.push({ method: req.method, url, payload: payload && JSON.parse(payload) });
+        res.setHeader('Content-Type', 'application/json');
+        if (req.method === 'DELETE') {
+          res.statusCode = 404;
+          res.end(JSON.stringify({ kind: 'Status', code: 404, message: 'Already gone' }));
+        } else if (req.method === 'POST' && url.pathname.endsWith('/jobs')) {
+          jobName = JSON.parse(payload).metadata.name;
+          res.statusCode = 201;
+          res.end(JSON.stringify({ metadata: { name: jobName, uid: 'real-uid' } }));
+        } else if (req.method === 'POST') {
+          res.statusCode = scenario === 'forbidden' ? 403 : 201;
+          res.end(JSON.stringify(scenario === 'forbidden'
+            ? { kind: 'Status', code: 403, message: 'private-password' }
+            : { metadata: { name: jobName } }));
+        } else if (scenario === 'cancel') {
+          controller.abort(new Error('Cancelled in flight'));
+        } else if (scenario === 'timeout') {
+          // Leave the request pending to exercise the SDK transport deadline.
+        } else if (url.pathname.endsWith('/log')) {
+          res.setHeader('Content-Type', 'text/plain');
+          res.end('Real SDK output');
+        } else if (url.pathname.endsWith('/pods')) {
+          res.end(JSON.stringify({ items: [{ metadata: { name: `${jobName}-pod` }, status: { containerStatuses: [{ state: { terminated: { exitCode: 0 } } }] } }] }));
+        } else {
+          res.end(JSON.stringify({ status: { succeeded: 1 } }));
+        }
+      });
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      t.after(async () => {
+        server.closeAllConnections();
+        await new Promise(resolve => server.close(resolve));
+      });
+      const config = new KubeConfig();
+      config.loadFromOptions({
+        clusters: [{ name: 'local', server: `http://127.0.0.1:${server.address().port}`, skipTLSVerify: true }],
+        users: [{ name: 'test' }], contexts: [{ name: 'test', cluster: 'local', user: 'test' }], currentContext: 'test'
+      });
+      const api = { namespace: 'test', batch: config.makeApiClient(BatchV1Api), core: config.makeApiClient(CoreV1Api) };
+      const result = runKubernetesTaskBlock({ api, playbook: 'tasks', inventory: 'private-password', signal: controller.signal });
+      if (scenario === 'success') {
+        assert.equal((await result).output, 'Real SDK output');
+        const pods = requests.find(r => r.url.pathname.endsWith('/pods'));
+        assert.equal(pods.url.searchParams.get('labelSelector'), `job-name=${jobName}`);
+        const logs = requests.find(r => r.url.pathname.endsWith('/log'));
+        assert.equal(logs.url.searchParams.get('limitBytes'), '262144');
+        assert.equal(logs.url.searchParams.get('container'), 'ansible');
+      } else if (scenario === 'forbidden') {
+        await assert.rejects(result, error => {
+          assert.equal(error.message, 'Kubernetes API request failed (HTTP 403)');
+          assert(!JSON.stringify(error).includes('private-password'));
+          return true;
+        });
+      } else if (scenario === 'cancel') {
+        await assert.rejects(result, /Cancelled in flight/);
+      } else {
+        await assert.rejects(result, /timeout/i);
+      }
+      const secret = requests.find(r => r.method === 'POST' && r.url.pathname.endsWith('/secrets'));
+      assert.equal(secret.payload.metadata.ownerReferences[0].uid, 'real-uid');
+      const cleanup = requests.filter(r => r.method === 'DELETE');
+      assert.equal(cleanup.length, 2);
+      assert.equal(cleanup[0].url.pathname, `/apis/batch/v1/namespaces/test/jobs/${jobName}`);
+      assert.equal(cleanup[0].url.searchParams.get('propagationPolicy'), 'Background');
+      assert.equal(cleanup[0].url.searchParams.get('gracePeriodSeconds'), '0');
+      assert.equal(cleanup[1].url.pathname, `/api/v1/namespaces/test/secrets/${jobName}`);
+    });
+  }
 });
