@@ -8,6 +8,39 @@ import vm from 'node:vm';
 import { DelayedError } from 'bullmq';
 import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
+import { checkPlannedVmids } from '../lib/vmidAvailability.js';
+
+const vmPlan = (actions = ['create'], before = null, vmid = 49690) => ({
+  format_version: '1.2', resource_changes: [{ address: 'proxmox_vm_qemu.lab_vm', type: 'proxmox_vm_qemu', change: { actions, before, after: { vmid } } }]
+});
+
+test('VMID preflight accepts free IDs and blocks occupied VM, template and container IDs', async () => {
+  await checkPlannedVmids(vmPlan(), async () => []);
+  for (const existing of [
+    { type: 'qemu', status: 'stopped' }, { type: 'qemu', template: 1 }, { type: 'lxc' }
+  ]) {
+    await assert.rejects(checkPlannedVmids(vmPlan(), async () => [{ ...existing, vmid: 49690, node: 'pve1', name: 'other-lab' }]), /VMID conflict.*49690.*other-lab/);
+  }
+});
+
+test('VMID preflight permits only replacements owned by the selected Terraform state', async () => {
+  const inventory = async () => [{ vmid: 49690, node: 'pve1', type: 'qemu' }];
+  const before = { vmid: 49690, id: 'pve1/qemu/49690' };
+  await checkPlannedVmids(vmPlan(['delete', 'create'], before), inventory);
+  await checkPlannedVmids(vmPlan(['update'], before), inventory);
+  await assert.rejects(checkPlannedVmids(vmPlan(['create', 'delete'], before), inventory), /VMID conflict/);
+  await assert.rejects(checkPlannedVmids(vmPlan(['delete', 'create'], { ...before, id: 'pve2/qemu/49690' }), inventory), /VMID conflict/);
+});
+
+test('VMID preflight fails closed on unavailable inventory, unknown IDs and duplicate IDs', async () => {
+  await assert.rejects(checkPlannedVmids(vmPlan(), async () => { throw new Error('Proxmox unavailable'); }), /Proxmox unavailable/);
+  await assert.rejects(checkPlannedVmids(vmPlan(), async () => null), /invalid Proxmox inventory/);
+  await assert.rejects(checkPlannedVmids(vmPlan(['create'], null, 0), async () => []), /known VMID/);
+  const unknown = vmPlan(); unknown.resource_changes[0].change.after_unknown = { vmid: true };
+  await assert.rejects(checkPlannedVmids(unknown, async () => []), /known VMID/);
+  const duplicate = vmPlan(); duplicate.resource_changes.push(duplicate.resource_changes[0]);
+  await assert.rejects(checkPlannedVmids(duplicate, async () => []), /Duplicate VMID/);
+});
 
 function lockPool() {
   const locks = new Map(), clients = [];
@@ -126,7 +159,8 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     waitForVmPowerState: async () => { waiting++; await powerGate; return true; },
     waitForGuestReadiness: async () => ({ readyVmids: new Set(), failedVmids: new Set() }),
     STOP_STATE_CONFIRMATION_TIMEOUT_MS: 10,
-    runCommand: async (_command, args, opts) => { commands.push({ args, ...opts }); return ''; }
+    checkPlannedVmids, fetchProxmoxVmResources: async () => [],
+    runCommand: async (_command, args, opts) => { commands.push({ args, ...opts }); return args[0] === 'show' ? '{"format_version":"1.2","resource_changes":[]}' : ''; }
   };
   t.after(async () => { releasePower(); for (const dir of directories) await fs.rm(dir, { recursive: true, force: true }); });
   vm.runInNewContext(source.slice(source.indexOf('export function startTerraformWorker'), source.indexOf('export async function resetStalledTerraformDeployments')).replace('export function', 'function') + '\nstartTerraformWorker({});', sandbox);
@@ -146,6 +180,11 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   await processor(jobFor('d', 'deploy'), 'd');
   assert(commands.some(({ args }) => args.join(' ') === 'workspace select blueprint-d'));
   assert(commands.every(({ cwd, env }) => env.TF_DATA_DIR === path.join(cwd, '.terraform')));
+  sandbox.runCommand = async (_command, args) => args[0] === 'show'
+    ? JSON.stringify({ format_version: '1.2', resource_changes: [{ type: 'proxmox_vm_qemu', change: { actions: ['create'], after: { vmid: 49690 } } }] })
+    : (assert.notEqual(args[0], 'apply', 'must not apply a conflicting plan'), '');
+  sandbox.fetchProxmoxVmResources = async () => [{ vmid: 49690, name: 'other-lab', node: 'pve1', type: 'qemu' }];
+  await assert.rejects(processor(jobFor('conflict', 'deploy'), 'conflict'), /VMID conflict.*49690/);
   sandbox.runCommand = async () => { throw new Error('Terraform failed'); };
   await assert.rejects(processor(jobFor('failed', 'deploy'), 'failed'), /Terraform failed/);
   assert(transitions.some(([id, status]) => id === 'failed' && status === 'failed'));

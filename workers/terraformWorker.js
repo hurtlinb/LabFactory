@@ -3,6 +3,7 @@ import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
+import { checkPlannedVmids } from '../lib/vmidAvailability.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -311,7 +312,8 @@ const fetchProxmoxVmResources = async envSettings => {
     method: 'GET',
     ...proxmoxRequestOptions(envSettings)
   });
-  return Array.isArray(payload?.data) ? payload.data : [];
+  if (!Array.isArray(payload?.data)) throw new Error('Invalid Proxmox VM inventory response');
+  return payload.data;
 };
 
 const fetchVmCurrentStatus = async (envSettings, node, vmid) => {
@@ -1759,6 +1761,14 @@ export function startTerraformWorker(connection) {
             );
 
             for (let attempt = 0; ; attempt += 1) {
+              // Recheck the actual saved plan before every apply, including retries.
+              // JSON plans contain secrets: never stream their contents into logs.
+              lease.assertHeld();
+              const planJson = await runCommand('terraform', ['show', '-json', 'tfplan'], {
+                cwd: terraformDir, env, signal: abortController.signal, quiet: true
+              });
+              await checkPlannedVmids(JSON.parse(planJson), () => fetchProxmoxVmResources(merged));
+              lease.assertHeld();
               try {
                 await runCommand(
                   'terraform',

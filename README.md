@@ -175,6 +175,8 @@ Each Terraform job uses its own temporary configuration, variables, plan and `TF
 Deploy both updated worker services together before using concurrent jobs; older workers do not acquire these locks. These limits control jobs, separately from Terraform's per-job VM parallelism and Ansible's per-job customization concurrency.
 Terraform is used for deployment and destruction.
 
+Before each Terraform apply (including retries), the worker checks the saved plan's VM creations against the Proxmox cluster inventory. Occupied VM, template and LXC IDs block the entire apply with a conflict message; duplicate or unknown planned IDs and inventory failures also block creation. A destroy-before-create replacement is allowed only when the Terraform state identifies that same VM on that node. This check does not reassign IDs or delete conflicting VMs. The Proxmox API token must have visibility of the full VM inventory. The check is not an atomic reservation against other applications creating VMs concurrently; Proxmox remains the final safeguard against collisions.
+
 Important points:
 - Proxmox authentication is done with API token environment variables
 - LabFactory stores template VMIDs in the database
