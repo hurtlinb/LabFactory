@@ -1,3 +1,4 @@
+import { runReadinessCommand } from '../lib/readinessConcurrency.js';
 import { activeAnsibleTasks } from '../lib/ansibleTasks.js';
 import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { runAnsibleTaskBlock } from '../lib/runAnsibleTasks.js';
@@ -67,7 +68,7 @@ const buildWindowsReconnectInventory = (target, password) => `all:
 
 // Each Windows VM gets its own independent ansible-playbook invocation, retried on its own
 // schedule — no shared process, round, or timeout window with any other VM. A slow or hanging
-// guest can therefore never delay or wipe out progress already made on another one.
+// Attempts share a worker-wide concurrency limit; retry backoff holds no slot.
 const waitForWindowsHostReconnect = async ({ target, password, signal }) => {
   const startedAt = Date.now();
   let lastError = null;
@@ -86,7 +87,7 @@ const waitForWindowsHostReconnect = async ({ target, password, signal }) => {
       await fs.writeFile(inventoryPath, buildWindowsReconnectInventory(target, password), { encoding: 'utf8', mode: 0o600 });
       await fs.writeFile(playbookPath, windowsReconnectCheckPlaybook, 'utf8');
 
-      await runCommand(
+      await runReadinessCommand(
         'timeout',
         [`${WINDOWS_RECONNECT_ATTEMPT_TIMEOUT_SECONDS}s`, 'ansible-playbook', '--inventory', inventoryPath, playbookPath],
         { cwd: ansibleDir, env: { ...process.env }, signal }

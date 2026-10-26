@@ -1,3 +1,4 @@
+import { runReadinessCommand } from '../lib/readinessConcurrency.js';
 import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
@@ -1146,7 +1147,7 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
     }
 
     try {
-      await runCommand(
+      await runReadinessCommand(
         'timeout',
         [
           `${LINUX_SSH_ATTEMPT_TIMEOUT_SECONDS}s`,
@@ -1181,7 +1182,7 @@ const waitForLinuxSshAndCloudInit = async ({ host, user, password, signal }) => 
 
 // Each Windows VM gets its own independent ansible-playbook invocation, retried on its own
 // schedule — no shared process, round, or timeout window with any other VM. A slow or hanging
-// guest can therefore never delay or wipe out progress already made on another one.
+// Attempts share a worker-wide concurrency limit; retry backoff holds no slot.
 const waitForWindowsHostReadiness = async ({ target, password, signal }) => {
   const startedAt = Date.now();
   let lastError = null;
@@ -1200,7 +1201,7 @@ const waitForWindowsHostReadiness = async ({ target, password, signal }) => {
       await writeFile(inventoryPath, buildWindowsReadinessInventory(target, password), 'utf8');
       await writeFile(playbookPath, windowsCloudbaseReadinessPlaybook, 'utf8');
 
-      await runCommand(
+      await runReadinessCommand(
         'timeout',
         [`${WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS}s`, 'ansible-playbook', '--inventory', inventoryPath, playbookPath],
         { cwd: ansibleDir, env: { ...process.env }, signal }
