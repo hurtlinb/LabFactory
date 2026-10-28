@@ -132,7 +132,12 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 #deploymentDetailsDialog .workstation-detail-summary .mini-pill { font-size: 10px; padding: 3px 7px; background: var(--brand-soft); color: var(--brand); }
 .workstation-detail-icon { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--brand-soft); color: var(--brand); }
 #deploymentDetailsDialog .vm-state-table-wrap { margin: 0; border: 0; border-radius: 0; max-height: none; overflow-x: auto; }
-#deploymentDetailsDialog .vm-state-table { min-width: 1120px; width: 100%; }
+#deploymentDetailsDialog .vm-state-table { min-width: 1320px; width: 100%; }
+/* Reserve space for all five VM actions, including snapshot restore/delete. */
+#deploymentDetailsDialog .vm-state-table th:last-child,
+#deploymentDetailsDialog .vm-state-table td:last-child { width: 184px; }
+#deploymentDetailsDialog .vm-state-table th:nth-child(12),
+#deploymentDetailsDialog .vm-state-table td:nth-child(12) { width: 170px; }
 #deploymentDetailsDialog .vm-state-table th { font-size: 10px; font-weight: 500; padding: 10px 8px; background: var(--surface-soft); }
 #deploymentDetailsDialog .vm-state-table td { padding: 11px 8px; font-size: 12px; border-bottom: 1px solid var(--line); }
 #deploymentDetailsDialog .vm-state-table tr:last-child td { border-bottom: 0; }
