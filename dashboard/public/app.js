@@ -1463,11 +1463,17 @@ const deploymentVmSelections = new Map();
 const vmBulkActions = {
   'reset-ip': 'Reset IP',
   'reset-password': 'Reset Password',
-  'pause-updates': 'Pause updates'
+  'pause-updates': 'Pause updates',
+  'snapshot-create': 'Create snapshot',
+  'snapshot-restore': 'Restore snapshot',
+  'snapshot-delete': 'Delete snapshot'
 };
 
 function renderVmActionIcon(action) {
   const shapes = {
+    'snapshot-create': '<rect x="3" y="5" width="14" height="14" rx="2"/><path d="M17 12h6M20 9v6M7 10h6M7 14h3"/>',
+    'snapshot-restore': '<path d="M3 11a9 9 0 1 1 2 7M3 4v7h7M12 7v5l3 2"/>',
+    'snapshot-delete': '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
     'reset-ip': '<circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15 15 0 0 1 0 20a15 15 0 0 1 0-20z"/>',
     'reset-password': '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
     'pause-updates': '<circle cx="12" cy="12" r="10"/><path d="M9 8v8M15 8v8"/>'
@@ -1483,6 +1489,15 @@ function getDeploymentVmSelection(deploymentId) {
 }
 
 function getVmActionUnavailableReason(vm, deployment, action) {
+  if (getDeploymentVmSelection(deployment.id).snapshotOperations?.get(String(vm.vmid))?.running) return 'Snapshot operation in progress';
+  if (action.startsWith('snapshot-')) {
+    if (!deployment.canManageSnapshots || !['running', 'mixed', 'deployed', 'stopped'].includes(deployment.status)) return 'Snapshot actions unavailable';
+    if (!vm.snapshot || vm.snapshot.error) return 'Snapshot status unavailable';
+    if (vm.snapshot.locked) return 'VM is busy';
+    if (action === 'snapshot-create' && vm.snapshot.exists) return 'Delete the existing snapshot first';
+    if (action !== 'snapshot-create' && !vm.snapshot.exists) return 'No snapshot';
+    return '';
+  }
   if (!['running', 'mixed', 'deployed'].includes(deployment.status)) return 'Lab is not ready';
   if (vm.proxmoxStatus !== 'running') return 'VM is not running';
   if (action === 'pause-updates' && !['windows11', 'windows-server'].includes(vm.osType)) return 'Windows only';
@@ -1532,7 +1547,9 @@ async function runVmBulkAction(deploymentId, action) {
   const selected = vms.filter(vm => selection.selected.has(String(vm.vmid)));
   const eligible = selected.filter(vm => !getVmActionUnavailableReason(vm, deployment, action));
   if (!eligible.length) return;
-  if (action !== 'pause-updates' && !confirm(`${vmBulkActions[action]} for ${eligible.length} VM(s)?\n\nThe blueprint settings will be re-applied. ${selected.length - eligible.length} incompatible VM(s) will be skipped.`)) return;
+  const snapshotAction = action.startsWith('snapshot-') ? action.slice(9) : null;
+  const warning = snapshotAction ? vmSnapshotDescriptions[snapshotAction] : 'The blueprint settings will be re-applied.';
+  if (action !== 'pause-updates' && !confirm(`${vmBulkActions[action]} for ${eligible.length} VM(s)?\n\n${warning} ${selected.length - eligible.length} incompatible VM(s) will be skipped.`)) return;
   selection.running = true;
   selection.action = action;
   selection.results = selected.map(vm => {
@@ -1549,11 +1566,11 @@ async function runVmBulkAction(deploymentId, action) {
       result.status = 'running';
       updateVmBulkControls(deploymentId);
       try {
-        const response = await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms/${result.vmid}/${action}`, {
+        const response = snapshotAction ? await executeVmSnapshotAction(deploymentId, result.vmid, snapshotAction) : await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms/${result.vmid}/${action}`, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }
         });
         result.status = 'success';
-        result.message = action === 'pause-updates' ? `Paused for ${response.days} days` : action === 'reset-ip' ? `IP: ${response.ip}` : 'Password reset';
+        result.message = snapshotAction ? response : action === 'pause-updates' ? `Paused for ${response.days} days` : action === 'reset-ip' ? `IP: ${response.ip}` : 'Password reset';
       } catch (error) {
         result.status = 'error';
         result.message = error.message;
@@ -1565,7 +1582,30 @@ async function runVmBulkAction(deploymentId, action) {
     await Promise.all(Array.from({ length: Math.min(3, pending.length) }, () => worker()));
   } finally {
     selection.running = false;
+    if (snapshotAction) await refreshOpenDeploymentDetails();
     if (state.activeDeploymentDetailsId === deploymentId) renderDeploymentVmDetails(selection.payload);
+  }
+}
+
+const vmSnapshotDescriptions = {
+  create: 'Create snapshot labfactory of the disks and configuration? RAM is not included.',
+  delete: 'Delete snapshot labfactory? You will no longer be able to restore this saved state.',
+  restore: 'Restore snapshot labfactory? Changes since the snapshot will be lost. A running VM will be interrupted and restarted. Saved passwords may also be reverted.'
+};
+
+async function executeVmSnapshotAction(deploymentId, vmid, action) {
+  const url = `/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms/${encodeURIComponent(vmid)}/snapshot`;
+  const { task } = await fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+  // Task polling survives Details refreshes and does not report acceptance as success.
+  const deadline = Date.now() + 30 * 60 * 1000;
+  while (true) {
+    const result = await fetchJson(`${url}?task=${encodeURIComponent(task)}`);
+    if (result.complete) {
+      if (!result.success) throw new Error(result.error || 'Snapshot operation failed');
+      return { create: 'Snapshot created.', delete: 'Snapshot deleted.', restore: 'Snapshot restored.' }[action];
+    }
+    if (Date.now() >= deadline) throw new Error('Snapshot task is still running. Check Proxmox before retrying.');
+    await new Promise(resolve => setTimeout(resolve, 2000));
   }
 }
 
@@ -1579,9 +1619,9 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
         const snapshotActions = snapshot && !snapshot.error
           ? (snapshot.exists ? ['restore', 'delete'] : ['create']).map(action => {
             const label = { create: 'Create snapshot', delete: 'Delete snapshot', restore: 'Restore snapshot' }[action];
-            return `<button class="ghost-button vm-snapshot-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" data-snapshot-action="${action}" ${snapshotDisabled ? 'disabled' : ''} title="${label} labfactory">${label}</button>`;
+            return `<button class="icon-btn vm-snapshot-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" data-snapshot-action="${action}" ${snapshotDisabled ? 'disabled' : ''} title="${label} labfactory" aria-label="${label} labfactory">${renderVmActionIcon(`snapshot-${action}`)}</button>`;
           }).join('') : '';
-        const snapshotMarkup = `<span class="muted">${escapeHtml(snapshot?.error || (snapshot ? (snapshot.exists ? 'labfactory' : 'No snapshot') : 'Unavailable'))}${snapshot?.locked ? ' (VM busy)' : ''}</span>${snapshotActions}${snapshotOperation ? `<span class="muted" role="status">${escapeHtml(snapshotOperation.message)}</span>` : ''}`;
+        const snapshotMarkup = `<span class="muted">${escapeHtml(snapshot?.error || (snapshot ? (snapshot.exists ? (snapshot.createdAt ? new Date(snapshot.createdAt * 1000).toLocaleString() : 'Date unavailable') : 'No snapshot') : 'Unavailable'))}${snapshot?.locked ? ' (VM busy)' : ''}</span>${snapshotOperation ? `<span class="muted" role="status">${escapeHtml(snapshotOperation.message)}</span>` : ''}`;
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
         const resetIpButton = canResetIp && hasStaticIp && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
@@ -1617,7 +1657,7 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
           <td class="vm-snapshot-cell">${snapshotMarkup}</td>
-          <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}</td>
+          <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}${snapshotActions}</td>
         </tr>
       `;
       }
@@ -1628,35 +1668,18 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
 async function runVmSnapshotAction(deploymentId, vmid, action) {
   const selection = getDeploymentVmSelection(deploymentId);
   if (!selection.snapshotOperations) selection.snapshotOperations = new Map();
-  if (selection.snapshotOperations.get(String(vmid))?.running) return;
-  const descriptions = {
-    create: 'Create snapshot labfactory of the disks and configuration? RAM is not included.',
-    delete: 'Delete snapshot labfactory? You will no longer be able to restore this saved state.',
-    restore: 'Restore snapshot labfactory? Changes since the snapshot will be lost. A running VM will be interrupted and restarted. Saved passwords may also be reverted.'
-  };
-  if (!descriptions[action] || !await confirmAction('VM snapshot', descriptions[action], { create: 'Create', delete: 'Delete', restore: 'Restore' }[action])) return;
-  if (selection.snapshotOperations.get(String(vmid))?.running) return;
+  if (selection.running || selection.snapshotOperations.get(String(vmid))?.running) return;
+
+  if (!vmSnapshotDescriptions[action] || !await confirmAction('VM snapshot', vmSnapshotDescriptions[action], { create: 'Create', delete: 'Delete', restore: 'Restore' }[action])) return;
+  if (selection.running || selection.snapshotOperations.get(String(vmid))?.running) return;
   const operation = { running: true, message: 'Snapshot operation in progress...' };
   selection.snapshotOperations.set(String(vmid), operation);
   const render = () => {
     if (state.activeDeploymentDetailsId === deploymentId && selection.payload) preserveDetailView(() => renderDeploymentVmDetails(selection.payload));
   };
   render();
-  const url = `/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms/${encodeURIComponent(vmid)}/snapshot`;
   try {
-    const { task } = await fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
-    // Task polling survives Details refreshes and does not report acceptance as success.
-    const deadline = Date.now() + 30 * 60 * 1000;
-    while (true) {
-      const result = await fetchJson(`${url}?task=${encodeURIComponent(task)}`);
-      if (result.complete) {
-        if (!result.success) throw new Error(result.error || 'Snapshot operation failed');
-        operation.message = { create: 'Snapshot created.', delete: 'Snapshot deleted.', restore: 'Snapshot restored.' }[action];
-        break;
-      }
-      if (Date.now() >= deadline) throw new Error('Snapshot task is still running. Check Proxmox before retrying.');
-      await new Promise(resolve => setTimeout(resolve, 2000));
-    }
+    operation.message = await executeVmSnapshotAction(deploymentId, vmid, action);
   } catch (error) {
     operation.message = `${error.message} Refresh snapshot status before retrying.`;
   } finally {
@@ -1789,7 +1812,7 @@ function renderDeploymentVmDetails(payload) {
       <label><input class="vm-select-all" type="checkbox" /> Select all VMs</label>
       <span class="vm-selection-count" aria-live="polite"></span>
       <div class="vm-bulk-actions">${Object.entries(vmBulkActions).map(([action, label]) => `<button type="button" class="btn btn-secondary" data-vm-bulk-action="${action}" title="${label}" aria-label="${label}" disabled>${renderVmActionIcon(action)}<span>${label}</span></button>`).join('')}</div>
-      <small class="muted">Actions apply to compatible running VMs. Other selected VMs are skipped.</small>
+      <small class="muted">Actions apply to compatible VMs. Snapshots also support stopped VMs. Other selected VMs are skipped.</small>
     </div>
     <div class="vm-bulk-feedback"></div>
     <div class="workstation-detail-list">

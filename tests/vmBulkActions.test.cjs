@@ -9,7 +9,8 @@ function setup(fetchJson = async () => ({ days: 35, ip: '10.0.0.1' })) {
     state: { activeDeploymentDetailsId: 'lab' },
     deploymentVmDetailsList: { querySelector: () => null, querySelectorAll: () => [] },
     escapeHtml: value => String(value).replaceAll('<', '&lt;'),
-    fetchJson, confirm: () => true, renderDeploymentVmDetails: () => {}
+    fetchJson, confirm: () => true, renderDeploymentVmDetails: () => {},
+    refreshOpenDeploymentDetails: async () => {}, setTimeout
   };
   vm.createContext(context);
   vm.runInContext(helpers, context);
@@ -20,6 +21,62 @@ function setup(fetchJson = async () => ({ days: 35, ip: '10.0.0.1' })) {
 function machine(vmid, overrides = {}) {
   return { vmid, name: 'VM ' + vmid, osType: 'windows11', proxmoxStatus: 'running', ipAddress: '10.0.0.1', ...overrides };
 }
+
+test('snapshot bulk eligibility supports stopped VMs and checks presence, rights and locks', () => {
+  const { context, selection } = setup();
+  const deployment = { id: 'lab', status: 'stopped', canManageSnapshots: true };
+  const vm = machine(1, { proxmoxStatus: 'stopped', snapshot: { exists: false } });
+  const reason = context.getVmActionUnavailableReason;
+  assert.equal(reason(vm, deployment, 'snapshot-create'), '');
+  assert(reason(vm, deployment, 'snapshot-restore'));
+  vm.snapshot.exists = true;
+  assert(reason(vm, deployment, 'snapshot-create'));
+  assert.equal(reason(vm, deployment, 'snapshot-delete'), '');
+  assert.equal(reason(vm, deployment, 'snapshot-restore'), '');
+  assert(reason(vm, { ...deployment, canManageSnapshots: false }, 'snapshot-delete'));
+  assert(reason(vm, { ...deployment, status: 'deploying' }, 'snapshot-delete'));
+  vm.snapshot.locked = true;
+  assert(reason(vm, deployment, 'snapshot-delete'));
+  vm.snapshot.locked = false;
+  selection.snapshotOperations = new Map([['1', { running: true }]]);
+  assert(reason(vm, deployment, 'snapshot-delete'));
+});
+
+test('snapshot batches confirm once, poll tasks, limit concurrency and preserve failures/skips', async () => {
+  let active = 0, maximum = 0, confirmations = 0;
+  const posts = [];
+  const { context, selection } = setup(async (url, options) => {
+    if (options) {
+      posts.push(JSON.parse(options.body).action);
+      active++; maximum = Math.max(maximum, active);
+      return { task: url.includes('/2/') ? 'failed' : 'ok' };
+    }
+    await new Promise(resolve => setTimeout(resolve, 5));
+    active--;
+    return { complete: true, success: !url.includes('failed'), error: 'Storage failure' };
+  });
+  context.confirm = message => { confirmations++; assert(message.includes('Changes since the snapshot will be lost')); return true; };
+  selection.payload.deployment.canManageSnapshots = true;
+  selection.payload.vms = [1,2,3,4,5].map(id => machine(id, { snapshot: { exists: true }, proxmoxStatus: 'stopped' }))
+    .concat(machine(6, { snapshot: { exists: false } }));
+  selection.selected = new Set(['1','2','3','4','5','6']);
+  await context.runVmBulkAction('lab', 'snapshot-restore');
+  assert.equal(confirmations, 1); assert.equal(maximum, 3);
+  assert.deepEqual(posts, Array(5).fill('restore'));
+  assert.equal(selection.results.filter(r => r.status === 'success').length, 4);
+  assert.equal(selection.results.filter(r => r.status === 'error').length, 1);
+  assert.equal(selection.results.filter(r => r.status === 'skipped').length, 1);
+  assert.equal(selection.running, false);
+});
+
+test('snapshot batch cancellation sends no request', async () => {
+  const { context, selection } = setup(() => { throw Error('Unexpected request'); });
+  selection.payload.deployment.canManageSnapshots = true;
+  selection.payload.vms = [machine(1, { snapshot: { exists: false } })];
+  selection.selected.add('1'); context.confirm = () => false;
+  await context.runVmBulkAction('lab', 'snapshot-create');
+  assert.equal(selection.running, false); assert.equal(selection.results.length, 0);
+});
 test('eligibility covers mixed labs, stopped VMs, DHCP and Windows-only pause', () => {
   const { context } = setup();
   const reason = context.getVmActionUnavailableReason;
