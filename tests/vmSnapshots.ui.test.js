@@ -44,15 +44,14 @@ test('snapshot column displays local date/time and icon actions are in the actio
   assert.match(html, /class="icon-btn vm-snapshot-button"/);
   assert.match(html, /aria-label="Restore snapshot labfactory"><svg>/);
 });
-test('cancel sends no request, accepted operations poll and show completion', async () => {
+test('cancel sends no request, successful operations clear the inline status', async () => {
   const cancelled = setup({ confirmAction: async () => false });
   await cancelled.context.runVmSnapshotAction('lab', '101', 'restore'); assert.equal(cancelled.calls.length, 0);
   const { context, selection, calls } = setup();
   await context.runVmSnapshotAction('lab', '101', 'create');
   assert.equal(calls.length, 2);
   assert.equal(JSON.parse(calls[0].options.body).action, 'create');
-  assert.equal(selection.snapshotOperations.get('101').message, 'Snapshot created.');
-  assert.equal(selection.snapshotOperations.get('101').running, false);
+  assert.equal(selection.snapshotOperations.has('101'), false);
 });
 test('failed tasks are displayed and duplicate pending actions do not submit', async () => {
   const { context, selection, calls } = setup({ fetchJson: async (_url, options) => options ? { task: 'upid' } : { complete: true, success: false, error: 'Disk failure' } });

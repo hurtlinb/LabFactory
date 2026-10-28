@@ -1679,7 +1679,8 @@ async function runVmSnapshotAction(deploymentId, vmid, action) {
   };
   render();
   try {
-    operation.message = await executeVmSnapshotAction(deploymentId, vmid, action);
+    await executeVmSnapshotAction(deploymentId, vmid, action);
+    selection.snapshotOperations.delete(String(vmid));
   } catch (error) {
     operation.message = `${error.message} Refresh snapshot status before retrying.`;
   } finally {
