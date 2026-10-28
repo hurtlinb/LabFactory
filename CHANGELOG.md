@@ -2,6 +2,12 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.1.0] — 2026-10-28
+
+- Add snapshot support
+- UI change for details page
+- Add estimated deployment duration for blueprints
+
 ## [2.0.3] — 2026-10-28
 
 - Security fix
