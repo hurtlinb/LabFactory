@@ -9,6 +9,7 @@ import { DelayedError } from 'bullmq';
 import { acquireJobLocks, tryJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
 import { checkPlannedVmids } from '../lib/vmidAvailability.js';
+import { safelyRecordDuration } from '../lib/deploymentDurations.js';
 
 const vmPlan = (actions = ['create'], before = null, vmid = 49690) => ({
   format_version: '1.2', resource_changes: [{ address: 'proxmox_vm_qemu.lab_vm', type: 'proxmox_vm_qemu', change: { actions, before, after: { vmid } } }]
@@ -135,7 +136,7 @@ test('concurrency configuration is bounded', () => {
 });
 
 test('Terraform processor runs start and stop concurrently, defers deploy contention and keeps workspace identity', async t => {
-  const pool = lockPool(), transitions = [], commands = [], directories = [];
+  const pool = lockPool(), transitions = [], commands = [], directories = [], durations = [];
   const source = await fs.readFile('workers/terraformWorker.js', 'utf8');
   let processor, options;
   let waiting = 0, releasePower;
@@ -144,6 +145,9 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     Worker: class { constructor(_name, fn, config) { processor = fn; options = config; } on() {} },
     Queue: class { async add() { return { id: 'child' }; } },
     terraformQueueName: 'tf', ansibleQueueName: 'ansible', dbPool: pool,
+    safelyRecordDuration,
+    startDeploymentDuration: async (_db, job) => durations.push(['start', job.id]),
+    finishDeploymentDuration: async (_db, job) => durations.push(['finish', job.id]),
     AbortController, DelayedError, acquireJobLocks, workerConcurrency, setMaxListeners() {},
     process: { env: {} }, path, console: { log() {}, warn() {}, error() {} },
     terraformSourceDir: path.resolve('terraform'), terraformVarsPath: 'config.json',
@@ -169,6 +173,7 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   const blocked = jobFor('d', 'deploy');
   await assert.rejects(processor(blocked, 'token'), DelayedError);
   assert.deepEqual(transitions, []);
+  assert.deepEqual(durations, []);
   const start = processor(jobFor('a'), 'a'), stop = processor(jobFor('b', 'stop'), 'b');
   await new Promise((resolve, reject) => {
     const timeout = setTimeout(() => { clearInterval(timer); reject(Error('Power jobs did not overlap')); }, 3000);
@@ -177,7 +182,9 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   releasePower(); await Promise.all([start, stop]); await global.release();
   assert(transitions.some(([id, status]) => id === 'a' && status === 'running'));
   assert(transitions.some(([id, status]) => id === 'b' && status === 'stopped'));
+  assert.deepEqual(durations, [], 'power actions must not contribute deployment durations');
   await processor(jobFor('d', 'deploy'), 'd');
+  assert.deepEqual(durations, [['start', 'd-deploy'], ['finish', 'd-deploy']]);
   assert(commands.some(({ args }) => args.join(' ') === 'workspace select blueprint-d'));
   assert(commands.every(({ cwd, env }) => env.TF_DATA_DIR === path.join(cwd, '.terraform')));
   sandbox.runCommand = async (_command, args) => args[0] === 'show'
@@ -188,6 +195,7 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   sandbox.runCommand = async () => { throw new Error('Terraform failed'); };
   await assert.rejects(processor(jobFor('failed', 'deploy'), 'failed'), /Terraform failed/);
   assert(transitions.some(([id, status]) => id === 'failed' && status === 'failed'));
+  assert.deepEqual(durations.filter(([phase]) => phase === 'finish'), [['finish', 'd-deploy']], 'failed deployments must not finish a duration sample');
   for (const dir of directories) await assert.rejects(fs.stat(dir), { code: 'ENOENT' });
   assert.equal(pool.locks.size, 0);
 });
@@ -199,6 +207,7 @@ test('Ansible processor shares the lab lock with Terraform and releases it after
   const sandbox = {
     Worker: class { constructor(_name, fn, config) { processor = fn; options = config; } on() {} },
     Queue: class {}, ansibleQueueName: 'ansible', dbPool: pool,
+    safelyRecordDuration, finishDeploymentDuration: async () => {},
     AbortController, DelayedError, acquireJobLocks, workerConcurrency,
     process: { env: {} }, console: { log() {}, warn() {}, error() {} },
     activeAnsibleTasks: () => [], getFileUploads: () => [],

@@ -102,9 +102,10 @@ test('reconnect failure cannot report success; resume does not reboot again', as
 });
 
 test('resume endpoint rejects unauthorized, stale and legacy jobs and rolls back queue failures', async () => {
-  const source = await fs.readFile('dashboard/server.js', 'utf8');
+  const source = (await fs.readFile('dashboard/server.js', 'utf8')).replace(/\r\n/g, '\n');
   const start = source.indexOf("app.post(\n  '/api/lifecycle/deployments/:id/resume-customization'");
   const end = source.indexOf("app.post(\n  '/api/lifecycle/deployments/:id/:action'", start);
+  assert(start >= 0 && end > start, 'resume route must be found before evaluating it');
   async function request({ manage = true, runId = 'run', checkpoints = {}, retryError = false, claim = 1 } = {}) {
     let handler, retries = 0; const queries = [];
     const deployment = { id: 'lab', status: 'failed', lastAction: 'customize', lastJobId: '37', lastRunId: 'run' };
