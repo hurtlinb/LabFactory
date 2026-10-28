@@ -419,7 +419,7 @@ function renderBlueprintList() {
           </div>
           <p class="blueprint-card-description" title="${escapeHtmlAttr(blueprint.description || '')}">${escapeHtml(blueprint.description || 'No description')}</p>
           ${renderBlueprintPreview(blueprint)}
-          <p class="blueprint-deployment-estimate" title="${escapeHtmlAttr(blueprintDeploymentEstimate(blueprint).detail)}">${escapeHtml(blueprintDeploymentEstimate(blueprint).label)} <span class="muted">incl. customization</span></p>
+          <p class="blueprint-deployment-estimate" title="${escapeHtmlAttr(blueprintDeploymentEstimate(blueprint).detail)}">${escapeHtml(blueprintDeploymentEstimate(blueprint).label)}</p>
           <div class="blueprint-card-footer">
             <div class="blueprint-card-owner">${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}</div>
             <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${blueprint.vmCount} VM · ${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
