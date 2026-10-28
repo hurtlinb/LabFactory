@@ -1,0 +1,121 @@
+<div id="lf-details-preview" class="viz-carousel viz-dotted-background" aria-label="Maquettes des détails du déploiement" data-previous-label="Précédent" data-next-label="Suivant">
+  <section data-variant="Cartes par poste" aria-label="Cartes par poste"><div class="lf-stage"><div class="lf-window" data-layout="cards"></div></div></section>
+  <section data-variant="Liste compacte" aria-label="Liste compacte" hidden><div class="lf-stage"><div class="lf-window" data-layout="list"></div></div></section>
+</div>
+<style>
+#lf-details-preview .lf-stage { padding:24px 16px; min-height:1080px; }
+#lf-details-preview .lf-window { --lf-bg:light-dark(#f4f5fa,#181b25); --lf-panel:light-dark(#ffffff,#222633); --lf-text:light-dark(#18233c,#e6ebf6); --lf-muted:light-dark(#68768e,#a5b0c5); --lf-line:light-dark(#e0e5ef,#3b4354); --lf-brand:light-dark(#6654e8,#b3a5ff); --lf-tint:light-dark(#efedff,#363052); --lf-green:light-dark(#07847e,#6cd9c7); color:var(--lf-text); background:var(--lf-bg); border:1px solid var(--lf-line); border-radius:18px; font:13px/1.5 system-ui,sans-serif; overflow:hidden; }
+#lf-details-preview .lf-window * { box-sizing:border-box; }
+#lf-details-preview .lf-window button, #lf-details-preview .lf-window input { font:inherit; }
+#lf-details-preview .lf-header { padding:22px; background:var(--lf-panel); border-bottom:1px solid var(--lf-line); }
+#lf-details-preview .lf-top, #lf-details-preview .lf-row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+#lf-details-preview .lf-top { justify-content:space-between; }
+#lf-details-preview .lf-eyebrow { font-size:11px; color:var(--lf-muted); letter-spacing:.09em; text-transform:uppercase; }
+#lf-details-preview h2 { font:500 21px/1.3 system-ui,sans-serif; margin:5px 0 8px; }
+#lf-details-preview .lf-muted { color:var(--lf-muted); }
+#lf-details-preview .lf-badge { border-radius:20px; background:var(--lf-tint); color:var(--lf-brand); padding:3px 8px; font-size:11px; }
+#lf-details-preview .lf-status { color:var(--lf-green); display:inline-flex; align-items:center; gap:5px; font-size:12px; }
+#lf-details-preview .lf-status::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+#lf-details-preview .lf-stats { display:flex; flex-wrap:wrap; gap:18px; margin-top:20px; padding-top:14px; border-top:1px solid var(--lf-line); color:var(--lf-muted); }
+#lf-details-preview .lf-stats b { font-weight:500; color:var(--lf-text); margin-right:4px; }
+#lf-details-preview .lf-button { display:inline-flex; justify-content:center; align-items:center; gap:6px; padding:7px 10px; background:var(--lf-panel); color:var(--lf-text); border:1px solid var(--lf-line); border-radius:8px; cursor:pointer; }
+#lf-details-preview .lf-button:hover { background:var(--lf-tint); }
+#lf-details-preview .lf-button:disabled { opacity:.4; cursor:default; }
+#lf-details-preview .lf-icon { padding:7px; min-width:32px; }
+#lf-details-preview .lf-window svg { width:16px; height:16px; flex-shrink:0; }
+#lf-details-preview .lf-content { padding:18px; }
+#lf-details-preview .lf-toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+#lf-details-preview .lf-toolbar label { display:flex; gap:7px; align-items:center; }
+#lf-details-preview input { accent-color:var(--lf-brand); }
+#lf-details-preview .lf-selected { color:var(--lf-brand); font-size:12px; margin-right:auto; }
+#lf-details-preview .lf-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; }
+#lf-details-preview .lf-post { min-width:0; background:var(--lf-panel); border:1px solid var(--lf-line); border-radius:12px; overflow:hidden; }
+#lf-details-preview .lf-post:has(.lf-select:checked) { border-color:var(--lf-brand); }
+#lf-details-preview .lf-post-head { display:flex; align-items:center; gap:8px; padding:12px; border-bottom:1px solid var(--lf-line); }
+#lf-details-preview .lf-post-head strong { font-weight:500; margin-right:auto; }
+#lf-details-preview .lf-os { display:grid; place-items:center; width:30px; height:32px; background:var(--lf-tint); color:var(--lf-brand); border-radius:8px; flex-shrink:0; }
+#lf-details-preview .lf-machine { padding:14px 12px; }
+#lf-details-preview .lf-identity { display:flex; align-items:flex-start; gap:9px; margin-bottom:14px; }
+#lf-details-preview .lf-name { font-weight:500; overflow-wrap:anywhere; }
+#lf-details-preview .lf-small { font-size:11px; color:var(--lf-muted); }
+#lf-details-preview .lf-facts { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+#lf-details-preview .lf-facts span { display:block; font-size:11px; color:var(--lf-muted); }
+#lf-details-preview .lf-facts div { min-width:0; overflow-wrap:anywhere; }
+#lf-details-preview .lf-snapshot { display:flex; gap:8px; align-items:center; padding-top:12px; margin-top:12px; border-top:1px solid var(--lf-line); }
+#lf-details-preview .lf-snapshot span { font-size:11px; color:var(--lf-muted); }
+#lf-details-preview .lf-actions { display:flex; align-items:center; gap:5px; flex-wrap:wrap; padding:10px 12px; border-top:1px solid var(--lf-line); }
+#lf-details-preview .lf-actions .lf-status { margin-right:auto; }
+#lf-details-preview .lf-bottom { padding:12px 18px; border-top:1px solid var(--lf-line); color:var(--lf-muted); font-size:11px; }
+#lf-details-preview .lf-notice { color:var(--lf-brand); margin:12px 0 0; }
+#lf-details-preview .lf-notice:empty { display:none; }
+#lf-details-preview [data-layout="list"] .lf-grid { grid-template-columns:1fr; }
+#lf-details-preview [data-layout="list"] .lf-post-head { border-bottom:0; }
+#lf-details-preview [data-layout="list"] .lf-machine { padding-top:0; }
+#lf-details-preview [data-layout="list"] .lf-identity { margin-bottom:0; }
+#lf-details-preview .lf-expand { margin-left:auto; }
+#lf-details-preview .lf-more { margin-top:14px; }
+@media(max-width:580px) { #lf-details-preview .lf-stage { padding:16px 0; min-height:1700px; } #lf-details-preview .lf-grid { grid-template-columns:1fr; } #lf-details-preview .lf-header { padding:16px; } #lf-details-preview .lf-content { padding:12px; } }
+@media(pointer:coarse) { #lf-details-preview .lf-button { min-height:44px; min-width:44px; } }
+</style>
+<script>
+(() => {
+  const root = document.getElementById('lf-details-preview');
+  const machines = [
+    { id:32000, post:'01', ip:'10.101.16.66', vlan:161, node:'peda-pve2', snapshot:'28.10.2026 · 10:42' },
+    { id:32001, post:'02', ip:'10.101.16.66', vlan:162, node:'peda-pve1', snapshot:null },
+    { id:32002, post:'03', ip:'10.101.16.66', vlan:163, node:'peda-pve4', snapshot:'28.10.2026 · 10:45' },
+    { id:32003, post:'04', ip:'10.101.16.66', vlan:164, node:'peda-pve3', snapshot:null }
+  ];
+  const icon = name => `<i data-lucide="${name}" aria-hidden="true"></i>`;
+  const button = (name,label,action) => `<button class="lf-button lf-icon" type="button" aria-label="${label}" data-tooltip="${label}" data-action="${action}">${icon(name)}</button>`;
+  root.querySelectorAll('.lf-window').forEach((window,index) => {
+    const compact = window.dataset.layout === 'list';
+    window.innerHTML = `<header class="lf-header">
+      <div class="lf-top"><span class="lf-eyebrow">Deployment details · Lab #42</span><span class="lf-badge">Maquette</span></div>
+      <h2>Windows Server <span class="lf-muted">@</span> Salle 101</h2>
+      <div class="lf-top"><div class="lf-row"><span class="lf-status">Running</span><span class="lf-muted">4 workstations</span></div><button class="lf-button" data-action="export">${icon('download')} Export CSV</button></div>
+      <div class="lf-stats"><span><b>4 / 4</b> VMs ready</span><span><b>4</b> Running</span><span><b>2 / 4</b> Snapshots</span></div>
+    </header><main class="lf-content">
+      <div class="lf-toolbar"><label><input type="checkbox" class="lf-all"> Select all</label><span class="lf-selected" aria-live="polite">0 selected</span>
+        <div class="lf-row" aria-label="Actions sur la sélection">
+          ${button('globe','Reset IP on selection','bulk-ip')}${button('key-round','Reset password on selection','bulk-password')}${button('pause','Pause updates on selection','bulk-updates')}
+          ${button('camera','Create snapshots on selection','bulk-create')}${button('rotate-ccw','Restore snapshots on selection','bulk-restore')}${button('trash-2','Delete snapshots on selection','bulk-delete')}
+        </div>
+      </div><div class="lf-grid">${machines.map(m => `<article class="lf-post" data-vm="${m.id}">
+        <div class="lf-post-head"><input class="lf-select" type="checkbox" value="${m.id}" aria-label="Select VM ${m.id}">${icon('monitor')}<strong>Workstation ${m.post}</strong><span class="lf-small">1 VM</span>${button('refresh-cw','Redeploy workstation','redeploy')}</div>
+        <div class="lf-machine"><div class="lf-identity"><span class="lf-os">${icon('computer')}</span><div><div class="lf-name">1-bhu-windows-server</div><div class="lf-small">Windows Server · ${m.id} · ${m.node}</div></div>${compact ? `<button class="lf-button lf-icon lf-expand" aria-label="Show VM details" aria-expanded="false" aria-controls="lf-info-${index}-${m.id}" data-expand>${icon('chevron-down')}</button>` : ''}</div>
+          ${compact ? `<div class="lf-row" style="margin-top:10px"><span>${m.ip}</span><span class="lf-small">VLAN ${m.vlan}</span></div><div class="lf-more" id="lf-info-${index}-${m.id}" hidden>` : ''}
+          <div class="lf-facts">${compact ? '' : `<div><span>IP address</span>${m.ip}</div><div><span>VLAN</span>${m.vlan}</div>`}<div><span>Username</span>Administrator</div><div><span>Password</span><button class="lf-button lf-icon" data-reveal aria-label="Show password">${icon('eye')}</button><span class="lf-secret" hidden>Demo-2026!</span></div></div>
+          ${compact ? '</div>' : ''}
+          <div class="lf-snapshot">${icon('camera')}<div><span>Snapshot</span><div class="lf-date">${m.snapshot || 'No snapshot'}</div></div></div>
+        </div><footer class="lf-actions"><span class="lf-status">Ready</span>${button('globe','Reset IP','ip')}${button('key-round','Reset password','password')}${button('pause','Pause updates','updates')}${m.snapshot ? button('rotate-ccw','Restore snapshot','restore')+button('trash-2','Delete snapshot','delete') : button('camera','Create snapshot','create')}</footer>
+      </article>`).join('')}</div><p class="lf-notice" aria-live="polite"></p>
+    </main><footer class="lf-bottom">4 VMs · 4 workstations · Proxmox connected</footer>`;
+    const selected = () => [...window.querySelectorAll('.lf-select:checked')];
+    const update = () => {
+      const count = selected().length;
+      window.querySelector('.lf-selected').textContent = `${count} selected`;
+      const all = window.querySelector('.lf-all'); all.checked = count === 4; all.indeterminate = count > 0 && count < 4;
+      window.querySelectorAll('[data-action^="bulk-"]').forEach(b => {
+        const action = b.dataset.action;
+        b.disabled = !selected().some(input => {
+          const m = machines.find(item => item.id === Number(input.value));
+          return action === 'bulk-create' ? !m.snapshot : ['bulk-restore','bulk-delete'].includes(action) ? Boolean(m.snapshot) : true;
+        });
+      });
+    };
+    window.addEventListener('change', e => {
+      if (e.target.matches('.lf-all')) window.querySelectorAll('.lf-select').forEach(input => {input.checked=e.target.checked;});
+      update();
+    });
+    window.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b) return;
+      if (b.hasAttribute('data-expand')) { const panel=window.querySelector(`#${b.getAttribute('aria-controls')}`); panel.hidden=!panel.hidden; b.setAttribute('aria-expanded',String(!panel.hidden)); return; }
+      if (b.hasAttribute('data-reveal')) { const value=b.parentElement.querySelector('.lf-secret'); value.hidden=!value.hidden; b.setAttribute('aria-label',value.hidden?'Show password':'Hide password'); return; }
+      if (b.dataset.action) window.querySelector('.lf-notice').textContent = `Aperçu : ${b.getAttribute('aria-label') || 'Export CSV'}${b.dataset.action.startsWith('bulk-') ? ` (${selected().length} VMs sélectionnées)` : ''}. Aucune action réelle exécutée.`;
+    });
+    update();
+  });
+  if (globalThis.lucide) lucide.createIcons();
+})();
+</script>

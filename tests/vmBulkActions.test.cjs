@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const source = fs.readFileSync('dashboard/public/app.js', 'utf8');
-const helpers = source.slice(source.indexOf('const deploymentVmSelections ='), source.indexOf('function renderDeploymentVmRows('));
+const helpers = source.slice(source.indexOf('const deploymentVmSelections ='), source.indexOf('function renderDeploymentVmCards('));
 function setup(fetchJson = async () => ({ days: 35, ip: '10.0.0.1' })) {
   const context = {
     state: { activeDeploymentDetailsId: 'lab' },
@@ -148,10 +148,10 @@ test('select all, partial selection and refresh preserve row selection and count
     querySelector: selector => ({ '.vm-select-all': all, '.vm-selection-count': count, '.vm-bulk-feedback': feedback })[selector],
     querySelectorAll: selector => selector === '.vm-select' ? rows : selector === '[data-vm-bulk-action]' ? buttons : []
   };
-  context.escapeHtmlAttr = String; context.getOsLabel = String;
+  context.escapeHtmlAttr = String; context.getOsLabel = String; context.getOsLogo = () => '/assets/os-other.svg';
   context.uiIcon = () => '<svg aria-hidden="true"></svg>';
   context.getDeploymentWorkstationNumber = () => '1'; context.isDeploymentBusy = () => false;
-  vm.runInContext(source.slice(source.indexOf('function renderDeploymentVmRows('), source.indexOf('async function redeployDeploymentWorkstation(')), context);
+  vm.runInContext(source.slice(source.indexOf('function renderDeploymentVmCards('), source.indexOf('async function redeployDeploymentWorkstation(')), context);
   vm.runInContext(source.slice(source.indexOf('function renderDeploymentVmDetails('), source.indexOf('async function openDeploymentDetails(')), context);
   const payload = { deployment: { id: 'lab', status: 'mixed' }, vms: [machine(1), machine(2, { osType: 'ubuntu' })] };
   context.renderDeploymentVmDetails(payload);

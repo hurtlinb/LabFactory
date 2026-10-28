@@ -120,6 +120,41 @@ test('detail refresh preserves expanded task output and focused VM selection', a
   assert.match(root.querySelector('pre').textContent, /Updated output/);
 });
 
+test('workstation cards group every VM and preserve per-VM selection, actions and expanded tasks', async t => {
+  const { api, document, w } = setup(t); await api.bootstrap();
+  api.state.activeDeploymentDetailsId = 'lab';
+  const machine = (vmid, workstationNumber, osType) => ({
+    vmid, workstationNumber, name: `VM ${vmid}`, osType, proxmoxStatus: 'running', state: 'ready',
+    ipAddress: '10.1.1.2', snapshot: { exists: true, createdAt: 1793192400 },
+    customization: { taskResults: { task: { name: 'Install', status: 'succeeded', output: `Output ${vmid}` } } }
+  });
+  const payload = { deployment: { id: 'lab', status: 'running', canManageSnapshots: true, canRedeployWorkstations: true },
+    vms: [machine(1, 1, 'ubuntu'), machine(2, 1, 'windows11'), machine(3, 2, 'windows-server')] };
+  api.renderDeploymentVmDetails(payload);
+  const root = document.getElementById('deploymentVmDetailsList');
+  assert.equal(root.querySelectorAll('.workstation-detail-card').length, 2);
+  assert.equal(root.querySelector('[data-workstation-number="1"]').querySelectorAll('.deployment-vm-card').length, 2);
+  assert.equal(root.querySelectorAll('table').length, 0);
+  assert.equal(root.querySelectorAll('.workstation-redeploy-button').length, 2);
+  const vm1 = root.querySelector('.deployment-vm-card[data-vmid="1"]');
+  const vm2 = root.querySelector('.deployment-vm-card[data-vmid="2"]');
+  assert.equal(vm1.querySelector('.pause-updates-button'), null);
+  assert.equal(vm2.querySelector('.pause-updates-button').dataset.vmid, '2');
+  assert.equal(vm2.querySelector('[data-snapshot-action="restore"]').dataset.vmid, '2');
+  vm2.querySelector('.vm-select').click();
+  vm2.querySelector('details').open = true;
+  vm2.querySelector('[data-snapshot-action="delete"]').focus();
+  api.preserveDetailView(() => api.renderDeploymentVmDetails(payload));
+  assert.equal(root.querySelector('.deployment-vm-card[data-vmid="1"] details').open, false);
+  assert.equal(root.querySelector('.deployment-vm-card[data-vmid="2"] details').open, true);
+  assert.equal(document.activeElement.dataset.vmid, '2');
+  assert.equal(document.activeElement.dataset.snapshotAction, 'delete');
+  assert.equal(root.querySelector('.vm-selection-count').textContent, '1 / 3 selected');
+  const all = root.querySelector('.vm-select-all'); all.checked = true;
+  all.dispatchEvent(new w.Event('change', { bubbles: true }));
+  assert.equal(root.querySelectorAll('.vm-select:checked').length, 3);
+});
+
 test('VM credentials show usernames and reveal each password only on request', async t => {
   const { api, document } = setup(t);
   await api.bootstrap();

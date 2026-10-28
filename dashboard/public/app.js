@@ -1609,7 +1609,7 @@ async function executeVmSnapshotAction(deploymentId, vmid, action) {
   }
 }
 
-function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false, canManageSnapshots = false) {
+function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false, canManageSnapshots = false) {
   return vms
     .map(
       vm => {
@@ -1639,26 +1639,26 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
             </button>`
           : '';
         return `
-        <tr>
-          <td class="vm-selection-cell"><input class="vm-select" type="checkbox" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Select ${escapeHtmlAttr(vm.name)} (VMID ${escapeHtmlAttr(String(vm.vmid))})" ${getDeploymentVmSelection(deploymentId).selected.has(String(vm.vmid)) ? 'checked' : ''} /></td>
-          <td><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" title="${escapeHtmlAttr(vm.state || 'unknown')}"></span></td>
-          <td class="vm-state-name-cell">
-            <strong>${escapeHtml(vm.name)}</strong>
-            ${vm.customization ? `<span class="muted">Customization: ${escapeHtml(vm.customization.status)} · ${escapeHtml(vm.customization.step || '')}${vm.customization.attempt ? ` · attempt ${Number(vm.customization.attempt)}/${Number(vm.customization.maxAttempts || 4)}` : ''}</span>${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
-            ${Object.values(vm.customization?.taskResults || {}).map(result => `<details class="muted"><summary>Ansible: ${escapeHtml(result.name)} — ${escapeHtml(result.status)}${result.durationMs != null ? ` (${(result.durationMs / 1000).toFixed(1)}s)` : ''}</summary><pre>${escapeHtml(result.error || result.output || 'Running...')}</pre></details>`).join('')}
-            <span class="muted">${vm.node ? escapeHtml(vm.node) : ''}</span>
-          </td>
-          <td>${vm.vmid}</td>
-          <td>${escapeHtml(getOsLabel(vm.osType))}</td>
-          <td>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</td>
-          <td>${escapeHtml(vm.ipAddress || 'n/a')}</td>
-          <td>${escapeHtml(vm.username || 'n/a')}</td>
-          <td>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button></div>` : '<span class="muted">n/a</span>'}</td>
-          <td>${escapeHtml(vm.state || 'unknown')}</td>
-          <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
-          <td class="vm-snapshot-cell">${snapshotMarkup}</td>
-          <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}${snapshotActions}</td>
-        </tr>
+        <article class="deployment-vm-card" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="${escapeHtmlAttr(vm.name)} (VMID ${escapeHtmlAttr(String(vm.vmid))})">
+          <header class="deployment-vm-heading">
+            <input class="vm-select" type="checkbox" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Select ${escapeHtmlAttr(vm.name)} (VMID ${escapeHtmlAttr(String(vm.vmid))})" ${getDeploymentVmSelection(deploymentId).selected.has(String(vm.vmid)) ? 'checked' : ''} />
+            <span class="deployment-vm-os"><img src="${escapeHtmlAttr(getOsLogo(vm.osType))}" alt="" loading="lazy"></span>
+            <div class="deployment-vm-identity"><strong>${escapeHtml(vm.name)}</strong><span class="muted">${escapeHtml(getOsLabel(vm.osType))} &middot; VMID ${escapeHtml(String(vm.vmid))} &middot; ${escapeHtml(vm.node || 'n/a')}</span></div>
+          </header>
+          <dl class="deployment-vm-facts">
+            <div><dt>IP address</dt><dd>${escapeHtml(vm.ipAddress || 'n/a')}</dd></div>
+            <div><dt>VLAN</dt><dd>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</dd></div>
+            <div><dt>Username</dt><dd>${escapeHtml(vm.username || 'n/a')}</dd></div>
+            <div><dt>Password</dt><dd>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button></div>` : '<span class="muted">n/a</span>'}</dd></div>
+          </dl>
+          <div class="deployment-vm-snapshot"><span class="muted">Snapshot</span><div class="vm-snapshot-cell">${snapshotMarkup}</div></div>
+          ${vm.customization ? `<div class="deployment-vm-customization vm-state-name-cell">${vm.customization ? `<span class="muted">Customization: ${escapeHtml(vm.customization.status)} · ${escapeHtml(vm.customization.step || '')}${vm.customization.attempt ? ` · attempt ${Number(vm.customization.attempt)}/${Number(vm.customization.maxAttempts || 4)}` : ''}</span>${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
+            ${Object.values(vm.customization?.taskResults || {}).map(result => `<details class="muted"><summary>Ansible: ${escapeHtml(result.name)} — ${escapeHtml(result.status)}${result.durationMs != null ? ` (${(result.durationMs / 1000).toFixed(1)}s)` : ''}</summary><pre>${escapeHtml(result.error || result.output || 'Running...')}</pre></details>`).join('')}</div>` : ''}
+          <footer class="deployment-vm-footer">
+            <div class="deployment-vm-status"><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" aria-hidden="true"></span><span>${escapeHtml(vm.state || 'unknown')}</span><span class="muted">Proxmox: ${escapeHtml(vm.proxmoxStatus || 'n/a')}</span></div>
+            <div class="deployment-vm-actions" role="group" aria-label="Actions for ${escapeHtmlAttr(vm.name)}">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}${snapshotActions}</div>
+          </footer>
+        </article>
       `;
       }
     )
@@ -1809,6 +1809,12 @@ function renderDeploymentVmDetails(payload) {
   const canPauseUpdates = ['running', 'mixed', 'deployed'].includes(deployment.status);
 
   deploymentVmDetailsList.innerHTML = `
+    <div class="deployment-details-summary" aria-label="Deployment summary">
+      <span><strong>${orderedWorkstations.length}</strong> workstations</span>
+      <span><strong>${vms.filter(vm => vm.guestReady || vm.state === 'ready').length} / ${vms.length}</strong> VMs ready</span>
+      <span><strong>${vms.filter(vm => vm.proxmoxStatus === 'running').length}</strong> running</span>
+      <span><strong>${vms.filter(vm => vm.snapshot?.exists).length} / ${vms.length}</strong> snapshots${vms.some(vm => !vm.snapshot || vm.snapshot.error) ? ' (some unavailable)' : ''}</span>
+    </div>
     <div class="vm-bulk-toolbar">
       <label><input class="vm-select-all" type="checkbox" /> Select all VMs</label>
       <span class="vm-selection-count" aria-live="polite"></span>
@@ -1833,7 +1839,7 @@ function renderDeploymentVmDetails(payload) {
               : '';
 
           return `
-            <section class="workstation-detail-card">
+            <section class="workstation-detail-card" data-workstation-number="${escapeHtmlAttr(workstationNumber)}" aria-label="Workstation ${escapeHtmlAttr(workstationNumber)}">
               <div class="panel-head workstation-detail-head">
                 <div class="workstation-detail-summary">
                   <span class="workstation-detail-icon">${uiIcon('monitor')}</span>
@@ -1842,28 +1848,7 @@ function renderDeploymentVmDetails(payload) {
                 </div>
                 ${actionMarkup}
               </div>
-              <div class="table-wrap vm-state-table-wrap">
-                <table class="queue-table vm-state-table">
-                  <thead>
-                    <tr>
-                      <th scope="col" aria-label="Selection"></th>
-                      <th scope="col"></th>
-                      <th scope="col">VM</th>
-                      <th scope="col">VMID</th>
-                      <th scope="col">OS</th>
-                      <th scope="col">VLAN</th>
-                      <th scope="col">IP</th>
-                      <th scope="col">Username</th>
-                      <th scope="col">Password</th>
-                      <th scope="col">State</th>
-                      <th scope="col">Proxmox</th>
-                      <th scope="col">Snapshot</th>
-                      <th scope="col"></th>
-                    </tr>
-                  </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword, canPauseUpdates, Boolean(deployment.canManageSnapshots))}</tbody>
-                </table>
-              </div>
+              <div class="workstation-vm-list">${renderDeploymentVmCards(workstationVms, deployment.id, canResetIp, canResetPassword, canPauseUpdates, Boolean(deployment.canManageSnapshots))}</div>
             </section>
           `;
         })
@@ -3848,19 +3833,18 @@ async function readRoute() {
 
 function preserveDetailView(render) {
   const root = deploymentVmDetailsList;
-  const key = el => el.closest('tr')?.querySelector('.vm-select')?.dataset.vmid || '';
+  const key = el => el.closest('.deployment-vm-card')?.dataset.vmid || el.closest('.workstation-detail-card')?.dataset.workstationNumber || '';
   const open = new Set([...root.querySelectorAll('details[open]')].map(el => key(el) + ':' + el.querySelector('summary')?.textContent.split(' — ')[0]));
   const focused = root.contains(document.activeElement) ? document.activeElement : null;
-  const focusKey = focused && { vm: key(focused), cls: [...focused.classList][0], bulk: focused.dataset.vmBulkAction, tag: focused.tagName };
-  const scrolls = [deploymentDetailsDialog.scrollTop, ...[...root.querySelectorAll('.table-wrap')].map(el => el.scrollLeft)];
+  const focusKey = focused && { vm: key(focused), cls: [...focused.classList][0], bulk: focused.dataset.vmBulkAction, snapshot: focused.dataset.snapshotAction, tag: focused.tagName };
+  const scrollTop = deploymentDetailsDialog.scrollTop;
   render();
   root.querySelectorAll('details').forEach(el => { el.open = open.has(key(el) + ':' + el.querySelector('summary')?.textContent.split(' — ')[0]); });
   if (focusKey) {
     const candidates = [...root.querySelectorAll('button, input, summary')];
-    candidates.find(el => key(el) === focusKey.vm && el.tagName === focusKey.tag && [...el.classList][0] === focusKey.cls && el.dataset.vmBulkAction === focusKey.bulk)?.focus({ preventScroll: true });
+    candidates.find(el => key(el) === focusKey.vm && el.tagName === focusKey.tag && [...el.classList][0] === focusKey.cls && el.dataset.vmBulkAction === focusKey.bulk && el.dataset.snapshotAction === focusKey.snapshot)?.focus({ preventScroll: true });
   }
-  deploymentDetailsDialog.scrollTop = scrolls[0];
-  root.querySelectorAll('.table-wrap').forEach((el, i) => { el.scrollLeft = scrolls[i + 1] || 0; });
+  deploymentDetailsDialog.scrollTop = scrollTop;
 }
 
 function syncFilterOptions() {

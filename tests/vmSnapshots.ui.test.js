@@ -9,7 +9,7 @@ function setup(overrides = {}) {
   const calls = [];
   const context = {
     getDeploymentVmSelection: () => selection, renderVmActionIcon: () => '<svg></svg>',
-    escapeHtml: String, escapeHtmlAttr: String, getOsLabel: String,
+    escapeHtml: String, escapeHtmlAttr: String, getOsLabel: String, getOsLogo: () => '/assets/os-other.svg',
     state: { activeDeploymentDetailsId: 'lab' }, preserveDetailView: fn => fn(), renderDeploymentVmDetails: () => {},
     confirmAction: async () => true, refreshOpenDeploymentDetails: async () => {},
     fetchJson: async (url, options) => { calls.push({ url, options }); return options ? { task: 'upid' } : { complete: true, success: true }; },
@@ -18,10 +18,10 @@ function setup(overrides = {}) {
   vm.runInNewContext(source.slice(source.indexOf('const vmSnapshotDescriptions ='), source.indexOf('async function redeployDeploymentWorkstation(')), context);
   return { context, selection, calls };
 }
-test('rows offer creation only without a snapshot and restore/delete only with one', () => {
+test('VM cards offer creation only without a snapshot and restore/delete only with one', () => {
   const { context } = setup();
   for (const exists of [true, false]) {
-    const html = context.renderDeploymentVmRows([{ vmid: 101, snapshot: { exists } }], 'lab', false, false, false, true);
+    const html = context.renderDeploymentVmCards([{ vmid: 101, snapshot: { exists } }], 'lab', false, false, false, true);
     assert.equal(html.includes('data-snapshot-action="create"'), !exists);
     assert.equal(html.includes('data-snapshot-action="restore"'), exists);
     assert.equal(html.includes('data-snapshot-action="delete"'), exists);
@@ -30,15 +30,15 @@ test('rows offer creation only without a snapshot and restore/delete only with o
 test('unavailable status never offers creation and locked/unauthorized VMs disable actions', () => {
   const { context } = setup();
   const row = snapshot => [{ vmid: 101, snapshot }];
-  assert(!context.renderDeploymentVmRows(row({ error: 'offline' }), 'lab', false, false, false, true).includes('data-snapshot-action'));
-  assert(context.renderDeploymentVmRows(row({ exists: false, locked: true }), 'lab', false, false, false, true).includes('disabled'));
-  assert(context.renderDeploymentVmRows(row({ exists: false }), 'lab').includes('disabled'));
+  assert(!context.renderDeploymentVmCards(row({ error: 'offline' }), 'lab', false, false, false, true).includes('data-snapshot-action'));
+  assert(context.renderDeploymentVmCards(row({ exists: false, locked: true }), 'lab', false, false, false, true).includes('disabled'));
+  assert(context.renderDeploymentVmCards(row({ exists: false }), 'lab').includes('disabled'));
 });
-test('snapshot column displays local date/time and icon actions are in the actions cell', () => {
+test('VM cards display snapshot date/time separately from icon actions', () => {
   const { context } = setup();
   const createdAt = 1793192400;
-  const html = context.renderDeploymentVmRows([{ vmid: 101, snapshot: { exists: true, createdAt } }], 'lab', false, false, false, true);
-  const cell = html.match(/<td class="vm-snapshot-cell">([\s\S]*?)<\/td>/)[1];
+  const html = context.renderDeploymentVmCards([{ vmid: 101, snapshot: { exists: true, createdAt } }], 'lab', false, false, false, true);
+  const cell = html.match(/<div class="vm-snapshot-cell">([\s\S]*?)<\/div>/)[1];
   assert(cell.includes(new Date(createdAt * 1000).toLocaleString()));
   assert(!cell.includes('<button'));
   assert.match(html, /class="icon-btn vm-snapshot-button"/);
