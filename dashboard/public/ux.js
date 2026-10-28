@@ -1,7 +1,7 @@
 export const labStatusLabels = {
   idle: 'Not deployed', queued: 'Queued', deploying: 'Creating VMs',
   customizing: 'Configuring VMs', deployed: 'Ready', running: 'Running',
-  mixed: 'Partially running', starting: 'Starting', stopping: 'Stopping',
+  mixed: 'Partially started', starting: 'Starting', stopping: 'Stopping',
   stopped: 'Stopped', destroying: 'Deleting VMs', destroyed: 'VMs deleted', failed: 'Failed'
 };
 

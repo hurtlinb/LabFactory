@@ -1,3 +1,4 @@
+import { startDeploymentDuration, finishDeploymentDuration, safelyRecordDuration } from '../lib/deploymentDurations.js';
 import { runReadinessCommand } from '../lib/readinessConcurrency.js';
 import { activeAnsibleTasks, getAnsibleTasks } from '../lib/ansibleTasks.js';
 import { getFileUploads } from '../lib/blueprintFiles.js';
@@ -1486,6 +1487,7 @@ export function startTerraformWorker(connection) {
           };
         }
         if (action === 'deploy') {
+          await safelyRecordDuration(startDeploymentDuration, dbPool, job);
           await readinessReporter.publish();
         }
 
@@ -1905,6 +1907,10 @@ export function startTerraformWorker(connection) {
             jobId: String(job.id),
             runId: job.data.runId
           });
+        }
+
+        if (action === 'deploy' && customizationTargets.length === 0 && guestReadiness.failedVmids.size === 0) {
+          await safelyRecordDuration(finishDeploymentDuration, dbPool, job);
         }
 
         console.log(`Terraform job ${job.id} finished for deployment ${deploymentLabel} (${action})`);

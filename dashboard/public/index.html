@@ -429,7 +429,7 @@
                   <span id="showOnlyMyLabsLabel" class="switch-label">Only my labs</span>
                 </label>
               </div>
-              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, module, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially running</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option></select></label></div><div id="lifecycleList" class="saved-list">
+              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, module, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially started</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option></select></label></div><div id="lifecycleList" class="saved-list">
                 <p class="placeholder">Loading deployments…</p>
               </div>
             </article>
@@ -814,6 +814,7 @@
                     </select>
                   </label>
                 </div>
+                <p id="deploymentDurationEstimate" class="muted" aria-live="polite" hidden></p>
                 <button class="btn btn-primary" type="submit">Deploy</button>
               <p id="deploymentDialogError" class="field-error" role="alert" hidden></p></form></div></dialog>
 <dialog id="moduleDialog" class="modal-dialog module-dialog" aria-labelledby="moduleDialogTitle"><div class="modal-card"><h2 id="moduleDialogTitle">Add module</h2><form id="courseForm" class="stack">

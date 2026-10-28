@@ -371,6 +371,30 @@ function renderBlueprintPreview(blueprint) {
   </div>`;
 }
 
+function blueprintDeploymentEstimate(blueprint) {
+  const milliseconds = Number(blueprint?.averageDeploymentMs);
+  const count = Number(blueprint?.deploymentDurationSamples || 0);
+  if (!count || !Number.isFinite(milliseconds) || milliseconds < 0 || blueprint?.averageDeploymentMs == null) {
+    return { label: 'Average deploy: no history yet', detail: 'No completed full deployments available yet.' };
+  }
+  const minutes = Math.max(1, Math.round(milliseconds / 60000));
+  const duration = milliseconds < 60000 ? '< 1 min' : minutes < 60 ? minutes + ' min' : Math.floor(minutes / 60) + ' h' + (minutes % 60 ? ' ' + minutes % 60 + ' min' : '');
+  return {
+    label: 'Average deploy: ' + duration,
+    detail: 'Based on ' + count + ' successful full deployment' + (count === 1 ? '' : 's') + '. Includes guest readiness and customization; excludes initial queue time. Duration varies with workplace count and cluster load.'
+  };
+}
+
+function updateDeploymentEstimate() {
+  const target = document.getElementById('deploymentDurationEstimate');
+  if (!target) return;
+  const blueprint = state.blueprints.find(item => item.id === deploymentBlueprintSelect?.value);
+  target.hidden = !blueprint;
+  if (!blueprint) { target.textContent = ''; return; }
+  const estimate = blueprintDeploymentEstimate(blueprint);
+  target.textContent = estimate.label + ' (including customization). ' + estimate.detail;
+}
+
 function renderBlueprintList() {
   if (!state.blueprints.length) {
     blueprintList.innerHTML = '<p class="placeholder">No blueprints yet. Use New to create your first reusable lab.</p>';
@@ -395,6 +419,7 @@ function renderBlueprintList() {
           </div>
           <p class="blueprint-card-description" title="${escapeHtmlAttr(blueprint.description || '')}">${escapeHtml(blueprint.description || 'No description')}</p>
           ${renderBlueprintPreview(blueprint)}
+          <p class="blueprint-deployment-estimate" title="${escapeHtmlAttr(blueprintDeploymentEstimate(blueprint).detail)}">${escapeHtml(blueprintDeploymentEstimate(blueprint).label)} <span class="muted">incl. customization</span></p>
           <div class="blueprint-card-footer">
             <div class="blueprint-card-owner">${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}</div>
             <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${blueprint.vmCount} VM · ${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
@@ -486,6 +511,7 @@ function renderDeploymentSelectors() {
         .map(classroom => `<option value="${classroom.id}">${escapeHtml(classroom.name)}</option>`)
         .join('');
     deploymentClassroomSelect.value = selected;
+    updateDeploymentEstimate();
   }
 }
 
@@ -1156,7 +1182,7 @@ function renderLifecycleSteps(status) {
     deployed:    { label: 'Ready',    cls: 'op-stopped', icon: '▶' },
     starting:    { label: 'Starting…',         cls: 'op-busy',    icon: '↻' },
     running:     { label: 'Running',           cls: 'op-running', icon: '▶' },
-    mixed:       { label: 'Partially running', cls: 'op-warning', icon: '▶' },
+    mixed:       { label: 'Partially started', cls: 'op-warning', icon: '▶' },
     stopping:    { label: 'Stopping…',         cls: 'op-busy',    icon: '↻' },
     stopped:     { label: 'Stopped',           cls: 'op-stopped', icon: '■' },
     destroying:  { label: 'Destroying…',       cls: 'op-busy',    icon: '↻' },
@@ -1240,7 +1266,7 @@ function renderLifecycleLabs() {
 
   lifecycleList.innerHTML = visibleDeployments
     .map(deployment => {
-      const actions = resolveLifecycleActions(deployment.status);
+      const actions = resolveLifecycleActions(deployment.status, deployment.hasExistingVms);
       const canManage = canManageDeployment(deployment);
       const foreign = isForeignDeployment(deployment);
       const visibleActions = actions.busy
@@ -1285,7 +1311,7 @@ function renderLifecycleLabs() {
             <div class="inline-actions">
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               <span class="pill ${statusPillClass}">${escapeHtml(labStatusLabel(s))}</span>
-              ${['deployed', 'running', 'stopped', 'mixed'].includes(s) ? `<button class="btn btn-ghost refresh-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Refresh lab state" title="Refresh lab state"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg></button>` : ''}
+              ${['deployed', 'running', 'stopped', 'mixed', 'failed'].includes(s) ? `<button class="btn btn-ghost refresh-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Refresh lab state" title="Refresh lab state"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg></button>` : ''}
               <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details ${uiIcon('arrow')}</button>
             </div>
           </div>
@@ -1374,7 +1400,7 @@ function bindLifecycleActions(container) {
 }
 
 function renderDashboardPowerActions(deployment) {
-  const actions = resolveLifecycleActions(deployment.status);
+  const actions = resolveLifecycleActions(deployment.status, deployment.hasExistingVms);
   if (actions.busy) return '<span class="loading-spinner" role="status" aria-label="Lab operation in progress"></span>';
   return actions.items.filter(item => ['start', 'stop'].includes(item.action)).map(item =>
     `<button class="btn btn-ghost lifecycle-action" type="button" data-action="${item.action}" data-deployment-id="${escapeHtmlAttr(deployment.id)}" aria-label="${item.label} #${escapeHtmlAttr(String(deployment.deploymentNumber))}" title="${item.label}">${uiIcon(item.action)}</button>`
@@ -1407,7 +1433,7 @@ function renderDashboard() {
                 d.status === 'stopped' ? 'dash-badge-stopped' :
                 d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
               const badgeText =
-                d.status === 'mixed' ? 'Partially running' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
+                d.status === 'mixed' ? 'Partially started' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
                 d.status === 'starting' ? labStatusLabel(d.status) :
                 ['queued', 'deploying', 'customizing'].includes(d.status) ? 'Preparing' :
                 d.status === 'stopped' ? 'Stopped' :
@@ -1966,17 +1992,17 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
   }
 }
 
-function resolveLifecycleActions(status) {
+function resolveLifecycleActions(status, hasExistingVms = null) {
   if (isDeploymentBusy(status)) {
     return { busy: true, items: [] };
   }
-  if (status === 'destroyed') {
+  if (status === 'destroyed' && hasExistingVms !== true) {
     return {
       busy: false,
       items: [{ action: 'deploy', icon: '⬆', label: 'Deploy lab' }]
     };
   }
-  if (!status || status === 'idle') {
+  if ((!status || status === 'idle') && hasExistingVms !== true) {
     return {
       busy: false,
       items: [{ action: 'deploy', icon: '⬆', label: 'Deploy lab' }]
@@ -2009,7 +2035,7 @@ function resolveLifecycleActions(status) {
   return {
     busy: false,
     items: [
-      { action: 'deploy', icon: '⬆', label: 'Deploy lab' },
+      ...(hasExistingVms === false ? [{ action: 'deploy', label: 'Deploy lab' }] : []),
       { action: 'destroy', icon: '✕', label: 'Destroy deployment' }
     ]
   };
@@ -2804,7 +2830,12 @@ async function refreshLifecycleLabs() {
   if (removedDeployments.includes(state.activeDeploymentDetailsId)) {
     deploymentDetailsDialog.close();
   }
-  if (removedDeployments.length) await loadBlueprints();
+  const completedDeployments = state.deployments.some(deployment => {
+    const previous = previousDeploymentsById.get(deployment.id);
+    return previous && ['queued', 'deploying', 'customizing'].includes(previous.status)
+      && ['deployed', 'running', 'stopped', 'mixed'].includes(deployment.status);
+  });
+  if (removedDeployments.length || completedDeployments) await loadBlueprints();
 }
 
 async function loadBlueprint(blueprintId) {
@@ -3435,6 +3466,7 @@ courseForm?.addEventListener('submit', async event => {
   }
 });
 
+deploymentBlueprintSelect?.addEventListener('change', updateDeploymentEstimate);
 const deployLabDialog = document.getElementById('deployLabDialog');
 const deploymentDialogError = document.getElementById('deploymentDialogError');
 let pendingDeploymentId = null;
@@ -3446,6 +3478,7 @@ function openDeployLabDialog({ blueprintId = '', classroomId = '' } = {}) {
   deploymentClassroomSelect.disabled = false;
   deploymentBlueprintSelect.value = blueprintId;
   deploymentClassroomSelect.value = classroomId;
+  updateDeploymentEstimate();
   deploymentDialogError.hidden = true;
   deployLabDialog.showModal();
   (blueprintId ? deploymentClassroomSelect : deploymentBlueprintSelect).focus();

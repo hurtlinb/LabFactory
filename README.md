@@ -509,3 +509,12 @@ Deployment **Details** provides Create, Delete and Restore snapshot actions for 
 The interface follows the Proxmox task until completion and reports failures. Actions are disabled while the deployment is busy, the VM is locked or snapshot status cannot be read. Storage must support snapshots; the Proxmox API token needs VM.Audit, VM.Snapshot and VM.Snapshot.Rollback permissions on the VMs (and VM.PowerMgmt to restart on restore). No database migration is required.
 
 Validation: `node --test tests/vmSnapshots.test.js tests/vmSnapshots.api.test.js tests/vmBulkActions.test.cjs`.
+
+
+### Blueprint deployment duration
+
+Blueprint cards and the Deploy dialog show the arithmetic mean of successful full lab deployment durations, including guest readiness and Ansible customization. Each run is measured once, from actual Terraform execution to the end of customization (or Terraform completion when no customization is required). Initial queue/lock waiting is excluded for new measurements; waiting between phases and any retry/resume interval are included. Individual workplace redeployments, failed readiness and incomplete customization are excluded. The sample count is available in the card tooltip and the Deploy dialog. This is a historical average across classroom sizes, not a guarantee for the selected classroom.
+
+Migration `030-blueprint-deployment-durations.sql` creates persistent measurements; they survive lab destruction and queue history cleanup. The dashboard imports completed Terraform/Ansible jobs still retained in Redis at startup and every five minutes, matching by deployment and run ID. Historical imports use the recorded Terraform processing timestamp. Old samples cannot be recovered after job history or the associated deployment has already been deleted. New samples are recorded by both workers. Restart the dashboard (to run migrations) and both workers when deploying this change.
+
+Validation: `node tests/deploymentDurations.test.js` and `node tests/dashboardUx.test.js`.

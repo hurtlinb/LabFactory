@@ -50,12 +50,12 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
+  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
 test('network preview and status labels describe real operations', () => {
-  assert.equal(helpers.labStatusLabel('mixed'), 'Partially running');
+  assert.equal(helpers.labStatusLabel('mixed'), 'Partially started');
   assert.equal(helpers.labStatusLabel('deployed'), 'Ready');
   assert.deepEqual(helpers.classroomPreview({ workstationCount: 2, startingVlan: 200, startingSubnet: '10.0.200.0', networkGateway: '10.0.200.1' })[1],
     { workstation: 2, vlan: 201, subnet: '10.0.201.0/24', gateway: '10.0.201.1' });
@@ -93,6 +93,21 @@ test('dashboard bootstraps all views, and edits are protected when replacing a b
   assert(confirmation.open); confirmation.close('cancel'); await tick();
   assert.equal(api.state.currentBlueprint.name, 'Edited');
   assert.equal(document.querySelector('.confirmation-dialog'), null);
+});
+
+test('failed labs with existing VMs expose Refresh and hide Deploy', async t => {
+  const { api, document } = setup(t); await api.bootstrap();
+  api.state.deployments = [{ id: 'lab', deploymentNumber: 137, status: 'failed', hasExistingVms: true,
+    blueprint: { id: 'bp', name: 'Windows' }, classroom: { id: 'room', name: 'Test' } }];
+  api.renderLifecycleLabs();
+  const card = document.querySelector('.deployment-card');
+  assert(card.querySelector('.refresh-deployment-button'));
+  assert.equal(card.querySelector('[data-action="deploy"]'), null);
+  api.state.deployments[0].status = 'mixed';
+  api.renderLifecycleLabs();
+  assert(document.querySelector('.deployment-card [data-action="start"]'));
+  assert(document.querySelector('.deployment-card [data-action="stop"]'));
+  assert.match(document.querySelector('.deployment-card').textContent, /Partially started/);
 });
 
 test('destructive lab action waits for confirmation and cancellation sends no request', async t => {
@@ -194,6 +209,47 @@ test('blueprint cards preview VM names and OS with overflow count and escaped co
   assert(preview.textContent.includes('<script>VM</script>'));
   assert.equal(preview.querySelector('.blueprint-preview-more').textContent, '+2 VM');
   assert.equal(preview.querySelector('img').getAttribute('src'), '/assets/os-ubuntu.png');
+});
+
+test('blueprint averages appear on cards and update when choosing a blueprint in Deploy', async t => {
+  const { api, document, w } = setup(t); await api.bootstrap();
+  api.state.blueprints = [
+    { ...blueprint, id: 'bp', averageDeploymentMs: 750000, deploymentDurationSamples: 3 },
+    { ...blueprint, id: 'new', name: 'New blueprint', averageDeploymentMs: null, deploymentDurationSamples: 0 },
+    { ...blueprint, id: 'long', averageDeploymentMs: 3900000, deploymentDurationSamples: 2 }
+  ];
+  api.renderBlueprintList();
+  const card = document.querySelector('[data-blueprint-id="bp"]');
+  assert.match(card.querySelector('.blueprint-deployment-estimate').textContent, /13 min/);
+  assert.match(card.querySelector('.blueprint-deployment-estimate').title, /3 successful full deployments/);
+  card.querySelector('.blueprint-deploy-button').click();
+  const estimate = document.getElementById('deploymentDurationEstimate');
+  assert.equal(estimate.hidden, false); assert.match(estimate.textContent, /13 min.*including customization/);
+  const select = document.getElementById('deploymentBlueprintSelect');
+  select.value = 'new'; select.dispatchEvent(new w.Event('change'));
+  assert.match(estimate.textContent, /no history yet/);
+  select.value = 'long'; select.dispatchEvent(new w.Event('change'));
+  assert.match(estimate.textContent, /1 h 5 min/);
+  select.value = ''; select.dispatchEvent(new w.Event('change'));
+  assert.equal(estimate.hidden, true);
+});
+
+test('finishing a deployment refreshes the blueprint average', async t => {
+  const { api, w } = setup(t); await api.bootstrap();
+  api.state.deployments = [{ id: 'lab', status: 'customizing' }];
+  let refreshed = false;
+  const fallback = w.fetch;
+  w.fetch = async (url, options) => {
+    if (url === '/api/lifecycle/deployments') return { ok: true, json: async () => [{ id: 'lab', status: 'running', blueprint: { id: 'bp', name: 'Test' }, classroom: { id: 'room', name: 'Test' } }] };
+    if (url === '/api/blueprints') {
+      refreshed = true;
+      return { ok: true, json: async () => [{ ...blueprint, averageDeploymentMs: 120000, deploymentDurationSamples: 1 }] };
+    }
+    return fallback(url, options);
+  };
+  await api.refreshLifecycleLabs();
+  assert.equal(refreshed, true);
+  assert.equal(api.state.blueprints[0].averageDeploymentMs, 120000);
 });
 
 test('delete blueprint does not also trigger opening that blueprint', async t => {

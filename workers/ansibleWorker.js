@@ -1,3 +1,4 @@
+import { finishDeploymentDuration, safelyRecordDuration } from '../lib/deploymentDurations.js';
 import { runReadinessCommand } from '../lib/readinessConcurrency.js';
 import { activeAnsibleTasks } from '../lib/ansibleTasks.js';
 import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
@@ -376,6 +377,7 @@ export function startAnsibleWorker(connection) {
           runId: job.data.runId
         });
 
+        await safelyRecordDuration(finishDeploymentDuration, dbPool, job);
         console.log(`Ansible job ${job.id} finished for deployment ${deploymentLabel} (customize)`);
         return { status: 'ansible-done' };
       } catch (error) {

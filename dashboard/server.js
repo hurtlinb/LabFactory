@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { importHistoricalDeploymentDurations } from '../lib/deploymentDurations.js';
 import { getVmSnapshot, startVmSnapshotAction, getVmSnapshotTask } from '../lib/vmSnapshots.js';
 import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
 import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes, blueprintFileDirectory } from '../lib/blueprintFiles.js';
@@ -860,6 +861,8 @@ const mapBlueprintSummary = row => ({
   },
   vmCount: Number(row.vm_count ?? 0),
   previewVms: row.preview_vms ?? [],
+  averageDeploymentMs: row.average_deployment_ms == null ? null : Number(row.average_deployment_ms),
+  deploymentDurationSamples: Number(row.deployment_duration_samples ?? 0),
   deploymentCount: Number(row.deployment_count ?? 0),
   guestPasswordMode: row.guest_password_mode === 'per-workstation' ? 'per-workstation' : 'shared',
   isLocked: Number(row.deployment_count ?? 0) > 0,
@@ -1817,13 +1820,13 @@ const deriveDeploymentStatusFromResources = (
   currentStatus,
   expectedVmids,
   resourceByVmid,
-  { reconcileTransient = false } = {}
+  { reconcileTransient = false, reconcileFailed = false } = {}
 ) => {
   if (!(resourceByVmid instanceof Map)) {
     return currentStatus;
   }
 
-  if (currentStatus === 'failed') {
+  if (currentStatus === 'failed' && !reconcileFailed) {
     return currentStatus;
   }
 
@@ -2289,6 +2292,7 @@ app.get(
       };
       deployments.push({
         ...runtimeDeployment,
+        hasExistingVms: resourceByVmid ? vmPlan.vms.some(vm => resourceByVmid.has(Number(vm.vmid))) : null,
         customizationResults: customizationProgress?.results ?? null,
         canResumeCustomization: deployment.status === 'failed' && Boolean(customizationProgress?.canResume) && canManageDeployment(req, deployment),
         displayStatus: resolveDeploymentDisplayStatus(effectiveDeploymentStatus, readinessProgress),
@@ -2318,8 +2322,8 @@ app.post(
       if (typeof deploymentId !== 'string') return res.status(400).json({ error: 'Invalid deployment ID' });
       rows = rows.filter(row => String(row.id) === deploymentId);
       if (!rows.length) return res.status(404).json({ error: 'deployment not found' });
-      if (!['deployed', 'running', 'stopped', 'mixed'].includes(mapDeployment(rows[0]).status)) {
-        return res.status(409).json({ error: 'Only deployed labs can be refreshed individually' });
+      if (!['deployed', 'running', 'stopped', 'mixed', 'failed'].includes(mapDeployment(rows[0]).status)) {
+        return res.status(409).json({ error: 'Only inactive operations can be refreshed individually' });
       }
     }
     const resources = await fetchClusterVmResources({ context: 'lifecycle deployments refresh-state' });
@@ -2328,6 +2332,7 @@ app.post(
 
     for (const row of rows) {
       const deployment = mapDeployment(row);
+      if (deploymentBusyStatuses.has(deployment.status)) continue;
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmids = buildTerraformDeploymentPayload({
@@ -2341,7 +2346,7 @@ app.post(
         deployment.status,
         vmids,
         resourceByVmid,
-        { reconcileTransient: true }
+        { reconcileFailed: true }
       );
 
       await dbPool.query(
@@ -2350,8 +2355,8 @@ app.post(
            status = $2,
            last_action = CASE WHEN $3::boolean THEN last_action ELSE 'refresh' END,
            updated_at = NOW()
-         WHERE id = $1`,
-        [deployment.id, reconciledStatus, deploymentBusyStatuses.has(deployment.status)]
+         WHERE id = $1 AND status = $4 AND last_run_id IS NOT DISTINCT FROM $5`,
+        [deployment.id, reconciledStatus, deploymentBusyStatuses.has(deployment.status), deployment.status, deployment.lastRunId]
       );
 
       const next = await fetchDeploymentById(deployment.id);
@@ -3204,6 +3209,13 @@ app.post(
       teacher: deployment.teacher,
       workstationPasswords: deployment.workstationPasswords
     });
+    if (action === 'deploy') {
+      const resources = await fetchClusterVmResources({ context: 'verify deployment VM absence' });
+      const existingVmids = new Set(resources.map(vm => Number(vm.vmid)));
+      if (terraformBlueprintPayload.vms.some(vm => existingVmids.has(Number(vm.vmid)))) {
+        return res.status(409).json({ error: 'VMs already exist for this lab. Refresh its state, then use Start or Stop.' });
+      }
+    }
     const updated = await updateDeploymentState({
       deploymentId: deployment.id,
       action,
@@ -3453,6 +3465,10 @@ app.get(
          t.first_name AS teacher_first_name,
          t.last_name AS teacher_last_name,
          t.display_name AS teacher_display_name,
+         (SELECT AVG(EXTRACT(EPOCH FROM (h.finished_at - h.started_at)) * 1000)
+          FROM blueprint_deployment_durations h WHERE h.blueprint_id = b.id AND h.finished_at IS NOT NULL) AS average_deployment_ms,
+         (SELECT COUNT(*) FROM blueprint_deployment_durations h
+          WHERE h.blueprint_id = b.id AND h.finished_at IS NOT NULL) AS deployment_duration_samples,
          COUNT(v.id) AS vm_count,
          (
            SELECT COALESCE(json_agg(preview ORDER BY preview.vm_order, preview.id), '[]'::json)
@@ -4027,6 +4043,16 @@ process.on('SIGTERM', shutdown);
   await cleanFiles();
   setInterval(cleanFiles, 60 * 60 * 1000).unref();
   await redisClient.connect();
+  let importingDurations = false;
+  const importDurations = async () => {
+    if (importingDurations) return;
+    importingDurations = true;
+    try { await importHistoricalDeploymentDurations(dbPool, queues); }
+    catch (error) { console.error('Unable to import historical deployment durations', error); }
+    finally { importingDurations = false; }
+  };
+  await importDurations();
+  setInterval(importDurations, 5 * 60 * 1000).unref();
   const server = app.listen(port, () => {
     console.log(`Dashboard listening on http://localhost:${port}`);
   });

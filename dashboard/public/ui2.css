@@ -196,7 +196,7 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .blueprint-card-header:has(.blueprint-deploy-button) { grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
 .blueprint-card-header:has(.blueprint-deploy-button) .blueprint-machine-count { display: none; }
 #blueprintList { grid-template-columns: repeat(auto-fit, minmax(min(350px, 100%), 1fr)); gap: 14px; }
-#blueprintList .blueprint-item { display: grid; grid-template-rows: 52px 48px 108px 46px; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-sm); }
+#blueprintList .blueprint-item { display: grid; grid-template-rows: 52px 48px 108px auto 46px; gap: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow-sm); }
 #blueprintList .blueprint-item:hover { border-color: var(--line-strong); background: var(--surface); }
 #blueprintList .blueprint-item.active { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand); }
 .blueprint-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 10px 12px; background: #fbfcff; border-bottom: 1px solid var(--line); }
@@ -298,3 +298,7 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
   .danger-panel > .danger-eyebrow { margin: -18px -16px 0; padding: 14px 16px; }
   .dev-banner-text { max-width: 100px; }
 }
+
+.blueprint-deployment-estimate { margin: 0; padding: 8px 12px; font-size: 12px; overflow-wrap: anywhere; border-top: 1px solid var(--line); }
+.blueprint-deployment-estimate .muted { display: block; font-size: 11px; }
+#deploymentDurationEstimate { font-size: 12px; line-height: 1.5; }
