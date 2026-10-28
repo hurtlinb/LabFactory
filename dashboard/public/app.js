@@ -1569,10 +1569,19 @@ async function runVmBulkAction(deploymentId, action) {
   }
 }
 
-function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false) {
+function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false, canManageSnapshots = false) {
   return vms
     .map(
       vm => {
+        const snapshot = vm.snapshot;
+        const snapshotOperation = getDeploymentVmSelection(deploymentId).snapshotOperations?.get(String(vm.vmid));
+        const snapshotDisabled = !canManageSnapshots || !snapshot || snapshot.error || snapshot.locked || snapshotOperation?.running;
+        const snapshotActions = snapshot && !snapshot.error
+          ? (snapshot.exists ? ['restore', 'delete'] : ['create']).map(action => {
+            const label = { create: 'Create snapshot', delete: 'Delete snapshot', restore: 'Restore snapshot' }[action];
+            return `<button class="ghost-button vm-snapshot-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" data-snapshot-action="${action}" ${snapshotDisabled ? 'disabled' : ''} title="${label} labfactory">${label}</button>`;
+          }).join('') : '';
+        const snapshotMarkup = `<span class="muted">${escapeHtml(snapshot?.error || (snapshot ? (snapshot.exists ? 'labfactory' : 'No snapshot') : 'Unavailable'))}${snapshot?.locked ? ' (VM busy)' : ''}</span>${snapshotActions}${snapshotOperation ? `<span class="muted" role="status">${escapeHtml(snapshotOperation.message)}</span>` : ''}`;
         const hasStaticIp = vm.ipAddress && vm.ipAddress !== 'dhcp' && vm.ipAddress !== 'n/a';
         const resetIpButton = canResetIp && hasStaticIp && vm.proxmoxStatus === 'running'
           ? `<button class="icon-btn reset-ip-button" type="button" title="Reset IP" aria-label="Reset IP" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
@@ -1607,12 +1616,54 @@ function renderDeploymentVmRows(vms, deploymentId, canResetIp = false, canResetP
           <td>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button></div>` : '<span class="muted">n/a</span>'}</td>
           <td>${escapeHtml(vm.state || 'unknown')}</td>
           <td>${escapeHtml(vm.proxmoxStatus || 'n/a')}</td>
+          <td class="vm-snapshot-cell">${snapshotMarkup}</td>
           <td style="white-space:nowrap">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}</td>
         </tr>
       `;
       }
     )
     .join('');
+}
+
+async function runVmSnapshotAction(deploymentId, vmid, action) {
+  const selection = getDeploymentVmSelection(deploymentId);
+  if (!selection.snapshotOperations) selection.snapshotOperations = new Map();
+  if (selection.snapshotOperations.get(String(vmid))?.running) return;
+  const descriptions = {
+    create: 'Create snapshot labfactory of the disks and configuration? RAM is not included.',
+    delete: 'Delete snapshot labfactory? You will no longer be able to restore this saved state.',
+    restore: 'Restore snapshot labfactory? Changes since the snapshot will be lost. A running VM will be interrupted and restarted. Saved passwords may also be reverted.'
+  };
+  if (!descriptions[action] || !await confirmAction('VM snapshot', descriptions[action], { create: 'Create', delete: 'Delete', restore: 'Restore' }[action])) return;
+  if (selection.snapshotOperations.get(String(vmid))?.running) return;
+  const operation = { running: true, message: 'Snapshot operation in progress...' };
+  selection.snapshotOperations.set(String(vmid), operation);
+  const render = () => {
+    if (state.activeDeploymentDetailsId === deploymentId && selection.payload) preserveDetailView(() => renderDeploymentVmDetails(selection.payload));
+  };
+  render();
+  const url = `/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms/${encodeURIComponent(vmid)}/snapshot`;
+  try {
+    const { task } = await fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action }) });
+    // Task polling survives Details refreshes and does not report acceptance as success.
+    const deadline = Date.now() + 30 * 60 * 1000;
+    while (true) {
+      const result = await fetchJson(`${url}?task=${encodeURIComponent(task)}`);
+      if (result.complete) {
+        if (!result.success) throw new Error(result.error || 'Snapshot operation failed');
+        operation.message = { create: 'Snapshot created.', delete: 'Snapshot deleted.', restore: 'Snapshot restored.' }[action];
+        break;
+      }
+      if (Date.now() >= deadline) throw new Error('Snapshot task is still running. Check Proxmox before retrying.');
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+  } catch (error) {
+    operation.message = `${error.message} Refresh snapshot status before retrying.`;
+  } finally {
+    operation.running = false;
+    await refreshOpenDeploymentDetails();
+    render();
+  }
 }
 
 async function redeployDeploymentWorkstation(deploymentId, workstationNumber, button) {
@@ -1782,10 +1833,11 @@ function renderDeploymentVmDetails(payload) {
                       <th scope="col">Password</th>
                       <th scope="col">State</th>
                       <th scope="col">Proxmox</th>
+                      <th scope="col">Snapshot</th>
                       <th scope="col"></th>
                     </tr>
                   </thead>
-                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword, canPauseUpdates)}</tbody>
+                  <tbody>${renderDeploymentVmRows(workstationVms, deployment.id, canResetIp, canResetPassword, canPauseUpdates, Boolean(deployment.canManageSnapshots))}</tbody>
                 </table>
               </div>
             </section>
@@ -1824,6 +1876,10 @@ function renderDeploymentVmDetails(payload) {
         button
       );
     });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.vm-snapshot-button').forEach(button => {
+    button.addEventListener('click', () => runVmSnapshotAction(button.dataset.deploymentId, button.dataset.vmid, button.dataset.snapshotAction));
   });
 
   deploymentVmDetailsList.querySelectorAll('.reset-ip-button').forEach(button => {

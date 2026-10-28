@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.0.3] — 2026-10-28
+
+- Security fix
+
 ## [2.0.0] — 2026-10-10
 
 - UI change

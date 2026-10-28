@@ -500,3 +500,12 @@ Labs show successful, failed and pending customization counts. VM details show t
 For the HTTP integration test, start an isolated dashboard with a test PostgreSQL database, Redis and file directory, then set `BLUEPRINT_FILES_TEST_DATABASE_URL`, `BLUEPRINT_FILES_TEST_API_URL`, and `BLUEPRINT_FILES_TEST_STORAGE` and run `node --test tests/blueprintFiles.http.test.js`. It uploads 300 MiB and checks save, replacement, customization removal and blueprint deletion.
 
 Guest readiness probes (Windows WinRM, Linux SSH, and Windows reconnect) share a FIFO limit across all labs in each worker process. `GUEST_READINESS_CONCURRENCY` defaults to 4 (range 1?8). Each attempt releases its slot before retry backoff; cancelled queued probes never launch. This bounds readiness subprocess memory independently of Terraform and lab job concurrency.
+
+
+### VM snapshots
+
+Deployment **Details** provides Create, Delete and Restore snapshot actions for each VM, available to the deployment owner and administrators. LabFactory manages one snapshot named `labfactory` per VM; delete it before creating another. Other Proxmox snapshots are left untouched. Snapshots save disks and configuration, without RAM. Restore discards subsequent changes (including guest password changes) and restarts the VM if it was running. The displayed blueprint credentials are not rewritten by a rollback.
+
+The interface follows the Proxmox task until completion and reports failures. Actions are disabled while the deployment is busy, the VM is locked or snapshot status cannot be read. Storage must support snapshots; the Proxmox API token needs VM.Audit, VM.Snapshot and VM.Snapshot.Rollback permissions on the VMs (and VM.PowerMgmt to restart on restore). No database migration is required.
+
+Validation: `node --test tests/vmSnapshots.test.js tests/vmSnapshots.api.test.js tests/vmBulkActions.test.cjs`.

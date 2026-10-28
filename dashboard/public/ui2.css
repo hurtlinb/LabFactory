@@ -279,3 +279,7 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
   .danger-panel > .danger-eyebrow { margin: -18px -16px 0; padding: 14px 16px; }
   .dev-banner-text { max-width: 100px; }
 }
+
+.vm-snapshot-cell { min-width: 155px; max-width: 240px; white-space: normal; }
+.vm-snapshot-cell > span { display: block; margin: 4px 0; overflow-wrap: anywhere; }
+.vm-snapshot-cell > button { display: block; margin: 4px 0; font-size: 12px; padding: 5px 8px; }

@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { getVmSnapshot, startVmSnapshotAction, getVmSnapshotTask } from '../lib/vmSnapshots.js';
 import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
 import { INSUFFICIENT_STORAGE_MESSAGE, isInsufficientStorageError, getBlueprintFileStorage, getFileUploads, validateFileUpload, persistFileUpload, receiveBlueprintFile, lockBlueprintFiles, cleanupBlueprintFiles, cleanupOrphanedBlueprintFiles, maxBlueprintFileBytes, blueprintFileDirectory } from '../lib/blueprintFiles.js';
 import express from 'express';
@@ -2465,6 +2466,24 @@ app.get(
       operationTargetVmids: vmProgressSource.targetVmids
     });
     const activeWorkstationNumbers = deriveTargetWorkstationNumbers(vmPlan, vmProgressSource.targetVmids);
+    const snapshots = new Map();
+    const snapshotEnv = readTerraformEnvSettings();
+    // Bound inventory concurrency for large deployments.
+    let snapshotIndex = 0;
+    await Promise.all(Array.from({ length: Math.min(4, vmStates.length) }, async () => {
+      while (snapshotIndex < vmStates.length) {
+        const { vm, resource } = vmStates[snapshotIndex++];
+        if (!resource?.node || !isQemuResource(resource)) continue;
+        try {
+          snapshots.set(Number(vm.vmid), await getVmSnapshot(
+            (apiPath, options) => requestProxmoxJson(snapshotEnv, apiPath, { ...options, timeoutMs: 10000 }), resource
+          ));
+        } catch {
+          snapshots.set(Number(vm.vmid), { error: 'Snapshot status unavailable' });
+        }
+      }
+    }));
+
 
     res.set('Cache-Control', 'no-store');
     res.json({
@@ -2477,6 +2496,7 @@ app.get(
         teacherEmail: deployment.teacherEmail,
         blueprintName: deployment.blueprint.name,
         classroomName: deployment.classroom.name,
+        canManageSnapshots: canManageDeployment(req, deployment) && !deploymentBusyStatuses.has(effectiveDeploymentStatus),
         canRedeployWorkstations: workstationRedeployableStatuses.has(effectiveDeploymentStatus) && canManageDeployment(req, deployment),
         busy: deploymentBusyStatuses.has(effectiveDeploymentStatus),
         activeWorkstationNumbers
@@ -2505,6 +2525,7 @@ app.get(
           guestStarted,
           guestReady,
           customization: customizationProgress?.results?.find(result => Number(result.vmid) === Number(vm.vmid)) ?? null,
+          snapshot: snapshots.get(Number(vm.vmid)) ?? null,
           proxmoxStatus: resource?.status ?? null,
           node: resource?.node ?? null
         };
@@ -2573,6 +2594,41 @@ app.get(
     res.send(csv);
   })
 );
+
+// Poll Proxmox tasks separately to avoid holding HTTP requests open.
+for (const method of ['get', 'post']) {
+  app[method](
+    '/api/lifecycle/deployments/:id/vms/:vmid/snapshot',
+    auth.requireRole(auth.ROLE_GROUPS.LABS),
+    wrapAsync(async (req, res) => {
+      const vmid = Number(req.params.vmid);
+      if (!Number.isInteger(vmid) || vmid <= 0) return res.status(400).json({ error: 'invalid vmid' });
+      const deployment = await fetchDeploymentById(req.params.id);
+      if (!deployment) return res.status(404).json({ error: 'deployment not found' });
+      if (!canManageDeployment(req, deployment)) return denyDeploymentManagement(res);
+      if (method === 'post' && deploymentBusyStatuses.has(deployment.status)) {
+        return res.status(409).json({ error: 'deployment already has an operation in progress' });
+      }
+      const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+      const classroom = await fetchClassroomById(deployment.classroom.id);
+      const plan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+      if (!plan.vms.some(vm => Number(vm.vmid) === vmid)) return res.status(404).json({ error: 'VM not found in deployment plan' });
+      try {
+        const resources = await fetchClusterVmResources({ context: 'VM snapshot' });
+        const resource = resources.find(vm => Number(vm.vmid) === vmid && isQemuResource(vm));
+        if (!resource?.node) return res.status(404).json({ error: 'VM not found in Proxmox cluster' });
+        const env = readTerraformEnvSettings();
+        assertRequiredTerraformEnvSettings(env);
+        const request = (apiPath, options) => requestProxmoxJson(env, apiPath, { ...options, timeoutMs: 15000 });
+        res.set('Cache-Control', 'no-store');
+        if (method === 'get') return res.json(await getVmSnapshotTask(request, resource, req.query.task));
+        return res.status(202).json(await startVmSnapshotAction(request, resource, req.body?.action));
+      } catch (error) {
+        return res.status([400, 409].includes(error.statusCode) ? error.statusCode : 502).json({ error: error.message });
+      }
+    })
+  );
+}
 
 app.post(
   '/api/lifecycle/deployments/:id/vms/:vmid/reset-ip',
