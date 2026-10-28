@@ -1642,7 +1642,7 @@ function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canReset
         const snapshot = vm.snapshot;
         const snapshotOperation = getDeploymentVmSelection(deploymentId).snapshotOperations?.get(String(vm.vmid));
         const snapshotDisabled = !canManageSnapshots || !snapshot || snapshot.error || snapshot.locked || snapshotOperation?.running;
-        const snapshotActions = snapshot && !snapshot.error
+        const snapshotActions = canManageSnapshots && snapshot && !snapshot.error
           ? (snapshot.exists ? ['restore', 'delete'] : ['create']).map(action => {
             const label = { create: 'Create snapshot', delete: 'Delete snapshot', restore: 'Restore snapshot' }[action];
             return `<button class="icon-btn vm-snapshot-button" type="button" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" data-snapshot-action="${action}" ${snapshotDisabled ? 'disabled' : ''} title="${label} labfactory" aria-label="${label} labfactory">${renderVmActionIcon(`snapshot-${action}`)}</button>`;
@@ -1844,7 +1844,7 @@ function renderDeploymentVmDetails(payload) {
     <div class="vm-bulk-toolbar">
       <label><input class="vm-select-all" type="checkbox" /> Select all VMs</label>
       <span class="vm-selection-count" aria-live="polite"></span>
-      <div class="vm-bulk-actions">${Object.entries(vmBulkActions).map(([action, label]) => `<button type="button" class="btn btn-secondary" data-vm-bulk-action="${action}" title="${label}" aria-label="${label}" disabled>${renderVmActionIcon(action)}<span>${label}</span></button>`).join('')}</div>
+      <div class="vm-bulk-actions">${Object.entries(vmBulkActions).filter(([action]) => !action.startsWith('snapshot-') || deployment.canManageSnapshots).map(([action, label]) => `<button type="button" class="btn btn-secondary" data-vm-bulk-action="${action}" title="${label}" aria-label="${label}" disabled>${renderVmActionIcon(action)}<span>${label}</span></button>`).join('')}</div>
       <small class="muted">Actions apply to compatible VMs. Snapshots also support stopped VMs. Other selected VMs are skipped.</small>
     </div>
     <div class="vm-bulk-feedback"></div>

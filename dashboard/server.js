@@ -2690,20 +2690,31 @@ app.post(
 
     const node = vmResource.node;
     const maskBits = parseVlanMaskBits(classroom.networkVlanMask ?? '/24') ?? 24;
-    const gateway = classroom.networkGateway;
+    // Match deployment's per-workplace gateway, including subnets smaller than /24.
+    const subnetSize = 2 ** (32 - maskBits);
+    const ipParts = targetIp.split('.').map(Number);
+    const gatewayHost = Number(String(classroom.networkGateway).split('.').at(-1));
+    const gatewayOctet = Math.floor(ipParts[3] / subnetSize) * subnetSize + gatewayHost % subnetSize;
+    const gateway = [...ipParts.slice(0, 3), gatewayOctet].join('.');
     const osType = String(targetVm.osType ?? '');
     const isWindows = ['windows11', 'windows-server'].includes(osType);
 
     let command;
     if (isWindows) {
       const psScript = [
+        `$ErrorActionPreference = 'Stop'`,
         `$idx = (Get-NetAdapter | Where-Object {$_.Status -eq 'Up'} | Select-Object -First 1).ifIndex`,
-        `Remove-NetIPAddress -InterfaceIndex $idx -Confirm:$false -ErrorAction SilentlyContinue`,
-        `Remove-NetRoute -InterfaceIndex $idx -DestinationPrefix '0.0.0.0/0' -Confirm:$false -ErrorAction SilentlyContinue`,
-        `New-NetIPAddress -InterfaceIndex $idx -IPAddress '${targetIp}' -PrefixLength ${maskBits} -DefaultGateway '${gateway}'`,
+        `if ($null -eq $idx) { throw 'No active network adapter found' }`,
+        `Set-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4 -Dhcp Disabled`,
+        `Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.InterfaceIndex -eq $idx} | Remove-NetIPAddress -Confirm:$false`,
+        `Get-NetRoute -AddressFamily IPv4 | Where-Object {$_.InterfaceIndex -eq $idx -and $_.DestinationPrefix -eq '0.0.0.0/0'} | Remove-NetRoute -Confirm:$false`,
+        `New-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 -IPAddress '${targetIp}' -PrefixLength ${maskBits} -DefaultGateway '${gateway}' | Out-Null`,
         `Set-DnsClientServerAddress -InterfaceIndex $idx -ServerAddresses ('195.186.4.162', '195.186.4.163')`,
+        `$iface = Get-NetIPInterface -InterfaceIndex $idx -AddressFamily IPv4`,
+        `$address = Get-NetIPAddress -InterfaceIndex $idx -AddressFamily IPv4 | Where-Object {$_.IPAddress -eq '${targetIp}' -and $_.PrefixLength -eq ${maskBits}}`,
+        `if ($iface.Dhcp -ne 'Disabled' -or -not $address) { throw 'Static IPv4 configuration verification failed' }`,
       ].join('; ');
-      command = ['powershell.exe', '-NonInteractive', '-Command', psScript];
+      command = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', `try { ${psScript} } catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }`];
     } else {
       const bashScript = [
         `set -e`,

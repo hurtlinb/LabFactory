@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.1.1] — 2026-10-28
+
+- IP reset fix
+
 ## [2.1.0] — 2026-10-28
 
 - Add snapshot support

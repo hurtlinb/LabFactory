@@ -27,12 +27,14 @@ test('VM cards offer creation only without a snapshot and restore/delete only wi
     assert.equal(html.includes('data-snapshot-action="delete"'), exists);
   }
 });
-test('unavailable status never offers creation and locked/unauthorized VMs disable actions', () => {
+test('unavailable or unauthorized snapshots hide actions while locked VMs disable them', () => {
   const { context } = setup();
   const row = snapshot => [{ vmid: 101, snapshot }];
   assert(!context.renderDeploymentVmCards(row({ error: 'offline' }), 'lab', false, false, false, true).includes('data-snapshot-action'));
   assert(context.renderDeploymentVmCards(row({ exists: false, locked: true }), 'lab', false, false, false, true).includes('disabled'));
-  assert(context.renderDeploymentVmCards(row({ exists: false }), 'lab').includes('disabled'));
+  for (const exists of [false, true]) {
+    assert(!context.renderDeploymentVmCards(row({ exists }), 'lab').includes('data-snapshot-action'));
+  }
 });
 test('VM cards display snapshot date/time separately from icon actions', () => {
   const { context } = setup();
