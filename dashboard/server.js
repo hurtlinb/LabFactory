@@ -2565,7 +2565,7 @@ app.get(
       console.error(`Unable to fetch Proxmox VM resources for CSV export ${deployment.id}`, error);
     }
     const rows = [
-      ['Deployment', 'Classroom', 'Workstation', 'VM name', 'VMID', 'OS', 'Username', 'Password', 'IP address', 'VLAN', 'Proxmox node'],
+      ['Deployment', 'Classroom', 'Workplace', 'VM name', 'VMID', 'OS', 'Username', 'Password', 'IP address', 'VLAN', 'Proxmox node'],
       ...vmPlan.vms.map(vm => {
         const resource = resourceByVmid.get(Number(vm.vmid));
         return [
@@ -3062,20 +3062,20 @@ app.post(
       resourceByVmid
     );
     if (!workstationRedeployableStatuses.has(effectiveDeploymentStatus)) {
-      res.status(409).json({ error: 'workstation redeploy is only available when the lab is running or failed' });
+      res.status(409).json({ error: 'workplace redeploy is only available when the lab is running or failed' });
       return;
     }
 
     const requestedWorkstationNumber = Number(req.params.workstationNumber);
     if (!Number.isInteger(requestedWorkstationNumber) || requestedWorkstationNumber < 1 || requestedWorkstationNumber > classroom.workstationCount) {
-      res.status(400).json({ error: 'invalid workstation number' });
+      res.status(400).json({ error: 'invalid workplace number' });
       return;
     }
 
     const workstationNumber = String(requestedWorkstationNumber).padStart(2, '0');
     const workstationVms = terraformBlueprintPayload.vms.filter(vm => resolveWorkstationNumberFromVmId(vm.id) === workstationNumber);
     if (!workstationVms.length) {
-      res.status(404).json({ error: 'workstation not found in deployment plan' });
+      res.status(404).json({ error: 'workplace not found in deployment plan' });
       return;
     }
 

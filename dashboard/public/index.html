@@ -301,13 +301,13 @@
                 </label>
                 <label class="field">
                   <span>Description</span>
-                  <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workstation"></textarea>
+                  <textarea id="blueprintDescription" name="description" rows="3" placeholder="Multi-VM lab with jump host, target and attacker workplace"></textarea>
                 </label>
 
-                </section><section class="blueprint-access-fields"><h2>2. Guest access</h2><p class="muted">Choose one shared password or generate a password for each workstation. Credentials are included in the VM CSV export.</p><label class="switch blueprint-password-toggle">
+                </section><section class="blueprint-access-fields"><h2>2. Guest access</h2><p class="muted">Choose one shared password or generate a password for each workplace. Credentials are included in the VM CSV export.</p><label class="switch blueprint-password-toggle">
                   <input id="blueprintGuestPasswordMode" type="checkbox" name="guestPasswordMode" value="per-workstation">
                   <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                  <span class="switch-label">Generate a different password for each workstation</span>
+                  <span class="switch-label">Generate a different password for each workplace</span>
                 </label>
                 <label id="blueprintGuestPasswordField" class="field">
                   <span>Guest password</span>
@@ -366,7 +366,7 @@
                   <p class="eyebrow">classrooms</p>
                 </div>
               </div>
-              <p class="muted">Each workstation gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
+              <p class="muted">Each workplace gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
               <form id="classroomForm" class="stack">
                 <label class="field">
                   <span>Name</span>
@@ -799,7 +799,7 @@
     </form>
   </dialog>
   <script type="module" src="/app.js"></script>
-<dialog id="deployLabDialog" class="modal-dialog deploy-lab-dialog" aria-labelledby="deployLabTitle"><div class="modal-card"><div class="panel-head"><h2 id="deployLabTitle">Deploy a lab</h2><button id="closeDeployLabButton" class="btn btn-ghost" type="button" aria-label="Close deployment dialog">Cancel</button></div><p class="muted">The blueprint will be deployed to every workstation in the selected classroom.</p><form id="deploymentForm" class="stack section-form">
+<dialog id="deployLabDialog" class="modal-dialog deploy-lab-dialog" aria-labelledby="deployLabTitle"><div class="modal-card"><div class="panel-head"><h2 id="deployLabTitle">Deploy a lab</h2><button id="closeDeployLabButton" class="btn btn-ghost" type="button" aria-label="Close deployment dialog">Cancel</button></div><p class="muted">The blueprint will be deployed to every workplace in the selected classroom.</p><form id="deploymentForm" class="stack section-form">
                 <div class="split">
                   <label class="field">
                     <span>Blueprint</span>

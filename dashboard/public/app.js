@@ -813,7 +813,7 @@ function renderClassrooms() {
           <div class="panel-head">
             <div>
               <strong>${escapeHtml(classroom.name)}</strong>
-              <p class="muted">${classroom.workstationCount} workstation(s)</p>
+              <p class="muted">${classroom.workstationCount} workplace(s)</p>
             </div>
             <button class="icon-btn delete-classroom-button" type="button" data-classroom-id="${classroom.id}" aria-label="Delete classroom">${uiIcon('delete')}</button>
           </div>
@@ -1431,7 +1431,7 @@ function renderDashboard() {
           <div class="dash-classroom-card">
             <div class="dash-classroom-header">
               <strong>${escapeHtml(classroom.name)}</strong>
-              <span class="dash-classroom-seats">${classroom.workstationCount} workstation${classroom.workstationCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
+              <span class="dash-classroom-seats">${classroom.workstationCount} workplace${classroom.workstationCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
               <button class="btn ${labs.length ? 'btn-secondary' : 'btn-primary'} dash-classroom-deploy" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}">${uiIcon('plus')} Deploy a lab</button>
             </div>
             <div class="dash-classroom-labs">${labsHtml}</div>
@@ -1652,7 +1652,7 @@ function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canReset
             <div><dt>Password</dt><dd>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button></div>` : '<span class="muted">n/a</span>'}</dd></div>
           </dl>
           <div class="deployment-vm-snapshot"><span class="muted">Snapshot</span><div class="vm-snapshot-cell">${snapshotMarkup}</div></div>
-          ${vm.customization ? `<div class="deployment-vm-customization vm-state-name-cell">${vm.customization ? `<span class="muted">Customization: ${escapeHtml(vm.customization.status)} · ${escapeHtml(vm.customization.step || '')}${vm.customization.attempt ? ` · attempt ${Number(vm.customization.attempt)}/${Number(vm.customization.maxAttempts || 4)}` : ''}</span>${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
+          ${vm.customization && (vm.customization.error || vm.customization.lastResponse || Object.keys(vm.customization.taskResults || {}).length) ? `<div class="deployment-vm-customization vm-state-name-cell">${vm.customization ? `${vm.customization.error ? `<span class="muted">${escapeHtml(vm.customization.error)}</span>` : ''}${vm.customization.lastResponse ? `<span class="muted">${escapeHtml(vm.customization.lastResponse)}</span>` : ''}` : ''}
             ${Object.values(vm.customization?.taskResults || {}).map(result => `<details class="muted"><summary>Ansible: ${escapeHtml(result.name)} — ${escapeHtml(result.status)}${result.durationMs != null ? ` (${(result.durationMs / 1000).toFixed(1)}s)` : ''}</summary><pre>${escapeHtml(result.error || result.output || 'Running...')}</pre></details>`).join('')}</div>` : ''}
           <footer class="deployment-vm-footer">
             <div class="deployment-vm-status"><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" aria-hidden="true"></span><span>${escapeHtml(vm.state || 'unknown')}</span><span class="muted">Proxmox: ${escapeHtml(vm.proxmoxStatus || 'n/a')}</span></div>
@@ -1691,7 +1691,7 @@ async function runVmSnapshotAction(deploymentId, vmid, action) {
 }
 
 async function redeployDeploymentWorkstation(deploymentId, workstationNumber, button) {
-  if (!await confirmAction('Redeploy workstation?', `Recreate the VMs for workstation ${workstationNumber}? Existing VM data will be lost.`, 'Redeploy')) return;
+  if (!await confirmAction('Redeploy workplace?', `Recreate the VMs for workplace ${workstationNumber}? Existing VM data will be lost.`, 'Redeploy')) return;
   if (!deploymentDetailsStatus) return;
   button.disabled = true;
   try {
@@ -1700,7 +1700,7 @@ async function redeployDeploymentWorkstation(deploymentId, workstationNumber, bu
       headers: { 'Content-Type': 'application/json' }
     });
     await Promise.all([refreshLifecycleLabs(), refreshOpenDeploymentDetails()]);
-    showMessage(deploymentDetailsStatus, `Workstation ${workstationNumber} redeploy queued.`, 'success', 5000);
+    showMessage(deploymentDetailsStatus, `Workplace ${workstationNumber} redeploy queued.`, 'success', 5000);
   } catch (error) {
     showMessage(deploymentDetailsStatus, error.message, 'danger', 5000);
   } finally {
@@ -1810,7 +1810,7 @@ function renderDeploymentVmDetails(payload) {
 
   deploymentVmDetailsList.innerHTML = `
     <div class="deployment-details-summary" aria-label="Deployment summary">
-      <span><strong>${orderedWorkstations.length}</strong> workstations</span>
+      <span><strong>${orderedWorkstations.length}</strong> workplaces</span>
       <span><strong>${vms.filter(vm => vm.guestReady || vm.state === 'ready').length} / ${vms.length}</strong> VMs ready</span>
       <span><strong>${vms.filter(vm => vm.proxmoxStatus === 'running').length}</strong> running</span>
       <span><strong>${vms.filter(vm => vm.snapshot?.exists).length} / ${vms.length}</strong> snapshots${vms.some(vm => !vm.snapshot || vm.snapshot.error) ? ' (some unavailable)' : ''}</span>
@@ -1839,11 +1839,11 @@ function renderDeploymentVmDetails(payload) {
               : '';
 
           return `
-            <section class="workstation-detail-card" data-workstation-number="${escapeHtmlAttr(workstationNumber)}" aria-label="Workstation ${escapeHtmlAttr(workstationNumber)}">
+            <section class="workstation-detail-card" data-workstation-number="${escapeHtmlAttr(workstationNumber)}" aria-label="Workplace ${escapeHtmlAttr(workstationNumber)}">
               <div class="panel-head workstation-detail-head">
                 <div class="workstation-detail-summary">
                   <span class="workstation-detail-icon">${uiIcon('monitor')}</span>
-                  <strong>Workstation ${escapeHtml(workstationNumber)}</strong>
+                  <strong>Workplace ${escapeHtml(workstationNumber)}</strong>
                   <span class="mini-pill">${workstationVms.length} VM${workstationVms.length !== 1 ? 's' : ''}</span>
                 </div>
                 ${actionMarkup}
@@ -3805,7 +3805,7 @@ async function confirmLabAction(deployment, action) {
   const context = `${deployment.blueprint.name} — ${deployment.classroom.name}, lab #${deployment.deploymentNumber}, ${deployment.totalVmCount} VMs.`;
   if (action === 'destroy') return confirmAction('Destroy lab?', `${context} All VM data will be permanently deleted. After successful destruction, the lab will also be removed from the list. The blueprint is preserved.`, 'Destroy lab');
   if (action === 'stop') return confirmAction('Stop lab?', `${context} Running sessions will be interrupted.`, 'Stop lab');
-  return await chooseAction('Deploy lab', `${context} The blueprint will be replicated for every workstation.`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
+  return await chooseAction('Deploy lab', `${context} The blueprint will be replicated for every workplace.`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
 }
 
 function writeRoute(view, id = '') {
@@ -3867,7 +3867,7 @@ function renderAttentionLabs() {
 function updateClassroomPreview() {
   const data = Object.fromEntries(new FormData(classroomForm));
   const rows = classroomPreview(data); const el = document.getElementById('classroomPreview');
-  if (el) el.textContent = rows ? rows.map(row => `Workstation ${row.workstation}: VLAN ${row.vlan}, subnet ${row.subnet}, gateway ${row.gateway}`).join('\n') : 'Enter valid network settings to preview the first and last workstation.';
+  if (el) el.textContent = rows ? rows.map(row => `Workplace ${row.workstation}: VLAN ${row.vlan}, subnet ${row.subnet}, gateway ${row.gateway}`).join('\n') : 'Enter valid network settings to preview the first and last workplace.';
 }
 
 function initUx() {
