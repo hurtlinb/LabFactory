@@ -363,11 +363,14 @@ test('blueprint deployment dialog retries failed launch without creating a secon
   assert.equal(api.state.currentBlueprint.id, null);
   document.getElementById('deploymentClassroomSelect').value = 'room';
   const originalFetch = w.fetch;
+  const testMode = document.getElementById('deploymentTestMode');
+  assert.equal(testMode.checked, false);
+  testMode.checked = true;
   let creates = 0, launches = 0;
   w.fetch = async (url, options = {}) => {
     if (url === '/api/lifecycle/deployments' && options.method === 'POST') {
       creates++;
-      assert.deepEqual(JSON.parse(options.body), { blueprintId: 'bp', classroomId: 'room' });
+      assert.deepEqual(JSON.parse(options.body), { blueprintId: 'bp', classroomId: 'room', testMode: true });
       return { ok: true, json: async () => ({ deployment: { id: 'new-lab' } }) };
     }
     if (url === '/api/lifecycle/deployments/new-lab/deploy') {
@@ -381,6 +384,7 @@ test('blueprint deployment dialog retries failed launch without creating a secon
   await tick();
   assert.equal(dialog.open, true);
   assert.equal(document.getElementById('deploymentDialogError').textContent, 'Queue unavailable');
+  assert.equal(testMode.disabled, true);
   form.dispatchEvent(new w.Event('submit', { cancelable: true }));
   await tick();
   assert.equal(creates, 1);

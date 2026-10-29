@@ -389,6 +389,7 @@ function updateDeploymentEstimate() {
   const target = document.getElementById('deploymentDurationEstimate');
   if (!target) return;
   const blueprint = state.blueprints.find(item => item.id === deploymentBlueprintSelect?.value);
+  if (document.getElementById('deploymentTestMode')?.checked) { target.hidden = true; return; }
   target.hidden = !blueprint;
   if (!blueprint) { target.textContent = ''; return; }
   const estimate = blueprintDeploymentEstimate(blueprint);
@@ -859,7 +860,7 @@ function renderClassrooms() {
             if (!activeLabs.length) return '';
             const pills = activeLabs.map(d =>
               `<span class="mini-pill" title="${escapeHtmlAttr(d.blueprint?.name || '')} — Lab #${escapeHtmlAttr(String(d.deploymentNumber ?? ''))}">` +
-              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ` +
+              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ${d.testMode ? '<span class="mini-pill">test</span>' : ''} ` +
               renderTeacherBadge(d.teacher || { email: d.teacherEmail }) +
               `</span>`
             ).join('');
@@ -1303,6 +1304,7 @@ function renderLifecycleLabs() {
                 <span style="color:var(--muted);font-weight:400;">@</span>
                 ${escapeHtml(deployment.classroom.name)}
                 <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
+                ${deployment.testMode ? '<span class="mini-pill">test</span>' : ''}
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
               </p>
               <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready</p>
@@ -1443,7 +1445,7 @@ function renderDashboard() {
                   <span class="dash-classroom-lab-icon">${labIcon}</span>
                   <div class="dash-row-info">
                     <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
-                    <p class="dash-row-meta">Lab #${d.deploymentNumber} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
                   </div>
                   <div class="dash-classroom-owner">${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</div>
                   <div class="dash-classroom-status"><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
@@ -1981,6 +1983,12 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
   try {
     const payload = await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms`);
     if (state.activeDeploymentDetailsId !== deploymentId || !deploymentDetailsDialog.open) return;
+    document.getElementById('deploymentDetailsTestBadge')?.remove();
+    if (payload.deployment.testMode) {
+      const badge = document.createElement('span');
+      badge.id = 'deploymentDetailsTestBadge'; badge.className = 'mini-pill'; badge.textContent = 'test';
+      deploymentDetailsTitle.after(badge);
+    }
     deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
     if (!getDeploymentVmSelection(deploymentId).running) preserveDetailView(() => renderDeploymentVmDetails(payload));
     deploymentDetailsStatus.hidden = true;
@@ -3469,10 +3477,14 @@ courseForm?.addEventListener('submit', async event => {
 deploymentBlueprintSelect?.addEventListener('change', updateDeploymentEstimate);
 const deployLabDialog = document.getElementById('deployLabDialog');
 const deploymentDialogError = document.getElementById('deploymentDialogError');
+const deploymentTestMode = document.getElementById('deploymentTestMode');
+deploymentTestMode.addEventListener('change', updateDeploymentEstimate);
 let pendingDeploymentId = null;
 function openDeployLabDialog({ blueprintId = '', classroomId = '' } = {}) {
   if (deploymentForm.dataset.busy) return;
   pendingDeploymentId = null;
+  deploymentTestMode.checked = false;
+  deploymentTestMode.disabled = false;
   renderDeploymentSelectors();
   deploymentBlueprintSelect.disabled = false;
   deploymentClassroomSelect.disabled = false;
@@ -3500,10 +3512,12 @@ deploymentForm?.addEventListener('submit', async event => {
   submitButton.disabled = true; submitButton.setAttribute('aria-busy', 'true');
   const payload = {
     blueprintId: deploymentBlueprintSelect.value,
-    classroomId: deploymentClassroomSelect.value
+    classroomId: deploymentClassroomSelect.value,
+    testMode: deploymentTestMode.checked
   };
   deploymentBlueprintSelect.disabled = true;
   deploymentClassroomSelect.disabled = true;
+  deploymentTestMode.disabled = true;
   deploymentDialogError.hidden = true;
 
   try {
@@ -3534,6 +3548,7 @@ deploymentForm?.addEventListener('submit', async event => {
     delete deploymentForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy');
     deploymentBlueprintSelect.disabled = Boolean(pendingDeploymentId);
     deploymentClassroomSelect.disabled = Boolean(pendingDeploymentId);
+    deploymentTestMode.disabled = Boolean(pendingDeploymentId);
   }
 });
 
@@ -3838,7 +3853,7 @@ async function confirmLabAction(deployment, action) {
   const context = `${deployment.blueprint.name} — ${deployment.classroom.name}, lab #${deployment.deploymentNumber}, ${deployment.totalVmCount} VMs.`;
   if (action === 'destroy') return confirmAction('Destroy lab?', `${context} All VM data will be permanently deleted. After successful destruction, the lab will also be removed from the list. The blueprint is preserved.`, 'Destroy lab');
   if (action === 'stop') return confirmAction('Stop lab?', `${context} Running sessions will be interrupted.`, 'Stop lab');
-  return await chooseAction('Deploy lab', `${context} The blueprint will be replicated for every workplace.`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
+  return await chooseAction('Deploy lab', `${context} ${deployment.testMode ? 'Only the first workplace will be deployed (test mode).' : 'The blueprint will be replicated for every workplace.'}`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
 }
 
 function writeRoute(view, id = '') {

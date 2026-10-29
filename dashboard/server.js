@@ -311,7 +311,8 @@ const courseSchema = z.object({
 
 const deploymentCreateSchema = z.object({
   blueprintId: z.string().uuid(),
-  classroomId: z.string().uuid()
+  classroomId: z.string().uuid(),
+  testMode: z.boolean().default(false)
 });
 
 const parseVlanMaskBits = mask => {
@@ -984,6 +985,7 @@ const mapCourse = row => ({
 const mapDeployment = row => ({
   id: row.id,
   deploymentNumber: Number(row.deployment_number ?? 0),
+  testMode: row.test_mode === true,
   teacherEmail: row.teacher_email ?? '',
   teacher: {
     email: row.teacher_email ?? '',
@@ -1022,7 +1024,7 @@ const mapDeployment = row => ({
     startingSubnet: row.starting_subnet ?? '10.0.200.0',
     incrementVlan: row.increment_vlan !== false
   },
-  totalVmCount: Number(row.workstation_count ?? 0) * Number(row.blueprint_vm_count ?? 0)
+  totalVmCount: (row.test_mode ? 1 : Number(row.workstation_count ?? 0)) * Number(row.blueprint_vm_count ?? 0)
 });
 
 const generateGuestPassword = () => {
@@ -1058,7 +1060,7 @@ const ensureDeploymentWorkstationPasswords = async (deployment, classroom, passw
   if (passwordMode !== 'per-workstation') return {};
   const existing = normalizeWorkstationPasswords(deployment.workstationPasswords);
   const passwords = { ...existing };
-  for (let index = 0; index < classroom.workstationCount; index += 1) {
+  for (let index = 0; index < (deployment.testMode ? 1 : classroom.workstationCount); index += 1) {
     const workstation = String(index + 1).padStart(2, '0');
     if (!passwords[workstation]) passwords[workstation] = generateGuestPassword();
   }
@@ -1366,7 +1368,7 @@ const updateDeploymentState = async ({ deploymentId, action, status, jobId = nul
   return fetchDeploymentById(result.rows[0].id);
 };
 
-const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, teacher = null, workstationPasswords = {} }) => {
+const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, testMode = false, teacher = null, workstationPasswords = {} }) => {
   const baseVmid = computeBlueprintBaseVmid(deploymentId);
   const labName = sanitizeVmName(blueprint.name);
   const effectiveTeacher = teacher ?? blueprint.teacher;
@@ -1378,7 +1380,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
     .slice(0, 3)
     .map(Number);
 
-  for (let workstationIndex = 0; workstationIndex < classroom.workstationCount; workstationIndex += 1) {
+  for (let workstationIndex = 0; workstationIndex < (testMode ? 1 : classroom.workstationCount); workstationIndex += 1) {
     const workstationNumber = String(workstationIndex + 1).padStart(2, '0');
     const vlanTag = classroom.incrementVlan === false
       ? classroom.startingVlan
@@ -2270,7 +2272,7 @@ app.get(
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
       const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
       const customizationProgress = (deployment.lastAction === 'customize' && ['customizing', 'failed', 'deployed', 'running', 'stopped', 'mixed'].includes(deployment.status))
         ? await fetchAnsibleCustomizationProgress(deployment)
@@ -2336,7 +2338,7 @@ app.post(
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
       const vmids = buildTerraformDeploymentPayload({
-        deploymentId: deployment.id,
+        deploymentId: deployment.id, testMode: deployment.testMode,
         blueprint,
         classroom,
         teacher: deployment.teacher
@@ -2397,10 +2399,10 @@ app.post(
 
     const deploymentInsert = await dbPool.query(
       `INSERT INTO lab_deployments
-        (id, blueprint_id, classroom_id, teacher_email, status, last_action, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, 'idle', 'prepare', NOW(), NOW())
+        (id, blueprint_id, classroom_id, teacher_email, test_mode, status, last_action, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, 'idle', 'prepare', NOW(), NOW())
        RETURNING id`,
-      [uuidv4(), blueprint.id, classroom.id, teacherEmail]
+      [uuidv4(), blueprint.id, classroom.id, teacherEmail, parsed.data.testMode]
     );
 
     const deploymentId = deploymentInsert.rows[0].id;
@@ -2426,7 +2428,7 @@ app.get(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const vmPlan = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id,
+      deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -2500,6 +2502,7 @@ app.get(
         teacher: deployment.teacher,
         teacherEmail: deployment.teacherEmail,
         blueprintName: deployment.blueprint.name,
+        testMode: deployment.testMode,
         classroomName: deployment.classroom.name,
         canManageSnapshots: canManageDeployment(req, deployment) && !deploymentBusyStatuses.has(effectiveDeploymentStatus),
         canRedeployWorkstations: workstationRedeployableStatuses.has(effectiveDeploymentStatus) && canManageDeployment(req, deployment),
@@ -2556,7 +2559,7 @@ app.get(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const vmPlan = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id,
+      deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -2616,7 +2619,7 @@ for (const method of ['get', 'post']) {
       }
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const plan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+      const plan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
       if (!plan.vms.some(vm => Number(vm.vmid) === vmid)) return res.status(404).json({ error: 'VM not found in deployment plan' });
       try {
         const resources = await fetchClusterVmResources({ context: 'VM snapshot' });
@@ -2653,7 +2656,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -2800,7 +2803,7 @@ app.post(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const vmPlan = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id,
+      deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -2927,7 +2930,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -3057,7 +3060,7 @@ app.post(
     const classroom = await fetchClassroomById(deployment.classroom.id);
     await ensureDeploymentWorkstationPasswords(deployment, classroom, blueprint.guestPasswordMode);
     const terraformBlueprintPayload = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id,
+      deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
       teacher: deployment.teacher,
@@ -3214,7 +3217,7 @@ app.post(
           ? 'destroy'
           : action;
     const terraformBlueprintPayload = buildTerraformDeploymentPayload({
-      deploymentId: deployment.id,
+      deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
       teacher: deployment.teacher,

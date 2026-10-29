@@ -799,7 +799,7 @@
     </form>
   </dialog>
   <script type="module" src="/app.js"></script>
-<dialog id="deployLabDialog" class="modal-dialog deploy-lab-dialog" aria-labelledby="deployLabTitle"><div class="modal-card"><div class="panel-head"><h2 id="deployLabTitle">Deploy a lab</h2><button id="closeDeployLabButton" class="btn btn-ghost" type="button" aria-label="Close deployment dialog">Cancel</button></div><p class="muted">The blueprint will be deployed to every workplace in the selected classroom.</p><form id="deploymentForm" class="stack section-form">
+<dialog id="deployLabDialog" class="modal-dialog deploy-lab-dialog" aria-labelledby="deployLabTitle"><div class="modal-card"><div class="panel-head"><h2 id="deployLabTitle">Deploy a lab</h2><button id="closeDeployLabButton" class="btn btn-ghost" type="button" aria-label="Close deployment dialog">Cancel</button></div><p class="muted">The blueprint will be deployed to every workplace in the selected classroom, or only the first workplace in test mode.</p><form id="deploymentForm" class="stack section-form">
                 <div class="split">
                   <label class="field">
                     <span>Blueprint</span>
@@ -814,6 +814,7 @@
                     </select>
                   </label>
                 </div>
+                <label class="switch"><input id="deploymentTestMode" name="testMode" type="checkbox" role="switch"><span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span><span class="switch-label">Test mode (only first workstation will be deployed)</span></label>
                 <p id="deploymentDurationEstimate" class="muted" aria-live="polite" hidden></p>
                 <button class="btn btn-primary" type="submit">Deploy</button>
               <p id="deploymentDialogError" class="field-error" role="alert" hidden></p></form></div></dialog>
