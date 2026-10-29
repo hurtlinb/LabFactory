@@ -121,21 +121,25 @@ test('destructive lab action waits for confirmation and cancellation sends no re
   assert(!requests.some(request => request.url.endsWith('/destroy')));
 });
 
-test('detail refresh preserves expanded task output and focused VM selection', async t => {
+test('detail refresh hides customization output and preserves focused VM selection', async t => {
   const { api, document } = setup(t); await api.bootstrap();
   const payload = { deployment: { id: 'lab', status: 'running' }, vms: [{ vmid: 1, name: 'VM', osType: 'ubuntu', proxmoxStatus: 'running', customization: { taskResults: { task: { name: 'Install', status: 'succeeded', output: 'Done' } } } }] };
   api.renderDeploymentVmDetails(payload);
   const root = document.getElementById('deploymentVmDetailsList');
-  root.querySelector('details').open = true;
+  payload.vms[0].customization.lastResponse = 'PLAY raw response';
+  payload.vms[0].customization.error = 'Raw error output';
+  payload.vms[0].customization.taskResults.task.durationMs = 33900;
   root.querySelector('.vm-select').focus();
   payload.vms[0].customization.taskResults.task.output = 'Updated output';
   api.preserveDetailView(() => api.renderDeploymentVmDetails(payload));
-  assert(root.querySelector('details').open);
+  assert.equal(root.querySelector('details'), null);
   assert.equal(document.activeElement.dataset.vmid, '1');
-  assert.match(root.querySelector('pre').textContent, /Updated output/);
+  assert.equal(root.querySelector('pre'), null);
+  assert.doesNotMatch(root.textContent, /Updated output|PLAY raw response|Raw error output/);
+  assert.match(root.textContent, /Ansible: Install.*succeeded.*33\.9s/);
 });
 
-test('workstation cards group every VM and preserve per-VM selection, actions and expanded tasks', async t => {
+test('workstation cards group every VM and preserve per-VM selection and actions', async t => {
   const { api, document, w } = setup(t); await api.bootstrap();
   api.state.activeDeploymentDetailsId = 'lab';
   const machine = (vmid, workstationNumber, osType) => ({
@@ -157,11 +161,10 @@ test('workstation cards group every VM and preserve per-VM selection, actions an
   assert.equal(vm2.querySelector('.pause-updates-button').dataset.vmid, '2');
   assert.equal(vm2.querySelector('[data-snapshot-action="restore"]').dataset.vmid, '2');
   vm2.querySelector('.vm-select').click();
-  vm2.querySelector('details').open = true;
   vm2.querySelector('[data-snapshot-action="delete"]').focus();
   api.preserveDetailView(() => api.renderDeploymentVmDetails(payload));
-  assert.equal(root.querySelector('.deployment-vm-card[data-vmid="1"] details').open, false);
-  assert.equal(root.querySelector('.deployment-vm-card[data-vmid="2"] details').open, true);
+  assert.equal(root.querySelector('details'), null);
+  assert.doesNotMatch(root.textContent, /Output [123]/);
   assert.equal(document.activeElement.dataset.vmid, '2');
   assert.equal(document.activeElement.dataset.snapshotAction, 'delete');
   assert.equal(root.querySelector('.vm-selection-count').textContent, '1 / 3 selected');
