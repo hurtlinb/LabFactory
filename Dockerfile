@@ -1,4 +1,4 @@
-FROM node:20-bookworm
+FROM node:24-bookworm
 
 COPY --from=docker:27.5.1-cli /usr/local/bin/docker /usr/local/bin/docker
 ENV PATH="/opt/ansible/bin:${PATH}"
@@ -44,7 +44,8 @@ RUN { echo 'provider_installation {'; \
 WORKDIR /usr/src/app
 
 COPY package.json package-lock.json* ./
-RUN npm install
+RUN npm ci
+RUN node --input-type=module -e "await import('@kubernetes/client-node')"
 
 COPY . .
 

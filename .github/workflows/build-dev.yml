@@ -16,6 +16,12 @@ jobs:
         id: sha
         run: echo "sha=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
       - name: Test customizations
         run: |
           npm ci --ignore-scripts
