@@ -720,6 +720,7 @@ input:focus, textarea:focus, select:focus {
   white-space: nowrap;
 }
 
+.test-pill { border-color: #fdba74; background: #ffedd5; color: #9a3412; }
 .warning-pill { border-color: var(--warning-line); background: var(--warning-soft); color: var(--warning); }
 .lock-pill { border-color: var(--line-strong); background: var(--surface-soft); color: var(--text-secondary); }
 .teacher-pill { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); font-weight: 600; }

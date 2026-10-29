@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.1.2] — 2026-10-29
+
+- Add test mode for deployments
+
 ## [2.1.1] — 2026-10-28
 
 - IP reset fix

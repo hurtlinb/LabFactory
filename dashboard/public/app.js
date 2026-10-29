@@ -860,7 +860,7 @@ function renderClassrooms() {
             if (!activeLabs.length) return '';
             const pills = activeLabs.map(d =>
               `<span class="mini-pill" title="${escapeHtmlAttr(d.blueprint?.name || '')} — Lab #${escapeHtmlAttr(String(d.deploymentNumber ?? ''))}">` +
-              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ${d.testMode ? '<span class="mini-pill">test</span>' : ''} ` +
+              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} ` +
               renderTeacherBadge(d.teacher || { email: d.teacherEmail }) +
               `</span>`
             ).join('');
@@ -1304,7 +1304,7 @@ function renderLifecycleLabs() {
                 <span style="color:var(--muted);font-weight:400;">@</span>
                 ${escapeHtml(deployment.classroom.name)}
                 <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
-                ${deployment.testMode ? '<span class="mini-pill">test</span>' : ''}
+                ${deployment.testMode ? '<span class="mini-pill test-pill">test</span>' : ''}
                 ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
               </p>
               <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready</p>
@@ -1445,7 +1445,7 @@ function renderDashboard() {
                   <span class="dash-classroom-lab-icon">${labIcon}</span>
                   <div class="dash-row-info">
                     <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
-                    <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
                   </div>
                   <div class="dash-classroom-owner">${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</div>
                   <div class="dash-classroom-status"><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
@@ -1986,7 +1986,7 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
     document.getElementById('deploymentDetailsTestBadge')?.remove();
     if (payload.deployment.testMode) {
       const badge = document.createElement('span');
-      badge.id = 'deploymentDetailsTestBadge'; badge.className = 'mini-pill'; badge.textContent = 'test';
+      badge.id = 'deploymentDetailsTestBadge'; badge.className = 'mini-pill test-pill'; badge.textContent = 'test';
       deploymentDetailsTitle.after(badge);
     }
     deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
