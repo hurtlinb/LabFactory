@@ -91,13 +91,14 @@ test('custom failure is not automatically retried and resume skips successful bl
   const execute = options.runTaskBlock;
   options.runTaskBlock = async args => {
     const result = await execute(args);
-    if (!args.syntaxOnly && args.block.id === 'second') throw Error('Connection reset');
+    if (!args.syntaxOnly && args.block.id === 'second') throw Object.assign(Error('Connection reset'), { stdout: 'TASK [Install]\nfatal: Connection reset\nPLAY RECAP\ntarget : ok=1 failed=1' });
     return result;
   };
   await assert.rejects(runCustomization(options), /Connection reset/);
   assert.equal(events.filter(event => event === 'custom:1:second').length, 1);
   assert(!events.includes('custom:1:last'));
   assert.equal(job.data.customizationResults[1].taskResults.second.status, 'failed');
+  assert.match(job.data.customizationResults[1].taskResults.second.output, /TASK \[Install\][\s\S]*PLAY RECAP/);
   events.length = 0; options.runTaskBlock = execute;
   await runCustomization(options);
   assert.deepEqual(events.filter(event => !event.startsWith('validate:')), ['custom:1:second', 'custom:1:last']);

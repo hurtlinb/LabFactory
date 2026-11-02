@@ -459,3 +459,33 @@ test('dashboard tiles expose power actions according to lab status', t => {
     assert(root.querySelector('[role="status"]'));
   }
 });
+
+ test('Ansible task results show a compact recap and failed task logs in a dismissible dialog', async t => {
+  const { api, document } = setup(t); await api.bootstrap();
+  const failedOutput = 'TASK [Install]\nfatal: <target>: FAILED!\nPLAY RECAP\ntarget : ok=1 changed=0 unreachable=0 failed=1 skipped=0 rescued=0 ignored=0';
+  const payload = { deployment: { id: 'lab', status: 'failed' }, vms: [{ vmid: 1, name: 'VM', osType: 'ubuntu', customization: { taskResults: {
+    success: { name: 'Prepare', status: 'succeeded', durationMs: 1000, output: 'PLAY RECAP\ntarget : ok=2 changed=1 unreachable=0 failed=0 skipped=0 rescued=0 ignored=0' },
+    fail: { name: 'Install <script>', status: 'failed', error: 'Task failed', output: failedOutput }
+  } } }] };
+  api.renderDeploymentVmDetails(payload);
+  const root = document.getElementById('deploymentVmDetailsList');
+  assert.equal(root.querySelectorAll('.ansible-task-result').length, 2);
+  assert.match(root.textContent, /ok=2 changed=1/);
+  assert.match(root.textContent, /failed=1/);
+  assert.doesNotMatch(root.textContent, /fatal:|Task failed/);
+  assert.equal(root.querySelectorAll('.ansible-task-logs').length, 1);
+  root.querySelector('.ansible-task-logs').click();
+  let dialog = document.querySelector('.ansible-logs-dialog');
+  assert.equal(dialog.open, true);
+  assert.match(dialog.querySelector('pre').textContent, /Task failed/);
+  assert.ok(dialog.querySelector('pre').textContent.includes(failedOutput));
+  assert.equal(dialog.querySelector('script'), null);
+  api.preserveDetailView(() => api.renderDeploymentVmDetails(payload));
+  assert.equal(dialog.open, true);
+  dialog.querySelector('button').click();
+  assert.equal(document.querySelector('.ansible-logs-dialog'), null);
+  root.querySelector('.ansible-task-logs').click();
+  dialog = document.querySelector('.ansible-logs-dialog');
+  dialog.close();
+  assert.equal(document.querySelector('.ansible-logs-dialog'), null);
+});

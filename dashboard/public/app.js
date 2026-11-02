@@ -1637,6 +1637,31 @@ async function executeVmSnapshotAction(deploymentId, vmid, action) {
   }
 }
 
+function ansibleTaskSummary(result) {
+  const output = String(result.output || result.error || '').replace(/\x1b\[[0-9;]*m/g, '');
+  const recapIndex = output.lastIndexOf('PLAY RECAP');
+  const recap = recapIndex >= 0 ? output.slice(recapIndex) : '';
+  const counts = recap.match(/\b(?:ok|changed|unreachable|failed|skipped|rescued|ignored)=\d+/g);
+  return 'Ansible: ' + result.name + ' \u2014 ' + result.status +
+    (result.durationMs != null ? ' (' + (result.durationMs / 1000).toFixed(1) + 's)' : '') +
+    (counts?.length ? ' \u00b7 ' + counts.join(' ') : '');
+}
+
+function showAnsibleTaskLogs(vm, result) {
+  const dialog = document.createElement('dialog');
+  dialog.className = 'modal-dialog job-dialog ansible-logs-dialog';
+  dialog.setAttribute('aria-label', 'Ansible logs');
+  const card = document.createElement('div'); card.className = 'modal-card';
+  const heading = document.createElement('h2'); heading.textContent = 'Ansible logs \u2014 ' + vm.name + ' \u2014 ' + result.name;
+  const output = document.createElement('pre'); output.tabIndex = 0;
+  output.textContent = [...new Set([result.error, result.output].filter(Boolean))].join('\n\n') || 'No Ansible logs available.';
+  const close = document.createElement('button'); close.type = 'button'; close.className = 'btn'; close.textContent = 'Close';
+  close.addEventListener('click', () => dialog.close());
+  card.append(heading, output, close); dialog.append(card); document.body.append(dialog);
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  dialog.showModal(); close.focus();
+}
+
 function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false, canManageSnapshots = false) {
   return vms
     .map(
@@ -1681,7 +1706,7 @@ function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canReset
           </dl>
           <div class="deployment-vm-snapshot"><span class="muted">Snapshot</span><div class="vm-snapshot-cell">${snapshotMarkup}</div></div>
           ${Object.keys(vm.customization?.taskResults || {}).length ? `<div class="deployment-vm-customization vm-state-name-cell">
-            ${Object.values(vm.customization.taskResults).map(result => `<p class="muted">Ansible: ${escapeHtml(result.name)} — ${escapeHtml(result.status)}${result.durationMs != null ? ` (${(result.durationMs / 1000).toFixed(1)}s)` : ''}</p>`).join('')}</div>` : ''}
+            ${Object.entries(vm.customization.taskResults).map(([taskId, result]) => `<div class="ansible-task-result"><span class="muted" title="${escapeHtmlAttr(ansibleTaskSummary(result))}">${escapeHtml(ansibleTaskSummary(result))}</span>${result.status === 'failed' || result.error ? `<button type="button" class="btn btn-ghost ansible-task-logs" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" data-task-id="${escapeHtmlAttr(taskId)}" aria-label="Logs for ${escapeHtmlAttr(result.name)}">logs</button>` : ''}</div>`).join('')}</div>` : ''}
           <footer class="deployment-vm-footer">
             <div class="deployment-vm-status"><span class="vm-state-dot" data-state="${escapeHtmlAttr(vm.state || 'unknown')}" aria-hidden="true"></span><span>${escapeHtml(vm.state || 'unknown')}</span><span class="muted">Proxmox: ${escapeHtml(vm.proxmoxStatus || 'n/a')}</span></div>
             <div class="deployment-vm-actions" role="group" aria-label="Actions for ${escapeHtmlAttr(vm.name)}">${resetIpButton}${resetPasswordButton}${pauseUpdatesButton}${snapshotActions}</div>
@@ -1887,6 +1912,13 @@ function renderDeploymentVmDetails(payload) {
   if (selection.running) {
     deploymentVmDetailsList.querySelectorAll('button, input').forEach(control => { control.disabled = true; });
   }
+  deploymentVmDetailsList.querySelectorAll('.ansible-task-logs').forEach(button => {
+    button.addEventListener('click', () => {
+      const vm = vms.find(item => String(item.vmid) === button.dataset.vmid);
+      const result = vm?.customization?.taskResults?.[button.dataset.taskId];
+      if (result) showAnsibleTaskLogs(vm, result);
+    });
+  });
   deploymentVmDetailsList.querySelector('.vm-select-all')?.addEventListener('change', event => {
     selection.selected = event.target.checked ? new Set(vms.map(vm => String(vm.vmid))) : new Set();
     deploymentVmDetailsList.querySelectorAll('.vm-select').forEach(input => { input.checked = selection.selected.has(input.dataset.vmid); });
