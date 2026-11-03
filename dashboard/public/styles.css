@@ -1350,6 +1350,7 @@ input:focus, textarea:focus, select:focus {
 
 .vm-state-dot[data-state='waiting for cloudbase-init'],
 .vm-state-dot[data-state='waiting for cloud-init'],
+.vm-state-dot[data-state='waiting for guest agent'],
 .vm-state-dot[data-state='waiting for reboot'],
 .vm-state-dot[data-state='redeploy queued'],
 .vm-state-dot[data-state='cloning'],
@@ -1358,6 +1359,7 @@ input:focus, textarea:focus, select:focus {
 .vm-state-dot[data-state='destroying'] { color: var(--brand); }
 .vm-state-dot[data-state='waiting for cloudbase-init']::before,
 .vm-state-dot[data-state='waiting for cloud-init']::before,
+.vm-state-dot[data-state='waiting for guest agent']::before,
 .vm-state-dot[data-state='waiting for reboot']::before,
 .vm-state-dot[data-state='redeploy queued']::before,
 .vm-state-dot[data-state='cloning']::before,

@@ -4,6 +4,26 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 
 const source = await readFile(new URL('../workers/terraformWorker.js', import.meta.url), 'utf8');
+
+test('VM details distinguish guest agent wait on start from cloud-init wait on deploy', async () => {
+  const dashboard = await readFile(new URL('../dashboard/server.js', import.meta.url), 'utf8');
+  const infer = vm.runInNewContext(
+    dashboard.slice(dashboard.indexOf('const inferDeploymentVmStatus ='), dashboard.indexOf('const buildDeploymentVmIpAddress =')) + '\ninferDeploymentVmStatus;',
+    {
+      shouldUseGuestReadinessProgress: status => ['queued', 'deploying', 'starting'].includes(status),
+      isWindowsOsType: os => os === 'windows'
+    }
+  );
+  for (const osType of ['linux', 'windows']) {
+    const state = { deploymentStatus: 'starting', vm: { osType }, resource: { status: 'running' }, guestStarted: true };
+    assert.equal(infer(state), 'waiting for guest agent');
+    assert.equal(infer({ ...state, guestReady: true }), 'ready');
+    assert.equal(infer({ ...state, guestFailed: true }), 'failed');
+    assert.equal(infer({ ...state, guestStarted: false }), 'starting');
+    assert.equal(infer({ ...state, deploymentStatus: 'deploying' }), osType === 'windows' ? 'waiting for cloudbase-init' : 'waiting for cloud-init');
+  }
+});
+
 function harness(request) {
   let now = 0, round = 0;
   const ready = [], failed = [], calls = [];

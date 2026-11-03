@@ -1485,6 +1485,7 @@ const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted 
       if (!guestStarted) {
         return deploymentStatus === 'starting' ? 'starting' : 'waiting for guest start';
       }
+      if (deploymentStatus === 'starting') return 'waiting for guest agent';
       return isWindowsOsType(vm.osType) ? 'waiting for cloudbase-init' : 'waiting for cloud-init';
     }
     if (deploymentStatus === 'customizing') {
