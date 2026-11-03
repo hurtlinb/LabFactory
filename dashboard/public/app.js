@@ -2725,11 +2725,18 @@ async function loadAppInfo() {
   state.currentUser = info.auth?.user || null;
 
   if (appVersion) {
-    appVersion.textContent = `Version ${info.buildTag ?? info.version ?? '--'}`;
+    const version = info.env === 'development' ? info.version : (info.buildTag ?? info.version);
+    appVersion.textContent = `Version ${version ?? '--'}`;
   }
 
   if (info.env === 'development') {
     document.body.classList.add('dev-env');
+    const devBannerText = document.querySelector('.dev-banner-text');
+    if (devBannerText) {
+      devBannerText.textContent = info.buildTag
+        ? `Development instance (build ${info.buildTag})`
+        : 'Development instance';
+    }
   }
 
   if (!userSession || !userSessionName || !userSessionMeta) {
