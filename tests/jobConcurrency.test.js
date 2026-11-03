@@ -161,7 +161,11 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     assertRequiredTerraformEnvSettings() {}, resolveProxmoxTargetNodes: async () => [],
     resolveVmNodesByVmid: async () => new Map(), runWithConcurrency: async () => {},
     waitForVmPowerState: async () => { waiting++; await powerGate; return true; },
-    waitForGuestReadiness: async () => ({ readyVmids: new Set(), failedVmids: new Set() }),
+    waitForStartedGuestAgents: async () => { waiting++; await powerGate; },
+    waitForGuestReadiness: async ({ action }) => {
+      assert.equal(action, 'deploy', 'only deployments may probe guest IPs');
+      return { readyVmids: new Set(), failedVmids: new Set() };
+    },
     STOP_STATE_CONFIRMATION_TIMEOUT_MS: 10,
     checkPlannedVmids, fetchProxmoxVmResources: async () => [],
     runCommand: async (_command, args, opts) => { commands.push({ args, ...opts }); return args[0] === 'show' ? '{"format_version":"1.2","resource_changes":[]}' : ''; }
@@ -183,6 +187,10 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   assert(transitions.some(([id, status]) => id === 'a' && status === 'running'));
   assert(transitions.some(([id, status]) => id === 'b' && status === 'stopped'));
   assert.deepEqual(durations, [], 'power actions must not contribute deployment durations');
+  sandbox.waitForStartedGuestAgents = async () => { throw new Error('QEMU Guest Agent unavailable'); };
+  await assert.rejects(processor(jobFor('agent-failed'), 'agent-failed'), /QEMU Guest Agent unavailable/);
+  assert(transitions.some(([id, status]) => id === 'agent-failed' && status === 'failed'));
+  assert(!transitions.some(([id, status]) => id === 'agent-failed' && status === 'running'));
   await processor(jobFor('d', 'deploy'), 'd');
   assert.deepEqual(durations, [['start', 'd-deploy'], ['finish', 'd-deploy']]);
   assert(commands.some(({ args }) => args.join(' ') === 'workspace select blueprint-d'));

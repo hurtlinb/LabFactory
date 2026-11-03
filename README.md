@@ -13,6 +13,8 @@ Current version: `2.2.0`
 
 ## Runtime requirements
 
+Starting an existing lab after a stop waits for each VM's QEMU Guest Agent through the Proxmox API, independently of guest IP addresses and credentials. The agent must be installed, enabled in Proxmox and running in every VM. If an agent does not respond within 20 minutes, the start fails and identifies the unready VMs. Initial deployments still check SSH/cloud-init or WinRM/Cloudbase-Init readiness.
+
 Node.js 24 or newer is required. Docker images and CI use Node.js 24. The Kubernetes task backend loads a client dependency that is incompatible with Node.js 20; image builds verify that the client can be imported.
 
 ## Dashboard interaction updates

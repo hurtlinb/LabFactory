@@ -10,6 +10,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { setMaxListeners } from 'node:events';
+import { setTimeout as abortableSleep } from 'node:timers/promises';
 import http from 'node:http';
 import https from 'node:https';
 import { DelayedError, Queue, Worker } from 'bullmq';
@@ -113,7 +114,7 @@ const encodeRequestBody = body => {
   };
 };
 
-const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null }) =>
+const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = true, body = null, signal, timeoutMs }) =>
   new Promise((resolve, reject) => {
     const target = new URL(url);
     const transport = target.protocol === 'https:' ? https : http;
@@ -130,7 +131,8 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
       {
         method,
         headers: requestHeaders,
-        rejectUnauthorized
+        rejectUnauthorized,
+        signal
       },
       response => {
         let body = '';
@@ -152,6 +154,7 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
       }
     );
     request.on('error', reject);
+    if (timeoutMs) request.setTimeout(timeoutMs, () => request.destroy(new Error('Proxmox request timed out')));
     if (requestBody) {
       request.write(requestBody.content);
     }
@@ -1259,6 +1262,43 @@ const activateVmHaAfterReadiness = async ({ action, merged, target }) => {
   console.log(`Activated Proxmox HA state "${haState}" for VMID ${target.vmid} after guest readiness`);
 };
 
+const waitForStartedGuestAgents = async ({ envSettings, vmids, signal, readinessReporter, concurrency, timeoutMs = VM_POWER_STATE_WAIT_TIMEOUT_MS }) => {
+  const pending = new Set(normalizeVmids(vmids));
+  const errors = new Map();
+  const deadline = Date.now() + timeoutMs;
+  while (pending.size && Date.now() < deadline) {
+    signal?.throwIfAborted();
+    const nodeByVmid = await resolveVmNodesByVmid(envSettings, [...pending]);
+    await runWithConcurrency([...pending], concurrency, async vmid => {
+      signal?.throwIfAborted();
+      try {
+        await requestJson({
+          url: new URL(`nodes/${encodeURIComponent(nodeByVmid.get(vmid))}/qemu/${vmid}/agent/ping`, `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
+          method: 'POST',
+          ...proxmoxRequestOptions(envSettings),
+          signal,
+          timeoutMs: Math.max(1, Math.min(10000, deadline - Date.now()))
+        });
+      } catch (error) {
+        signal?.throwIfAborted();
+        errors.set(vmid, formatProxmoxError(error));
+        return;
+      }
+      signal?.throwIfAborted();
+      pending.delete(vmid);
+      await readinessReporter.markReady(vmid);
+    });
+    if (pending.size && Date.now() < deadline) {
+      await abortableSleep(Math.min(VM_POWER_STATE_WAIT_RETRY_MS, deadline - Date.now()), undefined, { signal });
+    }
+  }
+  signal?.throwIfAborted();
+  if (pending.size) {
+    for (const vmid of pending) await readinessReporter.markFailed(vmid);
+    throw new Error(`Timed out waiting for QEMU Guest Agent: ${[...pending].map(vmid => `VM ${vmid} (${errors.get(vmid) || 'no response'})`).join('; ')}. Ensure the agent is installed, enabled and running.`);
+  }
+};
+
 const waitForGuestReadiness = async ({
   action,
   targets,
@@ -1556,7 +1596,7 @@ export function startTerraformWorker(connection) {
           merged.windows_admin_password = resolvedWindowsAdminPassword;
           const hasGuestPassword = Array.isArray(merged.vm_definitions)
             && merged.vm_definitions.some(vm => String(vm.windows_admin_password ?? '').trim());
-          if (hasWindowsVm && !String(merged.windows_admin_password ?? '').trim() && !hasGuestPassword) {
+          if (action === 'deploy' && hasWindowsVm && !String(merged.windows_admin_password ?? '').trim() && !hasGuestPassword) {
             throw new Error(
               'windows_admin_password must be set on the blueprint before deploying a Windows template with Cloudbase-Init wait'
             );
@@ -1666,20 +1706,12 @@ export function startTerraformWorker(connection) {
             }
 
             if (action === 'start') {
-              await waitForVmPowerState({
+              await readinessReporter.markStartedAll();
+              await waitForStartedGuestAgents({
                 envSettings: merged,
                 vmids: blueprintVms.map(vm => vm.vmid),
-                desiredState: 'running',
-                signal: abortController.signal
-              });
-              await readinessReporter.markStartedAll();
-              await waitForGuestReadiness({
-                action,
-                targets: blueprintVms,
-                merged,
-                job,
-                terraformParallelism,
-                abortController,
+                signal: abortController.signal,
+                concurrency: terraformParallelism,
                 readinessReporter
               });
             }

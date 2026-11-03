@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.2.1] — 2026-11-03
+
+- fix running vm detection after a stop/start
+
 ## [2.2.0] — 2026-11-02
 
 - Add logs for customization "Ansible"
