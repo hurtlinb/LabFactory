@@ -1,5 +1,19 @@
 Windows Server 2025 x64 - configuration derivee de Win22
 
+Evaluation Standard pour le lab :
+- Installer depuis le media Windows Server 2025 Evaluation, edition Standard.
+- Verifier dans la VM : DISM /Online /Get-CurrentEdition
+  Le resultat attendu est ServerStandardEval. ServerStandard sans Eval
+  n'est pas une edition d'evaluation ; ce fichier ne la convertit pas.
+- Aucune cle produit n'est injectee. La duree d'evaluation reste applicable.
+- SkipMachineOOBE=true est active uniquement pour ce template de lab afin
+  de passer l'OOBE machine et sa demande de cle. Ce parametre est deconseille
+  par Microsoft pour l'automatisation moderne ; tester sur un nouveau clone.
+  Il ne remplace pas une licence et ne prolonge pas l'evaluation.
+- Le fichier du depot ne modifie pas l'OOBE deja en cours dans une VM.
+
+Reference : https://learn.microsoft.com/en-us/windows-hardware/customize/desktop/automate-oobe
+
 Langues et region :
 - Interface et installation : en-US (utiliser un media Windows anglais).
 - Formats regionaux : en-CH (anglais, Suisse).

@@ -62,6 +62,11 @@
         <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
         <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
         <ProtectYourPC>3</ProtectYourPC>
+        <!-- Legacy workaround for this Server 2022 evaluation lab only.
+             Skip the machine OOBE, including the product-key prompt.
+             Deprecated by Microsoft: validate on a clone of the target image.
+             Does not change the installed edition or evaluation expiry. -->
+        <SkipMachineOOBE>true</SkipMachineOOBE>
       </OOBE>
       <AutoLogon>
         <Password>
