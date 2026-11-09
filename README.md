@@ -37,6 +37,18 @@ When `OIDC_ISSUER_URL` and `OIDC_CLIENT_ID` are configured:
 - login is handled with the Authorization Code flow + PKCE
 - the page footer shows the authenticated user
 
+OIDC sessions are stored in the existing Redis instance (`REDIS_HOST`, `REDIS_PORT`,
+`REDIS_PASSWORD`), with the prefix `labfactory:session:<OIDC_CLIENT_ID>:` and a TTL
+matching the rolling cookie lifetime (`SESSION_MAX_AGE_MS`, default 8 hours).
+Redis must be available for authenticated requests; there is no in-memory fallback.
+The first deployment of Redis-backed sessions requires existing users to sign in again.
+
+Kubernetes liveness and readiness probes use `/healthz`, a public process-health
+endpoint registered before session and authentication middleware. It returns `200`
+without creating a session or redirecting to the identity provider; it does not check
+external dependencies. DEV and PROD build workflows install the
+`deploy/kubernetes/dashboard-health` component alongside the updated image.
+
 Required environment variables for OIDC:
 - `SESSION_SECRET`
 - `OIDC_ISSUER_URL`

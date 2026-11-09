@@ -1,0 +1,17 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: labfactory-dashboard
+spec:
+  template:
+    spec:
+      containers:
+        - name: dashboard
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000

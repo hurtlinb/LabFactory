@@ -103,6 +103,11 @@ jobs:
           else
             printf '\n  ANSIBLE_TASKS_IMAGE: "hurtlinb/labfactory:custom-tasks-%s"\n' "${VERSION}" >> configmap-patch.yaml
           fi
+          # Ship probe paths together with the dashboard that implements /healthz.
+          cp -R "$GITHUB_WORKSPACE/deploy/kubernetes/dashboard-health" ./
+          if ! grep -q 'dashboard-health' kustomization.yaml; then
+            kustomize edit add component ./dashboard-health
+          fi
           kubectl kustomize . > /dev/null
 
           cd ../..

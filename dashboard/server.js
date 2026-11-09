@@ -47,9 +47,11 @@ const queueRetention = {
 };
 
 const redisClient = createClient({
+  disableOfflineQueue: true,
   socket: { host: connection.host, port: connection.port },
   password: connection.password
 });
+redisClient.on('error', error => console.error('Dashboard Redis connection error', error.message));
 
 const dbPool = new Pool({
   connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
@@ -1936,7 +1938,7 @@ const persistBlueprint = async (blueprintId, payload, teacherEmail) => {
   return fetchBlueprintById(blueprintId);
 };
 
-const auth = await initializeOidcAuth(app);
+const auth = await initializeOidcAuth(app, { redisClient });
 
 const normalizeEmail = value => String(value ?? '').trim().toLowerCase();
 const getRequestUser = req => req.auth?.user ?? req.session?.user ?? null;

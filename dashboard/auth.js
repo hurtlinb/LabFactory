@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import session from 'express-session';
+import { RedisStore } from 'connect-redis';
 
 const jsonRequest = async (url, options = {}) => {
   const response = await fetch(url, {
@@ -94,7 +95,10 @@ const decodeJwtPayload = token => {
 
 const issuerWellKnownUrl = issuerUrl => new URL('.well-known/openid-configuration', issuerUrl.endsWith('/') ? issuerUrl : `${issuerUrl}/`).toString();
 
-export const initializeOidcAuth = async app => {
+export const initializeOidcAuth = async (app, { redisClient } = {}) => {
+  // Register before session/auth middleware: probes must never initiate OIDC sessions.
+  app.get('/healthz', (_req, res) => res.status(200).send('ok'));
+
   const issuerUrl = String(process.env.OIDC_ISSUER_URL ?? '').trim();
   const clientId = String(process.env.OIDC_CLIENT_ID ?? '').trim();
   const sessionSecret = String(process.env.SESSION_SECRET ?? '').trim();
@@ -119,6 +123,13 @@ export const initializeOidcAuth = async app => {
   if (!sessionSecret) {
     throw new Error('SESSION_SECRET is required when OIDC authentication is enabled');
   }
+  if (!redisClient) {
+    throw new Error('Redis session storage is required when OIDC authentication is enabled');
+  }
+  const sessionMaxAge = Number(process.env.SESSION_MAX_AGE_MS ?? 8 * 60 * 60 * 1000);
+  if (!Number.isSafeInteger(sessionMaxAge) || sessionMaxAge <= 0) {
+    throw new Error('SESSION_MAX_AGE_MS must be a positive integer');
+  }
 
   const discovery = await jsonRequest(issuerWellKnownUrl(issuerUrl));
   const clientSecret = String(process.env.OIDC_CLIENT_SECRET ?? '').trim();
@@ -133,6 +144,11 @@ export const initializeOidcAuth = async app => {
     session({
       name: 'labfactory.sid',
       secret: sessionSecret,
+      store: new RedisStore({
+        client: redisClient,
+        prefix: `labfactory:session:${clientId}:`,
+        ttl: Math.ceil(sessionMaxAge / 1000)
+      }),
       resave: false,
       saveUninitialized: false,
       rolling: true,
@@ -140,7 +156,7 @@ export const initializeOidcAuth = async app => {
         httpOnly: true,
         sameSite: 'lax',
         secure: secureCookie,
-        maxAge: Number(process.env.SESSION_MAX_AGE_MS ?? 8 * 60 * 60 * 1000)
+        maxAge: sessionMaxAge
       }
     })
   );

@@ -14,7 +14,7 @@ test('logout destroys the local session and ends the identity provider session',
     ok: true, json: async () => ({ end_session_endpoint: 'https://identity.example/logout' })
   }));
   const routes = new Map();
-  await initializeOidcAuth({ use() {}, set() {}, get() {}, post(path, handler) { routes.set(path, handler); } });
+  await initializeOidcAuth({ use() {}, set() {}, get() {}, post(path, handler) { routes.set(path, handler); } }, { redisClient: {} });
   const logout = routes.get('/auth/logout');
   let destroyed = false;
   let cleared = false;
