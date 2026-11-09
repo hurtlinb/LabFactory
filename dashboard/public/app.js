@@ -1,6 +1,7 @@
 import { labStatusLabel, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
 
 const UI_ICONS = {
+  "copy": '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
   "lab": '<path d="M9 3h6M10 3v7L4 20a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1l-6-10V3M8 15h8"/><path d="M10 18h.01M14 17h.01"/>',
   "monitor": '<rect x="3" y="3" width="18" height="13" rx="2"/><path d="M12 16v5M8 21h8"/>',
   "plus": '<path d="M12 5v14M5 12h14"/>',
@@ -1663,6 +1664,9 @@ function showAnsibleTaskLogs(vm, result) {
 }
 
 function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canResetPassword = false, canPauseUpdates = false, canManageSnapshots = false) {
+  const copyButton = (vm, field, label) => vm[field] && vm[field] !== 'n/a' && !(field === 'ipAddress' && vm[field] === 'dhcp')
+    ? `<button class="icon-btn vm-copy-button" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" data-copy-field="${field}" title="Copy ${label}" aria-label="Copy ${label} for ${escapeHtmlAttr(vm.name)}">${uiIcon('copy')}</button>`
+    : '';
   return vms
     .map(
       vm => {
@@ -1699,10 +1703,10 @@ function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canReset
             <div class="deployment-vm-identity"><strong>${escapeHtml(vm.name)}</strong><span class="muted">${escapeHtml(getOsLabel(vm.osType))} &middot; VMID ${escapeHtml(String(vm.vmid))} &middot; ${escapeHtml(vm.node || 'n/a')}</span></div>
           </header>
           <dl class="deployment-vm-facts">
-            <div><dt>IP address</dt><dd>${escapeHtml(vm.ipAddress || 'n/a')}</dd></div>
+            <div><dt>IP address</dt><dd><div class="vm-copy-cell"><span>${escapeHtml(vm.ipAddress || 'n/a')}</span>${copyButton(vm, 'ipAddress', 'IP address')}</div></dd></div>
             <div><dt>VLAN</dt><dd>${escapeHtml(String(vm.vlanTag ?? 'n/a'))}</dd></div>
-            <div><dt>Username</dt><dd>${escapeHtml(vm.username || 'n/a')}</dd></div>
-            <div><dt>Password</dt><dd>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button></div>` : '<span class="muted">n/a</span>'}</dd></div>
+            <div><dt>Username</dt><dd><div class="vm-copy-cell"><span>${escapeHtml(vm.username || 'n/a')}</span>${copyButton(vm, 'username', 'username')}</div></dd></div>
+            <div><dt>Password</dt><dd>${vm.password ? `<div class="vm-password-cell"><span class="vm-password-value" hidden></span><button class="icon-btn vm-password-toggle" type="button" data-vmid="${escapeHtmlAttr(String(vm.vmid))}" aria-label="Show password for ${escapeHtmlAttr(vm.name)}" aria-pressed="false" title="Show password">${uiIcon('eye')}</button>${copyButton(vm, 'password', 'password')}</div>` : '<span class="muted">n/a</span>'}</dd></div>
           </dl>
           <div class="deployment-vm-snapshot"><span class="muted">Snapshot</span><div class="vm-snapshot-cell">${snapshotMarkup}</div></div>
           ${Object.keys(vm.customization?.taskResults || {}).length ? `<div class="deployment-vm-customization vm-state-name-cell">
@@ -1962,6 +1966,22 @@ function renderDeploymentVmDetails(payload) {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       await pauseVmUpdates(button.dataset.deploymentId, button.dataset.vmid, button);
+    });
+  });
+
+  deploymentVmDetailsList.querySelectorAll('.vm-copy-button').forEach(button => {
+    button.addEventListener('click', async event => {
+      event.stopPropagation();
+      const vm = payload.vms.find(item => String(item.vmid) === button.dataset.vmid);
+      const field = button.dataset.copyField;
+      if (!vm || !['ipAddress', 'username', 'password'].includes(field) || !vm[field]) return;
+      const label = { ipAddress: 'IP address', username: 'Username', password: 'Password' }[field];
+      try {
+        await navigator.clipboard.writeText(String(vm[field]));
+        showMessage(deploymentDetailsStatus, `${label} copied to clipboard.`, 'success', 3000);
+      } catch {
+        showMessage(deploymentDetailsStatus, 'Copy failed. Check your browser clipboard permissions and use HTTPS.', 'danger', 5000);
+      }
     });
   });
 
