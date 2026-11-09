@@ -501,8 +501,10 @@ const requestJson = ({ url, method = 'GET', headers = {}, rejectUnauthorized = t
         });
         response.on('end', () => {
           if ((response.statusCode ?? 500) >= 400) {
-            const error = new Error(`HTTP ${response.statusCode}: ${body}`);
+            const detail = body.trim() || response.statusMessage?.trim() || 'Empty error response';
+            const error = new Error(`HTTP ${response.statusCode}: ${detail}`);
             error.statusCode = response.statusCode;
+            error.statusMessage = response.statusMessage;
             error.responseBody = body;
             reject(error);
             return;
