@@ -2,6 +2,11 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.3.1] — 2026-11-17
+
+- Affichage du numéro de module devant le nom du blueprint dans les cartes des salles du dashboard.
+- Changement du propriétaire d'un lab déployé réservé aux administrateurs, avec sélection d'un utilisateur existant et blocage pendant une opération en cours.
+
 ## [2.3.0] — 2026-11-09
 
 - Add copy value button in details windows

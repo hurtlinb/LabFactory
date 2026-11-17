@@ -438,6 +438,43 @@ test('dashboard shows other teachers labs and attention items even when only my 
   assert.equal(document.querySelector('#dashClassroomsGrid [data-action="destroy"]'), null);
 });
 
+test('only admins can open owner selection, cancel it, and save a new lab owner', async t => {
+  const { api, document, w } = setup(t);
+  const deployment = { id: 'lab', status: 'running', deploymentNumber: 1, teacherEmail: 'old@example.test', blueprint: { name: 'Lab' }, classroom: { id: 'room', name: 'Room' }, totalVmCount: 1 };
+  api.state.deployments = [deployment];
+  api.state.showOnlyMyLabs = false;
+  api.state.isAdmin = false;
+  api.renderLifecycleLabs();
+  assert.equal(document.querySelector('.change-owner-button'), null);
+  api.state.isAdmin = true;
+  api.renderLifecycleLabs();
+  const writes = [];
+  w.fetch = async (url, options = {}) => {
+    if (options.method === 'PUT') {
+      writes.push({ url, body: JSON.parse(options.body) });
+      return { ok: true, json: async () => ({ ...deployment, teacherEmail: 'new@example.test' }) };
+    }
+    return { ok: true, json: async () => url === '/api/teachers'
+      ? [{ email: 'new@example.test', displayName: '<New owner>' }]
+      : [{ ...deployment, teacherEmail: 'new@example.test' }] };
+  };
+  document.querySelector('.change-owner-button').click(); await tick();
+  assert.match(document.querySelector('#labOwnerSelect').textContent, /<New owner>/);
+  document.querySelector('.owner-cancel').click();
+  assert.equal(writes.length, 0);
+  assert.equal(document.querySelector('.change-owner-dialog'), null);
+  document.querySelector('.change-owner-button').click(); await tick();
+  document.querySelector('#labOwnerSelect').value = 'new@example.test';
+  document.querySelector('.change-owner-dialog form').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await tick();
+  assert.deepEqual(writes, [{ url: '/api/lifecycle/deployments/lab/owner', body: { teacherEmail: 'new@example.test' } }]);
+  assert.equal(api.state.deployments[0].teacherEmail, 'new@example.test');
+  assert.equal(document.querySelector('.change-owner-dialog'), null);
+  api.state.deployments[0].status = 'deploying';
+  api.renderLifecycleLabs();
+  assert.equal(document.querySelector('.change-owner-button').disabled, true);
+});
+
 test('dashboard tiles expose power actions according to lab status', t => {
   const { api, document } = setup(t);
   api.state.isAdmin = true;

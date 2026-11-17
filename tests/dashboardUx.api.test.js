@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import path from 'node:path';
+import { z } from 'zod';
 
-const source = readFileSync('dashboard/server.js', 'utf8');
+const source = readFileSync('dashboard/server.js', 'utf8').replace(/\r\n/g, '\n');
 function route(start, end, overrides = {}) {
   let handler;
   const context = {
@@ -17,6 +18,34 @@ function route(start, end, overrides = {}) {
   return handler;
 }
 function response() { return { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } }; }
+
+test('owner transfer requires admin and validates the user and operation state before updating', async () => {
+  for (const scenario of ['success', 'invalid', 'missing', 'unknown', 'busy']) {
+    const queries = [];
+    let requiredRole;
+    const handler = route("app.put('/api/lifecycle/deployments/:id/owner'", "app.post(\n  '/api/lifecycle/deployments/refresh-state'", {
+      z, normalizeEmail: value => value.trim().toLowerCase(),
+      auth: { ROLE_GROUPS: { ADMIN_ONLY: 'admin' }, requireRole: role => { requiredRole = role; return role; } },
+      deploymentBusyStatuses: new Set(['deploying', 'destroying']),
+      fetchDeploymentById: async id => scenario === 'missing' ? null : { id, teacherEmail: 'new@example.test' },
+      dbPool: { query: async (sql, args) => {
+        queries.push({ sql, args });
+        return { rowCount: (sql.startsWith('SELECT') && scenario === 'unknown') || (sql.includes('UPDATE') && scenario === 'busy') ? 0 : 1 };
+      } }
+    });
+    assert.equal(requiredRole, 'admin');
+    const res = response();
+    await handler({ params: { id: 'lab' }, body: { teacherEmail: scenario === 'invalid' ? 'invalid' : ' NEW@example.test ' } }, res);
+    assert.equal(res.statusCode, { success: 200, invalid: 400, missing: 404, unknown: 400, busy: 409 }[scenario]);
+    const update = queries.find(query => query.sql.includes('UPDATE'));
+    assert.equal(Boolean(update), ['success', 'busy'].includes(scenario));
+    if (update) {
+      assert.equal(update.args[1], 'new@example.test');
+      assert.match(update.sql, /NOT \(status = ANY/);
+    }
+    if (scenario === 'success') assert.equal(res.body.teacherEmail, 'new@example.test');
+  }
+});
 
 test('history cleanup only cleans completed/failed jobs, without pausing or cancelling queues', async () => {
   const cleaned = [];

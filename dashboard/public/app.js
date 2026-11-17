@@ -1313,6 +1313,7 @@ function renderLifecycleLabs() {
             </div>
             <div class="inline-actions">
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
+              ${state.isAdmin ? `<button class="btn btn-ghost change-owner-button" type="button" data-deployment-id="${deployment.id}" ${actions.busy ? 'disabled' : ''}>Change owner</button>` : ''}
               <span class="pill ${statusPillClass}">${escapeHtml(labStatusLabel(s))}</span>
               ${['deployed', 'running', 'stopped', 'mixed', 'failed'].includes(s) ? `<button class="btn btn-ghost refresh-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Refresh lab state" title="Refresh lab state"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg></button>` : ''}
               <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details ${uiIcon('arrow')}</button>
@@ -1329,6 +1330,13 @@ function renderLifecycleLabs() {
     .join('');
 
   bindLifecycleActions(lifecycleList);
+
+  lifecycleList.querySelectorAll('.change-owner-button').forEach(button => {
+    button.addEventListener('click', event => {
+      event.stopPropagation();
+      void changeDeploymentOwner(button.dataset.deploymentId);
+    });
+  });
 
   lifecycleList.querySelectorAll('.refresh-deployment-button').forEach(button => {
     button.addEventListener('click', async event => {
@@ -1361,6 +1369,61 @@ function renderLifecycleLabs() {
       await openDeploymentDetails(btn.dataset.deploymentId);
     });
   });
+}
+
+async function changeDeploymentOwner(deploymentId) {
+  if (!state.isAdmin || document.querySelector('.change-owner-dialog')) return;
+  const deployment = state.deployments.find(item => item.id === deploymentId);
+  if (!deployment) return;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'modal-dialog change-owner-dialog';
+  dialog.setAttribute('aria-labelledby', 'changeOwnerTitle');
+  dialog.innerHTML = `<form class="modal-card">
+    <h2 id="changeOwnerTitle">Change lab owner</h2>
+    <p>Lab #${escapeHtml(String(deployment.deploymentNumber))} — ${escapeHtml(deployment.blueprint.name)}</p>
+    <label for="labOwnerSelect">New owner</label>
+    <select id="labOwnerSelect" required disabled><option value="">Loading users...</option></select>
+    <p class="owner-error" role="alert" hidden></p>
+    <div class="inline-actions"><button type="button" class="btn btn-secondary owner-cancel">Cancel</button>
+    <button type="submit" class="btn btn-primary" disabled>Save</button></div>
+  </form>`;
+  const select = dialog.querySelector('select');
+  const save = dialog.querySelector('[type="submit"]');
+  const errorEl = dialog.querySelector('.owner-error');
+  const showError = error => { errorEl.textContent = error.message; errorEl.hidden = false; };
+  dialog.querySelector('.owner-cancel').addEventListener('click', () => dialog.close());
+  dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  dialog.querySelector('form').addEventListener('submit', async event => {
+    event.preventDefault();
+    if (save.disabled || !select.value) return;
+    save.disabled = true;
+    select.disabled = true;
+    errorEl.hidden = true;
+    try {
+      await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/owner`, {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ teacherEmail: select.value })
+      });
+      dialog.close();
+      await refreshLifecycleLabs();
+      showMessage(globalStatus, 'Lab owner updated.', 'success');
+    } catch (error) {
+      if (dialog.isConnected) showError(error);
+      else showMessage(globalStatus, error.message, 'danger');
+    } finally { save.disabled = false; select.disabled = false; }
+  });
+  document.body.append(dialog);
+  dialog.showModal();
+  try {
+    const teachers = await fetchJson('/api/teachers');
+    select.innerHTML = '<option value="">Select a user</option>' + teachers.map(teacher =>
+      `<option value="${escapeHtmlAttr(teacher.email)}">${escapeHtml(teacher.displayName || teacher.email)} (${escapeHtml(teacher.email)})</option>`
+    ).join('');
+    select.value = deployment.teacherEmail || '';
+    select.disabled = false;
+    save.disabled = !teachers.length;
+    if (dialog.open) select.focus();
+  } catch (error) { showError(error); }
 }
 
 function bindLifecycleActions(container) {
@@ -1445,7 +1508,7 @@ function renderDashboard() {
                 <div class="dash-classroom-lab">
                   <span class="dash-classroom-lab-icon">${labIcon}</span>
                   <div class="dash-row-info">
-                    <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${escapeHtml(d.blueprint.name)}</a>
+                    <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${d.blueprint.course ? `${escapeHtml(String(d.blueprint.course.courseNumber))} - ` : ''}${escapeHtml(d.blueprint.name)}</a>
                     <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
                   </div>
                   <div class="dash-classroom-owner">${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</div>

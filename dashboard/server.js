@@ -2319,6 +2319,23 @@ app.get(
   })
 );
 
+app.put('/api/lifecycle/deployments/:id/owner', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  const parsed = z.object({ teacherEmail: z.string().trim().email() }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'A valid owner email is required' });
+  const teacherEmail = normalizeEmail(parsed.data.teacherEmail);
+  const deployment = await fetchDeploymentById(req.params.id);
+  if (!deployment) return res.status(404).json({ error: 'deployment not found' });
+  const teacher = await dbPool.query('SELECT email FROM teachers WHERE email = $1', [teacherEmail]);
+  if (!teacher.rowCount) return res.status(400).json({ error: 'Select an existing user' });
+  const result = await dbPool.query(
+    `UPDATE lab_deployments SET teacher_email = $2, updated_at = NOW()
+     WHERE id = $1 AND NOT (status = ANY($3::text[])) RETURNING id`,
+    [deployment.id, teacherEmail, Array.from(deploymentBusyStatuses)]
+  );
+  if (!result.rowCount) return res.status(409).json({ error: 'Wait for the current lab operation to finish before changing its owner' });
+  res.json(await fetchDeploymentById(deployment.id));
+}));
+
 app.post(
   '/api/lifecycle/deployments/refresh-state',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
