@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { transferDeploymentMetadata } from '../lib/deploymentOwner.js';
 import { importHistoricalDeploymentDurations } from '../lib/deploymentDurations.js';
 import { getVmSnapshot, startVmSnapshotAction, getVmSnapshotTask } from '../lib/vmSnapshots.js';
 import { getAnsibleTasks, activeAnsibleTasks, validateTaskBlock, collectionCatalog, parseTaskYaml } from '../lib/ansibleTasks.js';
@@ -2323,17 +2324,42 @@ app.put('/api/lifecycle/deployments/:id/owner', auth.requireRole(auth.ROLE_GROUP
   const parsed = z.object({ teacherEmail: z.string().trim().email() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'A valid owner email is required' });
   const teacherEmail = normalizeEmail(parsed.data.teacherEmail);
-  const deployment = await fetchDeploymentById(req.params.id);
-  if (!deployment) return res.status(404).json({ error: 'deployment not found' });
-  const teacher = await dbPool.query('SELECT email FROM teachers WHERE email = $1', [teacherEmail]);
+  const teacher = await dbPool.query('SELECT * FROM teachers WHERE email = $1', [teacherEmail]);
   if (!teacher.rowCount) return res.status(400).json({ error: 'Select an existing user' });
-  const result = await dbPool.query(
-    `UPDATE lab_deployments SET teacher_email = $2, updated_at = NOW()
-     WHERE id = $1 AND NOT (status = ANY($3::text[])) RETURNING id`,
-    [deployment.id, teacherEmail, Array.from(deploymentBusyStatuses)]
-  );
-  if (!result.rowCount) return res.status(409).json({ error: 'Wait for the current lab operation to finish before changing its owner' });
-  res.json(await fetchDeploymentById(deployment.id));
+  const client = await dbPool.connect();
+  try {
+    await client.query('BEGIN');
+    const locked = await client.query('SELECT id, status FROM lab_deployments WHERE id = $1 FOR UPDATE', [req.params.id]);
+    if (!locked.rowCount) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'deployment not found' });
+    }
+    if (deploymentBusyStatuses.has(locked.rows[0].status)) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ error: 'Wait for the current lab operation to finish before changing its owner' });
+    }
+    const deployment = await fetchDeploymentById(req.params.id);
+    const blueprint = await fetchBlueprintById(deployment.blueprint.id);
+    const classroom = await fetchClassroomById(deployment.classroom.id);
+    const args = { deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom };
+    const previousVms = buildTerraformDeploymentPayload({ ...args, teacher: deployment.teacher }).vms;
+    const nextVms = buildTerraformDeploymentPayload({ ...args, teacher: mapTeacher(teacher.rows[0]) }).vms;
+    const env = readTerraformEnvSettings();
+    assertRequiredTerraformEnvSettings(env);
+    await transferDeploymentMetadata({
+      request: (path, options) => requestProxmoxJson(env, path, { ...options, timeoutMs: 15000 }),
+      resources: await fetchClusterVmResources({ context: 'change deployment owner' }),
+      previousVms, nextVms,
+      persist: async () => {
+        await client.query('UPDATE lab_deployments SET teacher_email = $2, updated_at = NOW() WHERE id = $1', [deployment.id, teacherEmail]);
+        await client.query('COMMIT');
+      }
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+  res.json(await fetchDeploymentById(req.params.id));
 }));
 
 app.post(

@@ -36,21 +36,29 @@ test('owner transfer requires admin and validates the user and operation state b
       z, normalizeEmail: value => value.trim().toLowerCase(),
       auth: { ROLE_GROUPS: { ADMIN_ONLY: 'admin' }, requireRole: role => { requiredRole = role; return role; } },
       deploymentBusyStatuses: new Set(['deploying', 'destroying']),
-      fetchDeploymentById: async id => scenario === 'missing' ? null : { id, teacherEmail: 'new@example.test' },
+      fetchDeploymentById: async id => ({ id, teacherEmail: 'new@example.test', blueprint: { id: 'bp' }, classroom: { id: 'room' } }),
+      fetchBlueprintById: async () => ({}), fetchClassroomById: async () => ({}),
+      buildTerraformDeploymentPayload: () => ({ vms: [] }), mapTeacher: row => row,
+      readTerraformEnvSettings: () => ({}), assertRequiredTerraformEnvSettings() {},
+      fetchClusterVmResources: async () => [],
+      transferDeploymentMetadata: async ({ persist }) => persist(),
       dbPool: { query: async (sql, args) => {
         queries.push({ sql, args });
-        return { rowCount: (sql.startsWith('SELECT') && scenario === 'unknown') || (sql.includes('UPDATE') && scenario === 'busy') ? 0 : 1 };
-      } }
+        return { rowCount: scenario === 'unknown' ? 0 : 1, rows: [{ email: 'new@example.test' }] };
+      }, connect: async () => ({ release() {}, query: async (sql, args) => {
+        queries.push({ sql, args });
+        return { rowCount: scenario === 'missing' ? 0 : 1, rows: [{ id: 'lab', status: scenario === 'busy' ? 'deploying' : 'stopped' }] };
+      } }) }
     });
     assert.equal(requiredRole, 'admin');
     const res = response();
     await handler({ params: { id: 'lab' }, body: { teacherEmail: scenario === 'invalid' ? 'invalid' : ' NEW@example.test ' } }, res);
     assert.equal(res.statusCode, { success: 200, invalid: 400, missing: 404, unknown: 400, busy: 409 }[scenario]);
-    const update = queries.find(query => query.sql.includes('UPDATE'));
-    assert.equal(Boolean(update), ['success', 'busy'].includes(scenario));
+    const update = queries.find(query => query.sql.startsWith('UPDATE'));
+    assert.equal(Boolean(update), scenario === 'success');
     if (update) {
       assert.equal(update.args[1], 'new@example.test');
-      assert.match(update.sql, /NOT \(status = ANY/);
+      assert(queries.some(query => query.sql.includes('FOR UPDATE')));
     }
     if (scenario === 'success') assert.equal(res.body.teacherEmail, 'new@example.test');
   }
