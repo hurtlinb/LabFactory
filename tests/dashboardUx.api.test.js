@@ -19,6 +19,15 @@ function route(start, end, overrides = {}) {
 }
 function response() { return { statusCode: 200, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } }; }
 
+test('management permission follows the transferred owner rather than the blueprint creator', () => {
+  const context = { auth: { enabled: true, ROLES: { ADMIN: 'admin' } } };
+  vm.runInNewContext(source.slice(source.indexOf('const normalizeEmail ='), source.indexOf('app.use(auth.attachUser)')) + '\nthis.canManage = canManageDeployment;', context);
+  const deployment = { teacherEmail: 'new@example.test', blueprint: { teacherEmail: 'old@example.test' } };
+  const request = email => ({ auth: { user: { email, roles: ['teacher'] } } });
+  assert.equal(context.canManage(request(' NEW@example.test '), deployment), true);
+  assert.equal(context.canManage(request('old@example.test'), deployment), false);
+});
+
 test('owner transfer requires admin and validates the user and operation state before updating', async () => {
   for (const scenario of ['success', 'invalid', 'missing', 'unknown', 'busy']) {
     const queries = [];
@@ -44,6 +53,38 @@ test('owner transfer requires admin and validates the user and operation state b
       assert.match(update.sql, /NOT \(status = ANY/);
     }
     if (scenario === 'success') assert.equal(res.body.teacherEmail, 'new@example.test');
+  }
+});
+
+test('destroy checks live VMs for an idle lab while preserving owner and availability guards', async () => {
+  for (const scenario of ['existing', 'absent', 'unavailable', 'foreign']) {
+    const jobs = [], writes = [];
+    const handler = route("app.post(\n  '/api/lifecycle/deployments/:id/:action'", "app.delete(\n  '/api/lifecycle/deployments/:id'", {
+      fetchDeploymentById: async () => ({ id: 'lab', status: 'idle', blueprint: { id: 'bp' }, classroom: { id: 'room' }, teacher: { email: 'new@example.test' } }),
+      canManageDeployment: () => scenario !== 'foreign',
+      denyDeploymentManagement: res => res.status(403).json({ error: 'forbidden' }),
+      deploymentBusyStatuses: new Set(['destroying']),
+      fetchBlueprintById: async () => ({}), fetchClassroomById: async () => ({}),
+      buildTerraformDeploymentPayload: () => ({ vms: [{ vmid: 123 }] }),
+      fetchClusterVmResources: async () => {
+        if (scenario === 'unavailable') throw new Error('Proxmox unavailable');
+        return [{ vmid: scenario === 'existing' ? 123 : 999 }];
+      },
+      initialDeploymentStatusForAction: () => 'destroying',
+      updateDeploymentState: async data => { writes.push(data); return data; },
+      queues: { terraform: { add: async (...args) => { jobs.push(args); return { id: 'job' }; } } },
+      queueRetention: {}
+    });
+    const res = response();
+    const request = { params: { id: 'lab', action: 'destroy' } };
+    if (scenario === 'unavailable') await assert.rejects(handler(request, res), /Proxmox unavailable/);
+    else {
+      await handler(request, res);
+      assert.equal(res.statusCode, { existing: 200, absent: 409, foreign: 403 }[scenario]);
+    }
+    assert.equal(jobs.length, scenario === 'existing' ? 1 : 0);
+    assert.equal(writes.length, jobs.length);
+    if (jobs.length) assert.equal(jobs[0][0], 'destroy');
   }
 });
 

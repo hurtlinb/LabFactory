@@ -475,6 +475,29 @@ test('only admins can open owner selection, cancel it, and save a new lab owner'
   assert.equal(document.querySelector('.change-owner-button').disabled, true);
 });
 
+test('transferred labs appear in the new owners own labs and expose destroy after refresh', async t => {
+  const { api, document, w } = setup(t);
+  api.state.auth = { enabled: true };
+  api.state.isAdmin = false;
+  api.state.currentUser = { email: ' NEW@example.test ', roles: ['teacher'] };
+  api.state.showOnlyMyLabs = true;
+  const deployment = { id: 'lab', status: 'stopped', deploymentNumber: 1, teacherEmail: 'old@example.test', teacher: { email: 'old@example.test', initials: 'OLD' }, blueprint: { name: 'Transferred lab' }, classroom: { id: 'room', name: 'Room' }, totalVmCount: 1 };
+  api.state.deployments = [deployment];
+  api.renderLifecycleLabs();
+  assert.equal(document.querySelector('.deployment-card'), null);
+  w.fetch = async () => ({ ok: true, json: async () => [{ ...deployment, teacherEmail: 'new@example.test', teacher: { email: 'new@example.test', initials: 'NEW' } }] });
+  await api.refreshLifecycleLabs();
+  assert(document.querySelector('.deployment-card'));
+  assert(document.querySelector('.deployment-card [data-action="destroy"]'));
+  api.state.currentUser.email = 'old@example.test';
+  api.renderLifecycleLabs();
+  assert.equal(document.querySelector('.deployment-card'), null);
+  api.state.showOnlyMyLabs = false;
+  api.renderLifecycleLabs();
+  assert(document.querySelector('.deployment-card'));
+  assert.equal(document.querySelector('.deployment-card [data-action="destroy"]'), null);
+});
+
 test('dashboard tiles expose power actions according to lab status', t => {
   const { api, document } = setup(t);
   api.state.isAdmin = true;

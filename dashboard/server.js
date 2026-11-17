@@ -3221,11 +3221,6 @@ app.post(
       return;
     }
 
-    if (action === 'destroy' && deployment.status === 'idle') {
-      res.status(409).json({ error: 'deployment has no VMs to destroy' });
-      return;
-    }
-
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     if (action === 'deploy') {
@@ -3245,11 +3240,15 @@ app.post(
       teacher: deployment.teacher,
       workstationPasswords: deployment.workstationPasswords
     });
-    if (action === 'deploy') {
-      const resources = await fetchClusterVmResources({ context: 'verify deployment VM absence' });
+    if (action === 'deploy' || (action === 'destroy' && deployment.status === 'idle')) {
+      const resources = await fetchClusterVmResources({ context: 'verify deployment VM presence' });
       const existingVmids = new Set(resources.map(vm => Number(vm.vmid)));
-      if (terraformBlueprintPayload.vms.some(vm => existingVmids.has(Number(vm.vmid)))) {
+      const hasExistingVms = terraformBlueprintPayload.vms.some(vm => existingVmids.has(Number(vm.vmid)));
+      if (action === 'deploy' && hasExistingVms) {
         return res.status(409).json({ error: 'VMs already exist for this lab. Refresh its state, then use Start or Stop.' });
+      }
+      if (action === 'destroy' && !hasExistingVms) {
+        return res.status(409).json({ error: 'deployment has no VMs to destroy' });
       }
     }
     const updated = await updateDeploymentState({
