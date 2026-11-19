@@ -180,7 +180,7 @@ The `Jobs` page provides:
 
 The `Settings` page also contains a `Clear job history` button to remove completed and failed jobs from BullMQ history.
 
-The danger zone also contains a `Clean orphaned disks` button. It uses the Proxmox API token to inspect QEMU VM configs, list volumes in `PROXMOX_ORPHANED_DISK_POOL` (`ceph-pool` by default), and remove pool volumes that are not referenced by any VM config. Volumes whose VMID still exists in Proxmox or whose RBD image still has watchers are ignored. The cleanup uses direct Proxmox REST API calls on every node from `PROXMOX_NODES` or `PROXMOX_NODE`; the `nodes/{node}/execute` endpoint is not used because Proxmox restricts it to `root@pam`.
+The danger zone also contains a `Clean orphaned disks` button. It uses the Proxmox API token to inspect QEMU VM configs, list volumes in `PROXMOX_ORPHANED_DISK_POOL` (`ceph-pool` by default), and remove pool volumes that are not referenced by any VM config. Volumes whose VMID still exists in Proxmox or whose RBD image still has watchers are ignored. The cleanup inventories the shared pool through one node at a time and stops at the first successful response, falling back to another node on failure. Failed attempts remain reported in the cleanup result. The request timeout defaults to five minutes (`PROXMOX_ORPHANED_DISK_CLEANUP_TIMEOUT_MS=300000`); an existing environment override takes precedence, and Proxmox may enforce a shorter server-side timeout. The cleanup uses direct Proxmox REST API calls; the `nodes/{node}/execute` endpoint is not used because Proxmox restricts it to `root@pam`.
 
 ## Terraform Behavior
 

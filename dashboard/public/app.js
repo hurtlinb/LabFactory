@@ -3776,8 +3776,11 @@ cleanOrphanedDisksButton?.addEventListener('click', async () => {
   const confirmed = await confirmAction('Clean orphaned disks?', 'This permanently deletes unreferenced disks from the configured Ceph pool.', 'Delete orphaned disks');
   if (!confirmed) return;
 
+  const originalButtonContent = cleanOrphanedDisksButton.innerHTML;
   cleanOrphanedDisksButton.disabled = true;
-  showMessage(targetStatus, 'Cleaning orphaned disks...', 'success', 120000);
+  cleanOrphanedDisksButton.setAttribute('aria-busy', 'true');
+  cleanOrphanedDisksButton.innerHTML = '<span class="loading-spinner" aria-hidden="true"></span> Cleaning...';
+  showMessage(targetStatus, 'Cleaning orphaned disks...', 'success', 300000);
   try {
     const result = await fetchJson('/api/settings/clean-orphaned-disks', {
       method: 'POST',
@@ -3799,6 +3802,8 @@ cleanOrphanedDisksButton?.addEventListener('click', async () => {
   } catch (error) {
     showMessage(targetStatus, error.message, 'danger', 10000);
   } finally {
+    cleanOrphanedDisksButton.innerHTML = originalButtonContent;
+    cleanOrphanedDisksButton.removeAttribute('aria-busy');
     cleanOrphanedDisksButton.disabled = false;
   }
 });

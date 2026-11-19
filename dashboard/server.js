@@ -110,7 +110,7 @@ const PROXMOX_VM_RESOURCE_LOG_INTERVAL_MS = 60_000;
 const ORPHANED_DISK_CLEANUP_POOL = String(process.env.PROXMOX_ORPHANED_DISK_POOL || 'ceph-pool').trim();
 const ORPHANED_DISK_CLEANUP_TIMEOUT_MS = parsePositiveNumber(
   process.env.PROXMOX_ORPHANED_DISK_CLEANUP_TIMEOUT_MS,
-  120_000
+  300_000
 );
 const ORPHANED_DISK_CLEANUP_TASK_RETRY_MS = 1000;
 let lastProxmoxVmResourceErrorLog = {
@@ -648,7 +648,8 @@ const deleteStorageVolume = async (envSettings, node, storage, volid) => {
 const fetchProxmoxTaskStatus = async (envSettings, node, upid) => {
   const payload = await requestProxmoxJson(
     envSettings,
-    `nodes/${node}/tasks/${encodeURIComponent(upid)}/status`
+    `nodes/${node}/tasks/${encodeURIComponent(upid)}/status`,
+    { timeoutMs: ORPHANED_DISK_CLEANUP_TIMEOUT_MS }
   );
   return payload?.data ?? {};
 };
@@ -708,16 +709,18 @@ const cleanOrphanedDisksOnProxmoxNode = async () => {
     ...resourceNodes
   ])];
   const errors = [];
-  const storageContentByNode = await Promise.all(
-    targetNodes.map(async node => {
-      try {
-        return { node, volumes: await fetchStorageContent(envSettings, node, ORPHANED_DISK_CLEANUP_POOL) };
-      } catch (error) {
-        errors.push({ node, reason: error?.message || 'storage inventory failed' });
-        return { node, volumes: [] };
-      }
-    })
-  );
+  const storageContentByNode = [];
+  // The Ceph pool is shared: one successful inventory is sufficient.
+  // Try other nodes only on failure, without concurrent RBD inventories.
+  for (const node of targetNodes) {
+    try {
+      const volumes = await fetchStorageContent(envSettings, node, ORPHANED_DISK_CLEANUP_POOL);
+      storageContentByNode.push({ node, volumes });
+      break;
+    } catch (error) {
+      errors.push({ node, reason: error?.message || 'storage inventory failed' });
+    }
+  }
   const skippedVolumes = [];
   const candidateVolumes = [];
   const seenVolumes = new Set();

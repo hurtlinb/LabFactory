@@ -37,6 +37,38 @@ test('a shared Cloud-Init image is deleted only once', async () => {
   assert.equal(result.complete, true);
 });
 
+test('a successful shared-pool inventory stops further node requests, even when empty', async () => {
+  const calls = [];
+  const { run } = setup({ fetchStorageContent: async (_env, node) => {
+    calls.push(node);
+    return [];
+  } });
+  const result = await run();
+  assert.deepEqual(calls, ['a']);
+  assert.equal(result.complete, true);
+});
+
+test('fallback inventory waits for failure and stops at the first successful node', async () => {
+  const calls = [];
+  let firstFinished = false;
+  const { run, deleted } = setup({
+    fetchProxmoxNodeNames: async () => ['a', 'b', 'c'],
+    fetchStorageContent: async (_env, node) => {
+      calls.push(node);
+      if (node === 'a') {
+        await new Promise(resolve => setTimeout(resolve, 10));
+        firstFinished = true;
+        throw new Error('HTTP 596: Connection timed out');
+      }
+      assert.equal(firstFinished, true);
+      return [disk(1)];
+    }
+  });
+  await run();
+  assert.deepEqual(calls, ['a', 'b']);
+  assert.equal(deleted[0].node, 'b');
+});
+
 test('one failed inventory does not prevent cleanup via another node and is reported', async () => {
   const { run, deleted } = setup({ fetchStorageContent: async (_env, node) => {
     if (node === 'a') throw new Error('listing images failed');
