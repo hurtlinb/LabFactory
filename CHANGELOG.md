@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.3.2] — 2026-11-19
+
+- Fix deployment: VMID must be unique
+
 ## [2.3.1] — 2026-11-17
 
 - Affichage du numéro de module devant le nom du blueprint dans les cartes des salles du dashboard.

@@ -16,7 +16,7 @@ const vmPlan = (actions = ['create'], before = null, vmid = 49690) => ({
 });
 
 test('VMID preflight accepts free IDs and blocks occupied VM, template and container IDs', async () => {
-  await checkPlannedVmids(vmPlan(), async () => []);
+  await checkPlannedVmids(vmPlan(), async () => [], async id => id);
   for (const existing of [
     { type: 'qemu', status: 'stopped' }, { type: 'qemu', template: 1 }, { type: 'lxc' }
   ]) {
@@ -200,6 +200,12 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     : (assert.notEqual(args[0], 'apply', 'must not apply a conflicting plan'), '');
   sandbox.fetchProxmoxVmResources = async () => [{ vmid: 49690, name: 'other-lab', node: 'pve1', type: 'qemu' }];
   await assert.rejects(processor(jobFor('conflict', 'deploy'), 'conflict'), /VMID conflict.*49690/);
+  sandbox.fetchProxmoxVmResources = async () => [];
+  sandbox.checkProxmoxFreeVmid = async (_settings, id) => {
+    assert.equal(id, 49690);
+    throw new Error('VM already exists');
+  };
+  await assert.rejects(processor(jobFor('hidden-conflict', 'deploy'), 'hidden-conflict'), /VMID 49690.*creation blocked/);
   sandbox.runCommand = async () => { throw new Error('Terraform failed'); };
   await assert.rejects(processor(jobFor('failed', 'deploy'), 'failed'), /Terraform failed/);
   assert(transitions.some(([id, status]) => id === 'failed' && status === 'failed'));
@@ -234,4 +240,32 @@ test('Ansible processor shares the lab lock with Terraform and releases it after
   job.data.windowsAdminPassword = 'mismatched';
   await assert.rejects(processor(job, 'token'), /password does not match/);
   assert.equal(pool.locks.size, 0);
+});
+
+test('VMID preflight checks IDs hidden from inventory and fails closed', async () => {
+  const checked = [];
+  await checkPlannedVmids(vmPlan(), async () => [], async id => { checked.push(id); return String(id); });
+  assert.deepEqual(checked, [49690]);
+  for (const message of ['VM already exists', 'HTTP 403', 'Proxmox unavailable']) {
+    await assert.rejects(checkPlannedVmids(vmPlan(), async () => [], async () => { throw new Error(message); }),
+      /VMID 49690.*creation blocked/);
+  }
+  for (const result of [undefined, null, true, {}, [], 49691]) {
+    await assert.rejects(checkPlannedVmids(vmPlan(), async () => [], async () => result), /Invalid Proxmox VMID availability response/);
+  }
+  await assert.rejects(checkPlannedVmids(vmPlan(), async () => []), /availability check is required/);
+});
+
+test('worker queries the Proxmox cluster registry for the exact VMID', async () => {
+  const source = await fs.readFile('workers/terraformWorker.js', 'utf8');
+  const start = source.indexOf('const checkProxmoxFreeVmid =');
+  const context = { URL, proxmoxRequestOptions: () => ({ headers: { Authorization: 'test-token' } }),
+    requestJson: async options => {
+      assert.equal(options.url.href, 'https://pve.example/api2/json/cluster/nextid?vmid=49690');
+      assert.equal(options.method, 'GET');
+      assert.equal(options.headers.Authorization, 'test-token');
+      return { data: 49690 };
+    } };
+  vm.runInNewContext(source.slice(start, source.indexOf('const fetchVmCurrentStatus', start)) + '\nthis.check = checkProxmoxFreeVmid;', context);
+  assert.equal(await context.check({ proxmox_api_url: 'https://pve.example/api2/json/' }, 49690), 49690);
 });

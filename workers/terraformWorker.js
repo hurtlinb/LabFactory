@@ -321,6 +321,15 @@ const fetchProxmoxVmResources = async envSettings => {
   return payload.data;
 };
 
+const checkProxmoxFreeVmid = async (envSettings, vmid) => {
+  const payload = await requestJson({
+    url: new URL(`cluster/nextid?vmid=${vmid}`, `${envSettings.proxmox_api_url.replace(/\/+$/, '')}/`),
+    method: 'GET',
+    ...proxmoxRequestOptions(envSettings)
+  });
+  return payload?.data;
+};
+
 const fetchVmCurrentStatus = async (envSettings, node, vmid) => {
   const apiUrl = new URL(
     `nodes/${node}/qemu/${vmid}/status/current`,
@@ -1802,7 +1811,8 @@ export function startTerraformWorker(connection) {
               const planJson = await runCommand('terraform', ['show', '-json', 'tfplan'], {
                 cwd: terraformDir, env, signal: abortController.signal, quiet: true
               });
-              await checkPlannedVmids(JSON.parse(planJson), () => fetchProxmoxVmResources(merged));
+              await checkPlannedVmids(JSON.parse(planJson), () => fetchProxmoxVmResources(merged),
+                vmid => checkProxmoxFreeVmid(merged, vmid));
               lease.assertHeld();
               try {
                 await runCommand(
