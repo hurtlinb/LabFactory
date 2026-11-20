@@ -26,7 +26,8 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
     await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8'));
-    await db.query(`UPDATE windows_pool_settings SET paused = false`);
+    // Stock in the pool's Proxmox pool ("pool-dev" in dev, "pool" in prod), labs in "labs-dev"/"labs".
+    await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-dev'`);
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 2 WHERE category = 'assign'`);
     const templateId = randomUUID();
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'en')`, [templateId]);
@@ -60,7 +61,7 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       requestId: lab.requestId, deploymentId: lab.deploymentId, workstationNumber: index + 1, blueprintVmId: randomUUID(),
       name: `IN101-AB-lab-${String(index + 1).padStart(2, '0')}-srv`, tags: ['ab'], vlanTag: 72 + index,
       network: { mode: 'static', ipAddress: `10.10.${72 + index}.10`, prefixLength: 25, gateway: `10.10.${72 + index}.1` },
-      dnsServers: ['195.186.4.162', '195.186.4.163'], adminUser: 'Administrator', password: 'Final-Pa55word!', ...extra
+      dnsServers: ['195.186.4.162', '195.186.4.163'], adminUser: 'Administrator', password: 'Final-Pa55word!', proxmoxPool: 'labs-dev', ...extra
     });
     const state = async id => (await db.query('SELECT state, error_code FROM windows_pool_vms WHERE id = $1', [id])).rows[0];
 
@@ -80,7 +81,9 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       assert.equal(g.adminPassword, slot.password, 'final password applied');
       // Order: guest network (link down) -> connection -> post-connection check.
       const events = px.stats.events.filter(e => e.vmid === vm.vmid).map(e => `${e.at}${e.linkDown === undefined ? '' : e.linkDown ? ':down' : ':up'}`);
-      assert.deepEqual(events, ['guest-network:down', 'connect', 'post-connect:up']);
+      assert.deepEqual(events, ['pool-move', 'guest-network:down', 'connect', 'post-connect:up'], 'leaves the stock pool before any network');
+      assert.deepEqual(px.stats.events.filter(e => e.vmid === vm.vmid && e.at === 'pool-move').map(e => [e.from, e.to]), [['pool-dev', 'labs-dev']]);
+      assert.equal(g.pool, 'labs-dev', 'assigned VM in the labs Proxmox pool');
       // The password never travels on the command line.
       assert.ok(px.stats.execBodies.every(body => !JSON.stringify(body.command).includes(slot.password)));
       assert.deepEqual(winrmCalls.at(-1), { ipAddress: '10.10.72.10', username: 'Administrator', password: slot.password, signal: undefined });

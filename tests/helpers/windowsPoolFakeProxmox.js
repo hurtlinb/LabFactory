@@ -44,7 +44,17 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       if (guests.has(id) || hidden.has(id)) throw new ProxmoxError(400, `VM ${id} already exists`);
       return id;
     }
-    if (path === 'cluster/resources?type=vm') return [...guests].map(([vmid, g]) => ({ vmid, node: g.node, type: 'qemu', name: g.config.name, template: g.template ? 1 : 0 }));
+    if (path === 'cluster/resources?type=vm') return [...guests].map(([vmid, g]) => ({ vmid, node: g.node, type: 'qemu', name: g.config.name, template: g.template ? 1 : 0, ...(g.pool ? { pool: g.pool } : {}) }));
+    if (path === 'pools' && method === 'PUT') {
+      // Proxmox >= 8.1: move VMs into a pool (allow-move required if they are already in another one).
+      for (const id of String(body.vms).split(',').map(Number)) {
+        const g = guest(id);
+        if (g.pool && g.pool !== body.poolid && !Number(body['allow-move'])) throw new ProxmoxError(500, `VM ${id} is already a pool member`);
+        stats.events.push({ vmid: id, at: 'pool-move', from: g.pool ?? null, to: body.poolid, t: now() });
+        g.pool = body.poolid;
+      }
+      return null;
+    }
     if ((m = path.match(/^nodes\/[^/]+\/storage\/[^/]+\/content\/(.+)$/))) {
       if (stats.storageDown) throw new ProxmoxError(596, 'Connection timed out');
       const volid = decodeURIComponent(m[1]);
@@ -58,7 +68,7 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       stats.clones += 1; stats.cloneCalls.push({ ...body });
       stats.activeClones += 1; stats.maxActiveClones = Math.max(stats.maxActiveClones, stats.activeClones);
       const src = guest(m[2]);
-      guests.set(id, { node: body.target, status: 'stopped', lock: 'clone', history: [],
+      guests.set(id, { node: body.target, status: 'stopped', lock: 'clone', history: [], pool: body.pool,
         config: { ...src.config, template: undefined, name: body.name, description: body.description, digest: 'd1' } });
       return task(m[1], 'qmclone', id, cloneMs, () => { stats.activeClones -= 1; delete guests.get(id).lock; });
     }

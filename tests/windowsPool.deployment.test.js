@@ -123,8 +123,10 @@ test('pool deployment flow (P4b)', { skip: !url }, async t => {
         poolVms, reservedVms, requestId: request.id, deploymentId, deploymentNumber: 7, dnsServers: ['195.186.4.162', '195.186.4.163'],
         templateStorage: () => 'ceph-pool', defaultPassword: 'Shared!pass1',
         ipConfigFor: vm => `ip=${vm.subnetBase.replace(/\.0$/, '')}.${vm.ipLastOctet}/25,gw=${vm.subnetBase.replace(/\.0$/, '')}.1`,
-        adminUserFor: () => 'Administrator'
+        adminUserFor: () => 'Administrator',
+        labProxmoxPool: 'labs-dev'
       });
+      assert.ok(plan.every(item => item.slot.proxmoxPool === 'labs-dev'));
       const assigner = createPoolAssigner({ db, proxmox, holder: 'dep', winrmCheck: async () => {}, log: quiet,
         options: { leaseRetryMs: 10, connectSettleMs: 5, winrmTimeoutMs: 200, winrmRetryMs: 20, guestRetryMs: 20 } });
       const { assigned, failed } = await runPoolAssignments({ assigner, plan });
@@ -139,6 +141,7 @@ test('pool deployment flow (P4b)', { skip: !url }, async t => {
       const g = px.guests.get(srv1.vmid);
       assert.equal(g.config.tags, 'labfactory-pool;ab;7');
       assert.match(g.config.net0, /tag=72,link_down=0/);
+      assert.equal(g.pool, 'labs-dev', 'lab VM moved into the labs Proxmox pool');
       const slots = (await db.query(`SELECT workstation_number, manager FROM lab_vm_assignments WHERE deployment_id = $1 AND status = 'active' ORDER BY 1`, [deploymentId])).rows;
       assert.deepEqual(slots, [{ workstation_number: 1, manager: 'windows-pool' }, { workstation_number: 2, manager: 'windows-pool' }]);
     });

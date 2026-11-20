@@ -1572,7 +1572,7 @@ const preparePoolDeployment = async ({ job, token, replaceVmids }) => {
 // Starts the assignment chains (in parallel with Terraform). Returns { promise } (the promise
 // is NOT awaited here, otherwise Terraform would wait for the end of the assignments);
 // the promise never rejects.
-const startPoolAssignments = async ({ poolContext, job, ipConfigFor, signal }) => {
+const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxPool, signal }) => {
   if (!poolContext?.poolVms?.length) return null;
   const settings = (await dbPool.query('SELECT dns_servers FROM windows_pool_settings WHERE id')).rows[0];
   const storages = new Map((await dbPool.query('SELECT template_id, storage FROM windows_pool_templates')).rows.map(r => [r.template_id, r.storage]));
@@ -1587,7 +1587,8 @@ const startPoolAssignments = async ({ poolContext, job, ipConfigFor, signal }) =
     ipConfigFor,
     defaultPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
     adminUserFor: getWindowsAdminUsername,
-    replacements: poolContext.replacements
+    replacements: poolContext.replacements,
+    labProxmoxPool
   });
   // Redeploy: the old VMs of the slots are disconnected and stopped BEFORE any new
   // VM connects (same IP). The replacements are already reserved (reserve first).
@@ -1664,6 +1665,7 @@ export function startTerraformWorker(connection) {
         const skipTerraform = action === 'deploy' && Boolean(poolContext) &&
           (terraformBlueprintVms.length === 0 || (terraformTargets !== null && terraformTargets.length === 0));
         let poolIpConfigFor = null;
+        let poolLabProxmoxPool = null; // Proxmox pool of the labs (vm_pool), destination of the assigned pool VMs
         lease = await acquireJobLocks(dbPool, job, token, abortController, { deploy: action === 'deploy' && !skipTerraform });
         lease.assertHeld();
         terraformDir = await createTerraformJobDirectory(terraformSourceDir);
@@ -1733,6 +1735,7 @@ export function startTerraformWorker(connection) {
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
           // Network of the pool VMs: same rules as Terraform (single source: buildCloudInitIpConfig).
+          poolLabProxmoxPool = String(merged.vm_pool ?? '').trim() || null;
           poolIpConfigFor = vm => buildCloudInitIpConfig({
             subnetBase: vm.subnetBase,
             mask: merged.network_vlan_mask,
@@ -1937,7 +1940,7 @@ export function startTerraformWorker(connection) {
         // in parallel with Terraform (independent steps).
         const poolVmIds = new Set((poolContext?.poolVms ?? []).map(vm => vm.id));
         const terraformScopedVms = scopedBlueprintVms.filter(vm => !poolVmIds.has(vm.id));
-        assignmentPromise = (await startPoolAssignments({ poolContext, job, ipConfigFor: poolIpConfigFor, signal: abortController.signal }))?.promise ?? null;
+        assignmentPromise = (await startPoolAssignments({ poolContext, job, ipConfigFor: poolIpConfigFor, labProxmoxPool: poolLabProxmoxPool, signal: abortController.signal }))?.promise ?? null;
 
         if (!skipTerraform) {
           await runCommand('terraform', ['init', '-input=false'], {
