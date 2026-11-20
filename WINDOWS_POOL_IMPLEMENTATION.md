@@ -249,7 +249,8 @@ FK `RESTRICT` vers `lab_deployments` (demandes, affectations) : la suppression d
 - [x] Limiter les sondages individuellement, sans garder leur créneau pendant les backoffs ou l’attente de fin de préparation.
 - [x] Gérer les nouvelles révisions, la quarantaine et les reprises après arrêt du worker.
 - [x] Qualifier le worker sur l’infrastructure réelle (voir « Qualification P2 » ci-dessous).
-- [ ] Déploiement Kubernetes du worker (dépôt `labfactory-gitops`) — à faire après qualification.
+- [x] Manifeste Kubernetes du worker (dépôt `labfactory-gitops`), **dev uniquement**, préparé le 2026-11-20 sur la branche locale `feature/windows-pool-worker-dev` (commit `c73581b`, **non poussé**) : `overlays/dev/windows-pool-worker.yaml` + référence dans `overlays/dev/kustomization.yaml`. Hors `base/` car `overlays/prod` inclut `base` ; rendu `kubectl kustomize overlays/prod` **identique octet pour octet** avant/après ; dry-run serveur accepté dans `labfactory-dev`. Deployment `labfactory-windows-pool-worker` : `npm run windows-pool-worker`, secrets base de données/Redis/Proxmox, `labfactory-config`, `RollingUpdate` (réplicas coordonnés par PostgreSQL), `terminationGracePeriodSeconds: 150` (attente des opérations en cours, aucune tâche Proxmox interrompue), 100m/256Mi → 1 CPU/512Mi.
+- [ ] **Ne pas fusionner avant une image dev contenant `feature/windows-pool-p1`** : ArgoCD dev suit `HEAD` en synchronisation automatique ; l’image dev actuelle (`worker-c02df67`) ne contient pas le worker du pool (CrashLoop). Le clone local était en retard de 108 commits (mises à jour d’images poussées par la CI) : avancé en fast-forward avant la branche.
 
 ### Implémentation P2 (simulée, 2026-11-20)
 
