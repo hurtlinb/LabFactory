@@ -52,7 +52,9 @@ test('template configuration: linked clone required, consistent target and place
   assert.equal(parseTemplatePoolConfig(baseConfig).cloneMode, 'linked');
   assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, cloneMode: 'full' }));
   assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, readyTarget: 7 }), /maximum capacity/);
-  assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, node: null }), /node and a storage/);
+  // Node optional (automatic placement, 2026-11-20); storage still required to enable.
+  assert.equal(parseTemplatePoolConfig({ ...baseConfig, node: null }).node, null);
+  assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, storage: null }), /requires a storage/);
   assert.equal(parseTemplatePoolConfig({ ...baseConfig, enabled: false, node: null, storage: null }).enabled, false);
   assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, node: 'pve;rm -rf' }));
 });

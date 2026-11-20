@@ -4,7 +4,10 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { ProxmoxError } from '../../lib/windowsPool/proxmox.js';
 
 // templates: source template VMIDs present on the cluster (all on pve-a).
-export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, templates = [147] } = {}) {
+// nodes: cluster nodes (cluster/resources?type=node); storages: storage -> nodes that see it.
+export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, templates = [147],
+  nodes = [{ node: 'pve-a', status: 'online', mem: 0, maxmem: 256 * 1024 ** 3 }], storages = { 'ceph-pool': null } } = {}) {
+  const ha = new Map(); // 'vm:N' -> state
   const guests = new Map();
   const tasks = new Map();
   const hidden = new Set(); // guests invisible to the inventory but known to the registry
@@ -45,6 +48,23 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       return id;
     }
     if (path === 'cluster/resources?type=vm') return [...guests].map(([vmid, g]) => ({ vmid, node: g.node, type: 'qemu', name: g.config.name, template: g.template ? 1 : 0, ...(g.pool ? { pool: g.pool } : {}) }));
+    if (path === 'cluster/resources?type=node') return nodes.map(n => ({ type: 'node', id: `node/${n.node}`, ...n }));
+    if (path === 'cluster/resources?type=storage') {
+      return Object.entries(storages).flatMap(([storage, on]) => (on ?? nodes.map(n => n.node))
+        .map(node => ({ type: 'storage', id: `storage/${node}/${storage}`, storage, node, status: 'available' })));
+    }
+    if (path === 'cluster/ha/resources' && method === 'POST') {
+      if (ha.has(body.sid)) throw new ProxmoxError(500, `resource ID '${body.sid}' already defined`);
+      ha.set(body.sid, body.state); stats.events.push({ vmid: Number(body.sid.slice(3)), at: 'ha-add', state: body.state, t: now() });
+      return null;
+    }
+    if ((m = path.match(/^cluster\/ha\/resources\/(.+)$/))) {
+      const sid = decodeURIComponent(m[1]);
+      if (!ha.has(sid)) throw new ProxmoxError(500, `no such resource '${sid}'`);
+      if (method === 'DELETE') { ha.delete(sid); stats.events.push({ vmid: Number(sid.slice(3)), at: 'ha-remove', t: now() }); return null; }
+      if (method === 'PUT') { ha.set(sid, body.state); return null; }
+      return { sid, state: ha.get(sid) };
+    }
     if (path === 'pools' && method === 'PUT') {
       // Proxmox >= 8.1: move VMs into a pool (allow-move required if they are already in another one).
       for (const id of String(body.vms).split(',').map(Number)) {
@@ -94,7 +114,7 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
           stats.events.push({ vmid: Number(m[2]), at: 'boot', t: now(), linkDown: /link_down=1/.test(g.config.net0 ?? '') });
           g.status = 'running'; g.bootAt = now();
           stats.preparingNow += 1; stats.maxPreparing = Math.max(stats.maxPreparing, stats.preparingNow);
-        } else { g.status = 'stopped'; stats.events.push({ vmid: Number(m[2]), at: 'stop', t: now(), linkDown: /link_down=1/.test(g.config.net0 ?? '') }); }
+        } else { g.status = 'stopped'; stats.events.push({ vmid: Number(m[2]), at: 'stop', t: now(), ha: ha.has(`vm:${m[2]}`), linkDown: /link_down=1/.test(g.config.net0 ?? '') }); }
       });
     }
     if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/agent\/exec$/)) && method === 'POST') {
@@ -143,9 +163,10 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
     if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/agent\/exec-status\?pid=(\d+)$/))) return execs.get(Number(m[3]));
     if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\?purge=1/)) && method === 'DELETE') {
       const id = Number(m[2]);
+      stats.events.push({ vmid: id, at: 'destroy', ha: ha.has(`vm:${id}`), t: now() });
       return task(m[1], 'qmdestroy', id, 10, () => { const g = guests.get(id); if (g?.bootAt && !g.doneCounted) stats.preparingNow -= 1; guests.delete(id); });
     }
     throw new Error(`Fake Proxmox: unexpected route ${method} ${path}`);
   };
-  return { request, guests, tasks, hidden, volumes, log, stats, task };
+  return { request, guests, tasks, hidden, volumes, log, stats, task, ha, nodes };
 }

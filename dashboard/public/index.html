@@ -575,7 +575,7 @@
               <h4 id="poolTemplateFormTitle">Template configuration</h4>
               <input type="hidden" id="poolTemplateId">
               <label>Proxmox source template VMID <input id="poolSourceVmid" type="number" min="100" required></label>
-              <label>Node <input id="poolNode" type="text" required pattern="[A-Za-z0-9._\-]{1,64}"></label>
+              <label>Node <input id="poolNode" type="text" pattern="[A-Za-z0-9._\-]{1,64}" placeholder="automatic" title="Leave empty for automatic placement (online node with the most free memory; HA moves the VMs afterwards)"></label>
               <label>Storage <input id="poolStorage" type="text" required pattern="[A-Za-z0-9._\-]{1,64}"></label>
               <label>Ready reserve <input id="poolReadyTarget" type="number" min="0" max="500" required></label>
               <label>Maximum capacity <input id="poolMaxCapacity" type="number" min="1" max="500" required></label>

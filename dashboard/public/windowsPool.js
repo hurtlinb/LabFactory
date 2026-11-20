@@ -101,7 +101,7 @@ function renderTemplates() {
     if (t.configured && c.qualified && !c.enabled) actions.push(`<button type="button" class="btn btn-ghost" data-pool-action="enable" data-template="${escapeHtml(t.templateId)}">Enable</button>`);
     if (t.configured && c.enabled) actions.push(`<button type="button" class="btn btn-ghost" data-pool-action="disable" data-template="${escapeHtml(t.templateId)}">Disable</button>`);
     return `<tr>
-      <th scope="row">${escapeHtml(t.name)}<br><span class="muted">Proxmox ${escapeHtml(c?.sourceTemplateVmid ?? t.proxmoxTemplateVmid)}${c ? ` · ${escapeHtml(c.node)}/${escapeHtml(c.storage)}` : ''}</span></th>
+      <th scope="row">${escapeHtml(t.name)}<br><span class="muted">Proxmox ${escapeHtml(c?.sourceTemplateVmid ?? t.proxmoxTemplateVmid)}${c ? ` · ${escapeHtml(c.node || 'auto')}/${escapeHtml(c.storage)}` : ''}</span></th>
       <td>${templateState(t)}</td>
       <td>${counts.ready}</td><td>${counts.preparing}</td><td>${counts.reserved}</td><td>${counts.assigned}</td>
       <td>${counts.quarantined ? `<strong>${counts.quarantined}</strong>` : 0}</td>
@@ -233,7 +233,8 @@ function bind() {
     };
     // Immediate checks, with a visible message next to the form (instead of a silent refusal).
     const problems = [];
-    if (!body.node || !body.storage) problems.push('node and storage are required');
+    if (!body.storage) problems.push('storage is required');
+    if (!body.node) body.node = null; // automatic placement
     if (!Number.isInteger(body.sourceTemplateVmid) || body.sourceTemplateVmid < 100) problems.push('the source template VMID must be ≥ 100');
     if (body.readyTarget > body.maxCapacity) problems.push(`the ready reserve (${body.readyTarget}) must not exceed the maximum capacity (${body.maxCapacity})`);
     if (problems.length) return status(`Not saved: ${problems.join('; ')}.`, 'danger', 'poolTemplateStatus');
