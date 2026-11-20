@@ -217,7 +217,9 @@ test('pool deployment flow (P4b)', { skip: !url }, async t => {
 test('runPoolAssignments: bounded concurrency, results kept per slot', async () => {
   let running = 0;
   let max = 0;
+  const warmed = [];
   const assigner = {
+    warmUp: async vmid => { warmed.push(vmid); return true; },
     assign: async poolVmId => {
       running += 1; max = Math.max(max, running);
       await sleep(5);
@@ -226,8 +228,9 @@ test('runPoolAssignments: bounded concurrency, results kept per slot', async () 
       return { vmid: 70000 + Number(poolVmId.slice(3)), ipAddress: null };
     }
   };
-  const plan = Array.from({ length: 22 }, (_, i) => ({ poolVmId: `vm-${i}`, slot: { network: { ipAddress: `10.0.0.${i}` } } }));
+  const plan = Array.from({ length: 22 }, (_, i) => ({ poolVmId: `vm-${i}`, vmid: 70000 + i, slot: { network: { ipAddress: `10.0.0.${i}` } } }));
   const { assigned, failed } = await runPoolAssignments({ assigner, plan, concurrency: 4 });
+  assert.deepEqual(warmed, plan.slice(4).map(p => p.vmid), 'VMs waiting for a slot warmed up front');
   assert.equal(max, 4, 'never more than 4 chains at once');
   assert.equal(assigned.length, 21);
   assert.deepEqual(failed.map(f => [f.poolVmId, f.error.code]), [['vm-7', 'WINRM_FAILED']]);

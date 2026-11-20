@@ -94,6 +94,10 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       assert.deepEqual([assignment.manager, assignment.vmid, assignment.workstation_number, assignment.status], ['windows-pool', vm.vmid, 1, 'active']);
       const history = (await db.query('SELECT to_state FROM windows_pool_vm_events WHERE pool_vm_id = $1 ORDER BY id', [vm.id])).rows.map(r => r.to_state);
       assert.deepEqual(history, ['creating', 'preparing', 'ready', 'reserved', 'configuring', 'assigned']);
+      const timings = (await db.query(`SELECT detail->'timings' AS t FROM windows_pool_vm_events WHERE pool_vm_id = $1 AND to_state = 'assigned'`, [vm.id])).rows[0].t;
+      assert.deepEqual(Object.keys(timings).sort(), ['connectMs', 'guestNetworkMs', 'proxmoxMs', 'updatePauseMs', 'winrmMs'], 'duration of each step recorded');
+      assert.equal(await assigner.warmUp(vm.vmid), true, 'warm-up: read-only QGA command');
+      assert.equal(await assigner.warmUp(999999), false, 'warm-up never throws');
       // Idempotent: a second call (resume) does not redo anything.
       const again = await assigner.assign(vm.id, slot);
       assert.equal(again.resumed, true);
