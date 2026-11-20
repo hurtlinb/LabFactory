@@ -27,7 +27,9 @@ const SHUTDOWN_GRACE_MS = Math.max(5_000, Number(process.env.WINDOWS_POOL_SHUTDO
   const env = readTerraformEnvSettings();
   const db = new Pool({
     connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory',
-    max: Math.max(10, Number(process.env.WINDOWS_POOL_DB_POOL_SIZE ?? 20))
+    max: Math.max(10, Number(process.env.WINDOWS_POOL_DB_POOL_SIZE ?? 20)),
+    // Pool starvation = visible error instead of a silent freeze.
+    connectionTimeoutMillis: 30_000
   });
   const proxmox = createPoolProxmox(createHttpRequest({
     apiUrl: env.proxmox_api_url,
@@ -36,7 +38,12 @@ const SHUTDOWN_GRACE_MS = Math.max(5_000, Number(process.env.WINDOWS_POOL_SHUTDO
     tlsInsecure: env.proxmox_tls_insecure
   }));
   const holder = `${os.hostname()}:${process.pid}`;
-  const manager = createPoolManager({ db, proxmox, holder });
+  // Concurrent VM operations: at most a third of the pool (each one uses 2 connections + the
+  // tick, the coordinator and LISTEN need their own).
+  const maxConcurrentOperations = Math.max(2, Math.min(
+    Number(process.env.WINDOWS_POOL_MAX_CONCURRENT_OPERATIONS ?? 6),
+    Math.floor(db.options.max / 3)));
+  const manager = createPoolManager({ db, proxmox, holder, options: { maxConcurrentOperations } });
 
   const connection = redisConnectionOptions();
   const deployQueue = new Queue(DEPLOY_QUEUE_NAME, { connection });

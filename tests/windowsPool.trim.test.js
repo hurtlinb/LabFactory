@@ -99,6 +99,37 @@ test('Windows pool: stock surplus destroyed', { skip: !url }, async t => {
       assert.ok(codes[0]?.n >= 1);
       assert.equal([...slow.guests.keys()].filter(id => id !== 147).length, 0, 'no orphan VM on the Proxmox side (clone in progress waited for then destroyed)');
     });
+
+    await t.test('many VM operations at once with a small pool: no freeze (dev bug)', async () => {
+      // Dev situation: 34 VMs to handle, pool of 20, everything launched at once -> 19 lock connections,
+      // queries waiting forever. Here 15 VMs with a pool of 8 and bounded concurrency.
+      const small = new Pool({ connectionString: url, options: '-c search_path=' + schema, max: 8, connectionTimeoutMillis: 10_000 });
+      const burst = fakeProxmox({ cloneMs: 20 });
+      try {
+        await db.query('UPDATE windows_pool_templates SET enabled = false');
+        const ids = [];
+        for (let i = 0; i < 15; i++) {
+          const id = randomUUID();
+          const vmid = 75000 + i;
+          burst.guests.set(vmid, { node: 'pve-b', status: 'running', history: [],
+            config: { name: `lfpool-${vmid}`, description: `labfactory-pool:${id}`, net0: 'virtio=EE:EE:EE:EE:EE:EE,link_down=1', digest: 'x' } });
+          await small.query(`INSERT INTO windows_pool_vms (id, template_id, revision, source_template_vmid, cluster, node, vmid, state)
+                              VALUES ($1, $2, 1, 147, 'default', 'pve-b', $3, 'deleting')`, [id, tpl, vmid]);
+          ids.push(id);
+        }
+        const m3 = createPoolManager({ db: small, proxmox: createPoolProxmox(burst.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'burst', log: quiet,
+          options: { maxConcurrentOperations: 3, retryBackoffMs: [20, 40], powerTimeoutMs: 5_000, cloneTimeoutMs: 5_000 } });
+        const deadline = Date.now() + 30_000;
+        for (;;) {
+          await m3.tick(); await sleep(20);
+          const left = (await small.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE id = ANY($1::uuid[]) AND state <> 'deleted'`, [ids])).rows[0].n;
+          if (!left) break;
+          assert.ok(Date.now() < deadline, `operations frozen: ${left} VMs still to destroy`);
+        }
+        await m3.drain();
+        assert.equal([...burst.guests.keys()].filter(id => id >= 75000).length, 0, 'all destroyed on the Proxmox side');
+      } finally { await small.end(); }
+    });
   } finally {
     await db.end();
     await admin.query('DROP SCHEMA ' + schema + ' CASCADE');
