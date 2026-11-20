@@ -2013,6 +2013,10 @@ export function startTerraformWorker(connection) {
           } catch (error) {
             throw error;
           }
+          // P4c: the creations are done; the readiness waits (WinRM/SSH, up to tens of minutes)
+          // and the hand-off to Ansible no longer block the other labs' deployments.
+          // The lab lock stays held until the end of the job.
+          await lease.releaseKey?.('global:terraform-deploy');
         }
 
         let guestReadiness = {
