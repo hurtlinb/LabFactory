@@ -10,7 +10,11 @@ ALTER TABLE windows_pool_templates
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'windows_pool_templates_enabled_qualified') THEN
+  -- Scoped to THIS table (search_path): pg_constraint covers every schema, an existing
+  -- constraint of the same name elsewhere must not prevent creating it here.
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                  WHERE conname = 'windows_pool_templates_enabled_qualified'
+                    AND conrelid = 'windows_pool_templates'::regclass) THEN
     ALTER TABLE windows_pool_templates
       ADD CONSTRAINT windows_pool_templates_enabled_qualified
       CHECK (NOT enabled OR (qualified_revision IS NOT NULL AND qualified_revision = revision));

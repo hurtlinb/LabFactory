@@ -29,6 +29,12 @@ test('Windows pool administration (P6)', { skip: !url }, async t => {
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'Windows 2022 v2', 'windows-server', 'en', 147), ($2, 'Ubuntu', 'ubuntu', 'en', 111)`, [tWin, tLinux]);
     const config = { readyTarget: 2, maxCapacity: 4, maxParallelPreparations: 2, node: 'peda-pve2', storage: 'ceph-pool', sourceTemplateVmid: 147 };
 
+    await t.test('unconfigured Windows template: identifier present in the overview (dev bug: templateId null)', async () => {
+      const tpl = (await getPoolOverview(db)).templates.find(x => x.name === 'Windows 2022 v2');
+      assert.equal(tpl.configured, false);
+      assert.equal(tpl.templateId, tWin, 'the LEFT JOIN must not overwrite the template id with NULL');
+    });
+
     await t.test('configuration: Windows only, strict validation, created disabled', async () => {
       await assert.rejects(configureTemplate(db, tLinux, config), error => error.code === 'NOT_WINDOWS');
       await assert.rejects(configureTemplate(db, tWin, { ...config, readyTarget: 9 }), error => error instanceof PoolAdminError && /maximum capacity/.test(error.message));
