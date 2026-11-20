@@ -152,6 +152,9 @@ test('Windows pool reservation and waiting (P3)', { skip: !url }, async t => {
         { step: async () => { await manager.tick(); await coordinator.reconcile(); }, timeoutMs: 20_000 });
       await manager.drain();
       const [intact, reconnected, foreignMarker] = (await db.query(`SELECT * FROM windows_pool_vms WHERE request_id = $1 ORDER BY vmid`, [r.id])).rows;
+      // Reserve 1: the VM returned to the stock is legitimately kept (with reserve 0 it would be
+      // destroyed as surplus — rule "lowered reserve / disabled template").
+      await db.query(`UPDATE windows_pool_templates SET ready_target = 1 WHERE template_id = $1`, [tB]);
       const g = px.guests.get(reconnected.vmid);
       g.config.net0 = g.config.net0.replace('link_down=1', 'link_down=0');
       px.guests.get(foreignMarker.vmid).marker = { poolVmId: randomUUID(), revision: 1 };

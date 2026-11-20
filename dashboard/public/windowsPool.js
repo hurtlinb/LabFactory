@@ -258,7 +258,7 @@ function bind() {
     }
     if (action === 'enable' || action === 'disable') {
       const enabled = action === 'enable';
-      if (!enabled && !window.confirm('Disable this template? Labs waiting for it will wait; labs already deployed are not affected.')) return;
+      if (!enabled && !window.confirm('Disable this template? Its ready VMs will be destroyed (VMs already in labs are not affected). Labs waiting for it will keep waiting.')) return;
       return void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(template)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
         enabled ? 'Template enabled: new labs will use the pool.' : 'Template disabled.', 'poolTemplateStatus');
     }
