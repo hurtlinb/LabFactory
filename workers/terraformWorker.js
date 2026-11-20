@@ -71,9 +71,30 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const terraformSourceDir = path.resolve(__dirname, '../terraform');
 const ansibleDir = path.resolve(__dirname, '../ansible');
 const terraformVarsPath = path.resolve(__dirname, '../config/terraform-settings.json');
+// Windows pool: each assignment chain holds a lock connection + needs another one; the job locks
+// hold one each. 20 connections, and a 30 s acquisition timeout so that an exhaustion becomes a
+// visible error instead of a silent freeze (lab 188 in dev, 2026-11-20).
+const DB_POOL_MAX = 24;
 const dbPool = new Pool({
-  connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory'
+  connectionString: process.env.DATABASE_URL ?? 'postgresql://labfactory:labfactory@localhost:5432/labfactory',
+  max: DB_POOL_MAX,
+  connectionTimeoutMillis: 30_000
 });
+// Assignment chains in parallel for the WHOLE process (all jobs together): 2 connections each,
+// the rest kept for the job locks (up to 4 jobs x 2) and their queries.
+const POOL_ASSIGN_CONCURRENCY = Math.max(1, Math.min(
+  Number.parseInt(process.env.WINDOWS_POOL_ASSIGN_CONCURRENCY ?? '', 10) || 6,
+  Math.floor((DB_POOL_MAX - 10) / 2)));
+let poolAssignRunning = 0;
+const poolAssignWaiting = [];
+const withPoolAssignSlot = async fn => {
+  if (poolAssignRunning >= POOL_ASSIGN_CONCURRENCY) await new Promise(resolve => poolAssignWaiting.push(resolve));
+  else poolAssignRunning += 1;
+  try { return await fn(); } finally {
+    const next = poolAssignWaiting.shift();
+    if (next) next(); else poolAssignRunning -= 1;
+  }
+};
 
 const buildHttpError = (statusCode, body) => {
   let proxmoxMessage = null;
@@ -1595,7 +1616,9 @@ const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxP
   if (poolContext.replacements?.size) {
     await retireReplacedVms({ db: dbPool, proxmox: getPoolProxmox(), replacements: poolContext.replacements });
   }
-  return { promise: runPoolAssignments({ assigner: getPoolAssigner(), plan, signal }) };
+  const assigner = getPoolAssigner();
+  const limited = { assign: (...args) => withPoolAssignSlot(() => assigner.assign(...args)) };
+  return { promise: runPoolAssignments({ assigner: limited, plan, signal, concurrency: POOL_ASSIGN_CONCURRENCY }) };
 };
 
 // Waits for the assignments, closes the run request and returns the VMIDs to add to the

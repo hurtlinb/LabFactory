@@ -211,3 +211,26 @@ test('pool deployment flow (P4b)', { skip: !url }, async t => {
     await admin.end();
   }
 });
+
+// Lab 188 in dev (22 VMs): every assignment started at once exhausted the pg pool of the
+// Terraform worker (one lock connection per chain + one for its queries) -> frozen forever.
+test('runPoolAssignments: bounded concurrency, results kept per slot', async () => {
+  let running = 0;
+  let max = 0;
+  const assigner = {
+    assign: async poolVmId => {
+      running += 1; max = Math.max(max, running);
+      await sleep(5);
+      running -= 1;
+      if (poolVmId === 'vm-7') throw Object.assign(new Error('boom'), { code: 'WINRM_FAILED' });
+      return { vmid: 70000 + Number(poolVmId.slice(3)), ipAddress: null };
+    }
+  };
+  const plan = Array.from({ length: 22 }, (_, i) => ({ poolVmId: `vm-${i}`, slot: { network: { ipAddress: `10.0.0.${i}` } } }));
+  const { assigned, failed } = await runPoolAssignments({ assigner, plan, concurrency: 4 });
+  assert.equal(max, 4, 'never more than 4 chains at once');
+  assert.equal(assigned.length, 21);
+  assert.deepEqual(failed.map(f => [f.poolVmId, f.error.code]), [['vm-7', 'WINRM_FAILED']]);
+  assert.deepEqual(assigned.map(a => a.vmid), plan.filter(p => p.poolVmId !== 'vm-7').map(p => 70000 + Number(p.poolVmId.slice(3))), 'order of the plan kept');
+  assert.equal(assigned[0].ipAddress, '10.0.0.0');
+});
