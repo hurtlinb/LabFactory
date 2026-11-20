@@ -1080,7 +1080,7 @@ const ensureDeploymentWorkstationPasswords = async (deployment, classroom, passw
   return passwords;
 };
 
-const deploymentBusyStatuses = new Set(['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying']);
+const deploymentBusyStatuses = new Set(['queued', 'waiting_for_pool', 'deploying', 'customizing', 'starting', 'stopping', 'destroying']);
 const workstationRedeployableStatuses = new Set(['running', 'failed']);
 
 const parseVmidsToSet = value =>
@@ -1271,6 +1271,7 @@ const buildTerraformBlueprintPayload = blueprint => {
         osType: vm.template.osType,
         language: vm.template.language ?? 'en',
         windowsAdminUsername: getWindowsAdminUsername(vm.template.language),
+        templateId: vm.template.id,
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
@@ -1406,6 +1407,7 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
         osType: vm.template.osType,
         language: vm.template.language ?? 'en',
         windowsAdminUsername: getWindowsAdminUsername(vm.template.language),
+        templateId: vm.template.id,
         cloneSource: String(vm.template.proxmoxTemplateVmid),
         fullClone: Boolean(vm.template.fullClone),
         ipLastOctet: vm.ipLastOctet ?? null,
@@ -1472,6 +1474,8 @@ const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request
 const inferDeploymentVmStatus = ({ deploymentStatus, vm, resource, guestStarted = false, guestReady = false, guestFailed = false }) => {
   if (!resource) {
     if (guestFailed) return 'failed';
+    // Windows pool (P4b): the lab waits for ready VMs before any creation.
+    if (deploymentStatus === 'waiting_for_pool') return 'waiting_for_pool';
     if (['queued', 'deploying'].includes(deploymentStatus)) return 'cloning';
     if (deploymentStatus === 'destroying') return 'destroying';
     if (deploymentStatus === 'destroyed') return 'destroyed';
@@ -1796,6 +1800,7 @@ const upsertTeacher = async user => {
 
 const TRANSIENT_DEPLOYMENT_STATUSES = new Set([
   'queued',
+  'waiting_for_pool',
   'deploying',
   'customizing',
   'starting',

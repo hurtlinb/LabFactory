@@ -1179,6 +1179,7 @@ function renderLifecycleSteps(status) {
   const opMap = {
     idle:        { label: 'Not started',       cls: 'op-idle',    icon: '↺' },
     queued:      { label: 'Queued',            cls: 'op-busy',    icon: '↻' },
+    waiting_for_pool: { label: 'Waiting for Windows pool…', cls: 'op-busy', icon: '↻' },
     deploying:   { label: 'Deploying…',        cls: 'op-busy',    icon: '↻' },
     customizing: { label: 'Configuring…',      cls: 'op-busy',    icon: '↻' },
     deployed:    { label: 'Ready',    cls: 'op-stopped', icon: '▶' },
@@ -1193,7 +1194,7 @@ function renderLifecycleSteps(status) {
   };
   const op = opMap[s] || { label: s, cls: 'op-idle', icon: '?' };
 
-  const prepareState = ['queued', 'deploying', 'customizing'].includes(s) ? 'active'
+  const prepareState = ['queued', 'waiting_for_pool', 'deploying', 'customizing'].includes(s) ? 'active'
     : ['deployed', 'running', 'mixed', 'starting', 'stopping', 'stopped', 'destroying', 'destroyed'].includes(s) ? 'done'
     : '';
 
@@ -1495,12 +1496,13 @@ function renderDashboard() {
                 : uiIcon('lab');
               const badgeClass =
                 d.status === 'mixed' ? 'dash-badge-preparing' : ['running', 'deployed'].includes(d.status) ? 'dash-badge-running' :
-                ['queued', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
+                ['queued', 'waiting_for_pool', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
                 d.status === 'stopped' ? 'dash-badge-stopped' :
                 d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
               const badgeText =
                 d.status === 'mixed' ? 'Partially started' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
                 d.status === 'starting' ? labStatusLabel(d.status) :
+                d.status === 'waiting_for_pool' ? 'Waiting for Windows pool' :
                 ['queued', 'deploying', 'customizing'].includes(d.status) ? 'Preparing' :
                 d.status === 'stopped' ? 'Stopped' :
                 d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
@@ -1542,7 +1544,7 @@ function renderDashboard() {
 }
 
 function isDeploymentBusy(status) {
-  return ['queued', 'deploying', 'customizing', 'starting', 'stopping', 'destroying'].includes(status);
+  return ['queued', 'waiting_for_pool', 'deploying', 'customizing', 'starting', 'stopping', 'destroying'].includes(status);
 }
 
 function getDeploymentWorkstationNumber(vm) {
@@ -2397,7 +2399,7 @@ async function promptDomainMember(vmId) {
 }
 
 const DEPLOY_CONFLICT_PHRASE = 'deploy';
-const DEPLOY_ACTIVE_STATUSES = ['queued', 'deploying', 'customizing', 'starting', 'stopping', 'deployed', 'running', 'mixed'];
+const DEPLOY_ACTIVE_STATUSES = ['queued', 'waiting_for_pool', 'deploying', 'customizing', 'starting', 'stopping', 'deployed', 'running', 'mixed'];
 
 function promptDeploymentConflict(existingDeployment) {
   const dialog = document.getElementById('deploymentConflictDialog');

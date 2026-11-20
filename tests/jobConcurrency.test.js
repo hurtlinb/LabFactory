@@ -169,6 +169,11 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     STOP_STATE_CONFIRMATION_TIMEOUT_MS: 10,
     checkPlannedVmids, fetchProxmoxVmResources: async () => [],
     readWindowsPoolVmidRange: async () => ({ name: 'Windows pool', min: 70000, max: 79999 }),
+    // Windows pool (P4b) with no enabled template: historical flow unchanged.
+    preparePoolDeployment: async () => null,
+    startPoolAssignments: async () => null,
+    settlePoolAssignments: async () => ({ assigned: [] }),
+    applyAssignmentsToPayload: vms => vms,
     runCommand: async (_command, args, opts) => { commands.push({ args, ...opts }); return args[0] === 'show' ? '{"format_version":"1.2","resource_changes":[]}' : ''; }
   };
   t.after(async () => { releasePower(); for (const dir of directories) await fs.rm(dir, { recursive: true, force: true }); });

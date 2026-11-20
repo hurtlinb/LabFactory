@@ -50,6 +50,9 @@ CREATE TABLE IF NOT EXISTS windows_pool_requests (
   id UUID PRIMARY KEY,
   deployment_id UUID NOT NULL REFERENCES lab_deployments(id) ON DELETE RESTRICT,
   kind TEXT NOT NULL CHECK (kind IN ('deploy', 'redeploy-workstation')),
+  -- Job run (lab_deployments.last_run_id) that created the request: a request left
+  -- behind by an abandoned run is cancelled (verified) before a new run.
+  run_id TEXT,
   status TEXT NOT NULL DEFAULT 'waiting_for_pool'
     CHECK (status IN ('waiting_for_pool', 'reserved', 'fulfilled', 'cancelled', 'failed')),
   -- [{ "templateId": uuid, "count": n }] ; the revision is resolved at reservation time.
