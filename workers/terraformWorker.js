@@ -915,7 +915,7 @@ const invokeVmPowerAction = async (envSettings, node, vmid, action) => {
 };
 
 const isProxmoxHaResourceMissing = error =>
-  error?.statusCode === 404 || /no such resource|does not exist|not found/i.test(formatProxmoxError(error));
+  error?.statusCode === 404 || /no such resource|does not exist|not found|not ha managed/i.test(formatProxmoxError(error));
 
 const isProxmoxHaResourceAlreadyExists = error =>
   /already exists|resource.*exists|duplicate/i.test(formatProxmoxError(error));

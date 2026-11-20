@@ -60,7 +60,8 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
     }
     if ((m = path.match(/^cluster\/ha\/resources\/(.+)$/))) {
       const sid = decodeURIComponent(m[1]);
-      if (!ha.has(sid)) throw new ProxmoxError(500, `no such resource '${sid}'`);
+      // Real PVE 9 messages (DELETE seen in dev on lab 187).
+      if (!ha.has(sid)) throw new ProxmoxError(500, method === 'DELETE' ? `cannot delete service '${sid}', not HA managed!` : `no such resource '${sid}'`);
       if (method === 'DELETE') { ha.delete(sid); stats.events.push({ vmid: Number(sid.slice(3)), at: 'ha-remove', t: now() }); return null; }
       if (method === 'PUT') { ha.set(sid, body.state); return null; }
       return { sid, state: ha.get(sid) };

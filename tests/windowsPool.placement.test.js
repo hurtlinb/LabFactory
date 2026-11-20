@@ -91,14 +91,17 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
     });
 
     await t.test('destruction: HA removed before the stop', async () => {
-      const vmids = (await db.query(`SELECT vmid FROM windows_pool_vms WHERE state = 'ready'`)).rows.map(r => r.vmid);
+      const vmids = (await db.query(`SELECT vmid FROM windows_pool_vms WHERE state = 'ready' ORDER BY vmid`)).rows.map(r => r.vmid);
+      // VM without HA (ready before the HA version, lab 187 in dev): "not HA managed" tolerated.
+      px.ha.delete(`vm:${vmids[0]}`);
       await db.query(`UPDATE windows_pool_templates SET enabled = false`);
       await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state <> 'deleted'`)).rows[0].n === 0);
       for (const vmid of vmids) {
         const events = px.stats.events.filter(e => e.vmid === vmid);
         const removed = events.findIndex(e => e.at === 'ha-remove');
         const stopped = events.findIndex(e => e.at === 'stop');
-        assert.ok(removed >= 0 && stopped > removed, 'ha-remove before stop');
+        if (vmid === vmids[0]) assert.equal(removed, -1, 'no HA to remove');
+        else assert.ok(removed >= 0 && stopped > removed, 'ha-remove before stop');
         assert.equal(events[stopped].ha, false);
         assert.equal(px.ha.has(`vm:${vmid}`), false);
         assert.equal(px.guests.has(vmid), false);
