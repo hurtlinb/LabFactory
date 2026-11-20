@@ -130,7 +130,13 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       g.net ??= { dhcp: 'Enabled', enableDhcp: 1, ip: null, prefix: null, gateway: null, dns: [] };
       const apipa = { ip: '169.254.172.144', prefix: 16, origin: 'WellKnown' };
       const readPassword = () => { if (body['input-data']) g.adminPassword = JSON.parse(body['input-data']).password; };
-      if (script.includes('EnableDHCP -Value 0')) {
+      if (script.includes('PauseQualityUpdatesStartTime')) {
+        const start = new Date().toISOString().slice(0, 10);
+        const names = [...script.matchAll(/-Name '(Pause\w+StartTime)' -Value/g)].map(x => x[1]);
+        g.wuPause = Object.fromEntries(names.map(name => [name, start]));
+        stats.events.push({ vmid: Number(m[2]), at: 'wu-pause', linkDown: !connected, names, t: now() });
+        out = JSON.stringify({ start, ...(g.wuPauseDefect ? {} : g.wuPause) });
+      } else if (script.includes('EnableDHCP -Value 0')) {
         stats.events.push({ vmid: Number(m[2]), at: 'guest-network', linkDown: !connected, t: now() });
         if (connected) { exitcode = 1; out = ''; } else {
           const [, ip, mask, gateway] = /address=([\d.]+) mask=([\d.]+) gateway=([\d.]+)/.exec(script);

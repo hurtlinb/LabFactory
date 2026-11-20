@@ -80,9 +80,11 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       assert.deepEqual(g.net, { dhcp: 'Disabled', enableDhcp: 0, ip: '10.10.72.10', prefix: 25, gateway: '10.10.72.1', dns: ['195.186.4.162', '195.186.4.163'] });
       assert.equal(g.adminPassword, slot.password, 'final password applied');
       // Order: guest network (link down) -> connection -> post-connection check.
-      const assignmentSteps = new Set(['pool-move', 'guest-network', 'connect', 'post-connect']);
+      const assignmentSteps = new Set(['pool-move', 'guest-network', 'wu-pause', 'connect', 'post-connect']);
       const events = px.stats.events.filter(e => e.vmid === vm.vmid && assignmentSteps.has(e.at)).map(e => `${e.at}${e.linkDown === undefined ? '' : e.linkDown ? ':down' : ':up'}`);
-      assert.deepEqual(events, ['pool-move', 'guest-network:down', 'connect', 'post-connect:up'], 'leaves the stock pool before any network');
+      assert.deepEqual(events, ['pool-move', 'guest-network:down', 'wu-pause:down', 'connect', 'post-connect:up'], 'leaves the stock pool before any network; Windows Update paused before connecting');
+      const today = new Date().toISOString().slice(0, 10);
+      assert.deepEqual(g.wuPause, { PauseQualityUpdatesStartTime: today }, 'Windows Server: quality updates paused (35 days)');
       assert.deepEqual(px.stats.events.filter(e => e.vmid === vm.vmid && e.at === 'pool-move').map(e => [e.from, e.to]), [['pool-dev', 'labs-dev']]);
       assert.equal(g.pool, 'labs-dev', 'assigned VM in the labs Proxmox pool');
       // The password never travels on the command line.
@@ -135,6 +137,17 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       px.guests.get(vm.vmid).dhcpDefect = true;
       await assert.rejects(assigner.assign(vm.id, slotFor(lab, 0)), error => error.code === 'ASSIGNMENT_INVALID' && /DHCP/.test(error.message));
       assert.ok(!px.stats.events.some(e => e.vmid === vm.vmid && e.at === 'connect'), 'never connected');
+    });
+
+    await t.test('Windows Update: feature updates paused too on Windows 11; unconfirmed pause = never connected', async () => {
+      const lab = await reserveLab(2);
+      await assigner.assign(lab.vms[0].id, slotFor(lab, 0, { osType: 'windows11' }));
+      assert.deepEqual(Object.keys(px.guests.get(lab.vms[0].vmid).wuPause).sort(), ['PauseFeatureUpdatesStartTime', 'PauseQualityUpdatesStartTime']);
+      const vm = lab.vms[1];
+      px.guests.get(vm.vmid).wuPauseDefect = true;
+      await assert.rejects(assigner.assign(vm.id, slotFor(lab, 1)), error => error.code === 'WU_PAUSE_FAILED');
+      assert.ok(!px.stats.events.some(e => e.vmid === vm.vmid && e.at === 'connect'), 'never connected');
+      assert.equal((await state(vm.id)).state, 'quarantined');
     });
 
     await t.test('WinRM unavailable: quarantine', async () => {
