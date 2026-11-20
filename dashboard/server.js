@@ -27,6 +27,11 @@ import {
   assertRequiredTerraformEnvSettings
 } from '../lib/terraformSettings.js';
 import { fetchActiveAssignments, overlayAssignments, purgeDeploymentPoolRecords } from '../lib/windowsPool/deployment.js';
+import {
+  PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, configureTemplate, qualifyTemplate,
+  setTemplateEnabled, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
+} from '../lib/windowsPool/admin.js';
+import { createHttpRequest, createPoolProxmox } from '../lib/windowsPool/proxmox.js';
 import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
 
 const require = createRequire(import.meta.url);
@@ -4017,6 +4022,15 @@ app.post('/api/jobs/cancel-all', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), 
         summary[name] = { removed, stopped };
       }
 
+      // Windows pool (P6): the cancelled labs must not keep an open request (reserved VMs
+      // blocked forever). Intact VMs go back to the stock, the others are destroyed.
+      const interrupted = await dbPool.query(
+        'SELECT id FROM lab_deployments WHERE status = ANY($1::text[])', [Array.from(TRANSIENT_DEPLOYMENT_STATUSES)]);
+      for (const { id } of interrupted.rows) {
+        await cancelDeploymentPoolRequests({ db: dbPool, proxmox: getDashboardPoolProxmox(), deploymentId: id })
+          .catch(error => console.warn(`Windows pool: unable to cancel the requests of lab ${id}: ${error.message}`));
+      }
+
       await resetTransientLifecycleStates();
 
       res.json({ ok: true, queues: summary });
@@ -4051,6 +4065,89 @@ app.get('/api/workers', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), async (re
     res.status(500).json({ error: 'unable to fetch worker statuses' });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Windows pool administration (lot P6)
+// ---------------------------------------------------------------------------
+let dashboardPoolProxmox = null;
+const getDashboardPoolProxmox = () => {
+  if (!dashboardPoolProxmox) {
+    const env = readTerraformEnvSettings();
+    dashboardPoolProxmox = createPoolProxmox(createHttpRequest({
+      apiUrl: env.proxmox_api_url, tokenId: env.proxmox_api_token_id,
+      tokenSecret: env.proxmox_api_token_secret, tlsInsecure: env.proxmox_tls_insecure
+    }));
+  }
+  return dashboardPoolProxmox;
+};
+const sendPoolAdminError = (res, error) => {
+  if (error instanceof PoolAdminError) return res.status(error.status).json({ error: error.message, code: error.code });
+  throw error;
+};
+const poolActor = req => getRequestUser(req)?.email || getRequestUser(req)?.name || (auth.enabled ? 'unknown' : 'local');
+
+app.get('/api/windows-pool', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await getPoolOverview(dbPool));
+}));
+
+app.put('/api/windows-pool/settings', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  try { await updatePoolSettings(dbPool, req.body ?? {}); } catch (error) { return sendPoolAdminError(res, error); }
+  res.json(await getPoolOverview(dbPool));
+}));
+
+app.put('/api/windows-pool/templates/:templateId', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  let result;
+  try { result = await configureTemplate(dbPool, req.params.templateId, req.body ?? {}); } catch (error) { return sendPoolAdminError(res, error); }
+  res.json({ ...result, overview: await getPoolOverview(dbPool) });
+}));
+
+app.post('/api/windows-pool/templates/:templateId/qualify', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  try { await qualifyTemplate(dbPool, req.params.templateId, { actor: poolActor(req), note: req.body?.note }); } catch (error) { return sendPoolAdminError(res, error); }
+  res.json(await getPoolOverview(dbPool));
+}));
+
+app.post('/api/windows-pool/templates/:templateId/enabled', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  try { await setTemplateEnabled(dbPool, req.params.templateId, req.body?.enabled === true); } catch (error) { return sendPoolAdminError(res, error); }
+  res.json(await getPoolOverview(dbPool));
+}));
+
+app.put('/api/windows-pool/limits', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  try {
+    await updateOperationLimit(dbPool, { category: req.body?.category, scope: req.body?.scope ?? 'cluster', maxActive: Number(req.body?.maxActive) });
+  } catch (error) { return sendPoolAdminError(res, error); }
+  res.json(await getPoolOverview(dbPool));
+}));
+
+app.post('/api/windows-pool/vms/:id/destroy', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  try { await destroyQuarantinedVm(dbPool, req.params.id); } catch (error) { return sendPoolAdminError(res, error); }
+  res.json(await getPoolOverview(dbPool));
+}));
+
+app.get('/api/windows-pool/vms/:id/timeline', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  try { res.json(await getVmTimeline(dbPool, req.params.id)); } catch (error) { return sendPoolAdminError(res, error); }
+}));
+
+// Cancellation of a lab waiting for the pool (by its owner or an administrator): request
+// cancelled (intact reserved VMs back to the stock), delayed job removed, lab 'failed'/'cancelled'.
+app.post('/api/lifecycle/deployments/:id/cancel-pool-wait', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(async (req, res) => {
+  const deployment = await fetchDeploymentById(req.params.id);
+  if (!deployment) return res.status(404).json({ error: 'deployment not found' });
+  if (!canManageDeployment(req, deployment)) return denyDeploymentManagement(res);
+  if (deployment.status !== 'waiting_for_pool') {
+    return res.status(409).json({ error: 'Only a lab waiting for the Windows pool can be cancelled here' });
+  }
+  if (deployment.lastJobId) {
+    const job = await queues.terraform.getJob(String(deployment.lastJobId));
+    if (job && ['delayed', 'waiting'].includes(await job.getState())) await job.remove();
+  }
+  await cancelDeploymentPoolRequests({ db: dbPool, proxmox: getDashboardPoolProxmox(), deploymentId: deployment.id });
+  await dbPool.query(
+    `UPDATE lab_deployments SET status = 'failed', last_action = 'cancelled', updated_at = NOW()
+      WHERE id = $1 AND status = 'waiting_for_pool' AND last_run_id IS NOT DISTINCT FROM $2`,
+    [deployment.id, deployment.lastRunId ?? null]);
+  res.json({ ok: true, deployment: await fetchDeploymentById(deployment.id) });
+}));
 
 app.get('/api/maintenance/files', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
   res.set('Cache-Control', 'no-store');

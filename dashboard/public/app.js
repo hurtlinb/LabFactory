@@ -184,6 +184,7 @@ const PAGE_TITLES = {
   'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
   'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
   'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
+  'admin-windows-pool': { title: 'Windows pool', breadcrumb: 'Administration' },
 };
 
 function getDragItemType(dataTransfer) {
@@ -274,6 +275,8 @@ async function setActiveView(view, { fromRoute = false } = {}) {
   document.getElementById('menuToggle')?.setAttribute('aria-expanded', 'false');
   document.getElementById('pageTitle')?.focus({ preventScroll: true });
   if (view === 'admin-settings') void loadUploadedFiles();
+  // Independent pages (separate modules, e.g. windowsPool.js) listen to the view changes.
+  window.dispatchEvent(new CustomEvent('labfactory:view', { detail: { view } }));
   if (view !== 'blueprint') {
     state.isBlueprintWorkspaceVisible = false;
     renderBlueprintWorkspace();
@@ -1433,7 +1436,7 @@ function bindLifecycleActions(container) {
       event.stopPropagation();
       const action = button.dataset.action;
       const target = state.deployments.find(d => d.id === button.dataset.deploymentId);
-      if (['destroy', 'stop', 'deploy'].includes(action) && !await confirmLabAction(target, action)) return;
+      if (['destroy', 'stop', 'deploy', 'cancel-pool-wait'].includes(action) && !await confirmLabAction(target, action)) return;
       if (action === 'deploy' || action === 'start') {
         const thisDeployment = state.deployments.find(d => d.id === button.dataset.deploymentId);
         const conflicting = state.deployments.find(
@@ -1456,7 +1459,9 @@ function bindLifecycleActions(container) {
         if (state.isAdmin) {
           await refreshQueues();
         }
-        showMessage(globalStatus, `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
+        showMessage(globalStatus, action === 'cancel-pool-wait'
+          ? 'Lab cancelled: it no longer waits for the Windows pool.'
+          : `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
       } finally {
@@ -2118,6 +2123,10 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
 }
 
 function resolveLifecycleActions(status, hasExistingVms = null) {
+  // Windows pool: a waiting lab holds nothing; its owner can cancel it.
+  if (status === 'waiting_for_pool') {
+    return { busy: false, items: [{ action: 'cancel-pool-wait', icon: '✕', label: 'Cancel (waiting for Windows pool)' }] };
+  }
   if (isDeploymentBusy(status)) {
     return { busy: true, items: [] };
   }
@@ -3982,6 +3991,7 @@ async function confirmLabAction(deployment, action) {
   const context = `${deployment.blueprint.name} — ${deployment.classroom.name}, lab #${deployment.deploymentNumber}, ${deployment.totalVmCount} VMs.`;
   if (action === 'destroy') return confirmAction('Destroy lab?', `${context} All VM data will be permanently deleted. After successful destruction, the lab will also be removed from the list. The blueprint is preserved.`, 'Destroy lab');
   if (action === 'stop') return confirmAction('Stop lab?', `${context} Running sessions will be interrupted.`, 'Stop lab');
+  if (action === 'cancel-pool-wait') return confirmAction('Cancel this lab?', `${context} The lab is waiting for ready Windows VMs. Cancelling stops the deployment; it can be deployed again later.`, 'Cancel lab');
   return await chooseAction('Deploy lab', `${context} ${deployment.testMode ? 'Only the first workplace will be deployed (test mode).' : 'The blueprint will be replicated for every workplace.'}`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
 }
 

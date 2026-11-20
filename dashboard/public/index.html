@@ -103,6 +103,13 @@
             </svg>
             Jobs
           </button>
+          <button data-view="admin-windows-pool" data-role-group="admin">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+            </svg>
+            Windows pool
+          </button>
         </div>
       </nav>
 
@@ -525,6 +532,98 @@
         </section>
 
         <!-- ── Jobs / Queues ──────────────────────────────────── -->
+        <!-- ── Windows pool (lot P6) ─────────────────────────────── -->
+        <section class="page" data-view="admin-windows-pool" data-role-group="admin" hidden>
+          <article class="panel" aria-labelledby="poolSettingsTitle">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Windows pool</p>
+                <h3 id="poolSettingsTitle">Global settings</h3>
+              </div>
+              <button type="button" id="poolRefreshButton" class="btn btn-secondary">Refresh</button>
+            </div>
+            <p class="muted">Windows VMs are prepared in advance (linked clones, network disconnected) and assigned to labs on deployment. Only templates that are qualified and enabled use the pool; the others are still cloned by Terraform.</p>
+            <form id="poolSettingsForm" class="pool-settings-form">
+              <label class="switch"><input type="checkbox" id="poolPaused"><span>Suspended (no new assignment or preparation; existing labs are not affected)</span></label>
+              <label>Proxmox resource pool <input id="poolProxmoxPool" type="text" placeholder="labs-dev" pattern="[A-Za-z0-9._-]{1,64}"></label>
+              <label>DNS servers (comma-separated) <input id="poolDnsServers" type="text" placeholder="195.186.4.162, 195.186.4.163"></label>
+              <p class="muted" id="poolVmidRange"></p>
+              <button type="submit" class="btn btn-primary">Save settings</button>
+            </form>
+            <div id="poolStatus" class="status-message" role="status" aria-live="polite" hidden></div>
+          </article>
+
+          <article class="panel" aria-labelledby="poolTemplatesTitle">
+            <p class="eyebrow">Templates</p>
+            <h3 id="poolTemplatesTitle">Windows templates</h3>
+            <p class="muted">A template must be qualified for its current revision before it can be enabled. Changing its Proxmox source template creates a new revision and disables it until it is qualified again.</p>
+            <div class="table-wrap">
+              <table class="queue-table pool-templates-table">
+                <thead><tr><th scope="col">Template</th><th scope="col">State</th><th scope="col">Ready</th><th scope="col">Preparing</th><th scope="col">Reserved</th><th scope="col">In labs</th><th scope="col">Errors</th><th scope="col">Reserve / ceiling</th><th scope="col">Actions</th></tr></thead>
+                <tbody id="poolTemplatesBody"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
+              </table>
+            </div>
+            <form id="poolTemplateForm" class="pool-template-form" hidden>
+              <h4 id="poolTemplateFormTitle">Template configuration</h4>
+              <input type="hidden" id="poolTemplateId">
+              <label>Proxmox source template VMID <input id="poolSourceVmid" type="number" min="100" required></label>
+              <label>Node <input id="poolNode" type="text" required pattern="[A-Za-z0-9._-]{1,64}"></label>
+              <label>Storage <input id="poolStorage" type="text" required pattern="[A-Za-z0-9._-]{1,64}"></label>
+              <label>Ready reserve <input id="poolReadyTarget" type="number" min="0" max="500" required></label>
+              <label>Maximum capacity <input id="poolMaxCapacity" type="number" min="1" max="500" required></label>
+              <label>Parallel preparations <input id="poolMaxParallel" type="number" min="1" max="32" required></label>
+              <div class="inline-actions"><button type="submit" class="btn btn-primary">Save</button><button type="button" id="poolTemplateCancel" class="btn btn-secondary">Cancel</button></div>
+            </form>
+          </article>
+
+          <article class="panel" aria-labelledby="poolRequestsTitle">
+            <p class="eyebrow">Demand</p>
+            <h3 id="poolRequestsTitle">Labs waiting for the pool</h3>
+            <div class="table-wrap">
+              <table class="queue-table">
+                <thead><tr><th scope="col">Lab</th><th scope="col">Status</th><th scope="col">Reason</th><th scope="col">Missing VMs</th><th scope="col">Waiting since</th><th scope="col">Actions</th></tr></thead>
+                <tbody id="poolRequestsBody"><tr><td colspan="6" class="muted">Loading…</td></tr></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel" aria-labelledby="poolMetricsTitle">
+            <p class="eyebrow">Measurements</p>
+            <h3 id="poolMetricsTitle">Durations (last 7 days)</h3>
+            <div class="table-wrap">
+              <table class="queue-table">
+                <thead><tr><th scope="col">Phase</th><th scope="col">Samples</th><th scope="col">Median</th><th scope="col">90th percentile</th><th scope="col">Maximum</th></tr></thead>
+                <tbody id="poolMetricsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel" aria-labelledby="poolLimitsTitle">
+            <p class="eyebrow">Concurrency</p>
+            <h3 id="poolLimitsTitle">Operation limits</h3>
+            <p class="muted">Shared by every worker replica. A slot held by a running Proxmox task stays counted until the task is confirmed finished.</p>
+            <div class="table-wrap">
+              <table class="queue-table">
+                <thead><tr><th scope="col">Operation</th><th scope="col">Scope</th><th scope="col">Active</th><th scope="col">Ceiling</th><th scope="col">Actions</th></tr></thead>
+                <tbody id="poolLimitsBody"></tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="panel" aria-labelledby="poolQuarantineTitle">
+            <p class="eyebrow">Errors</p>
+            <h3 id="poolQuarantineTitle">Quarantined VMs</h3>
+            <p class="muted">A quarantined VM is kept for diagnosis and never returned to the pool. Destroying it frees its capacity.</p>
+            <div class="table-wrap">
+              <table class="queue-table">
+                <thead><tr><th scope="col">VMID</th><th scope="col">Error</th><th scope="col">Details</th><th scope="col">Since</th><th scope="col">Actions</th></tr></thead>
+                <tbody id="poolQuarantineBody"></tbody>
+              </table>
+            </div>
+            <div id="poolTimeline" class="pool-timeline" hidden></div>
+          </article>
+        </section>
+
         <section class="page" data-view="admin-queues" data-role-group="admin" hidden>
           <div class="hero-grid">
             <article class="panel">
@@ -799,6 +898,7 @@
     </form>
   </dialog>
   <script type="module" src="/app.js"></script>
+  <script type="module" src="/windowsPool.js"></script>
 <dialog id="deployLabDialog" class="modal-dialog deploy-lab-dialog" aria-labelledby="deployLabTitle"><div class="modal-card"><div class="panel-head"><h2 id="deployLabTitle">Deploy a lab</h2><button id="closeDeployLabButton" class="btn btn-ghost" type="button" aria-label="Close deployment dialog">Cancel</button></div><p class="muted">The blueprint will be deployed to every workplace in the selected classroom, or only the first workplace in test mode.</p><form id="deploymentForm" class="stack section-form">
                 <div class="split">
                   <label class="field">

@@ -118,7 +118,10 @@ test('job cancellation preserves finished history and the original queue pause s
     queues: { terraform: queue('terraform'), ansible: queue('ansible') },
     queueNames: { terraform: 'terraform', ansible: 'ansible' },
     redisClient: { hGetAll: async () => ({ status: 'paused' }), publish: async (_channel, action) => actions.push(action) },
-    resetTransientLifecycleStates: async () => {}, console
+    resetTransientLifecycleStates: async () => {}, console,
+    // Windows pool (P6): open requests of the interrupted labs closed before the reset.
+    dbPool: { query: async () => ({ rows: [] }) }, TRANSIENT_DEPLOYMENT_STATUSES: new Set(['queued']),
+    cancelDeploymentPoolRequests: async () => [], getDashboardPoolProxmox: () => null
   });
   const res = response(); await handler({}, res);
   assert.equal(res.body.ok, true);
