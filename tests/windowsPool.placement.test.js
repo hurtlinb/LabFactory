@@ -117,6 +117,27 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
       await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state <> 'deleted'`)).rows[0].n === 0);
     });
 
+    await t.test('reserve on hold while a lab is busy, refilled once it is done', async () => {
+      await db.query(`ALTER TABLE lab_deployments ADD COLUMN IF NOT EXISTS status TEXT, ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW()`);
+      const busy = randomUUID();
+      const stale = randomUUID();
+      await db.query(`INSERT INTO lab_deployments (id, status, updated_at) VALUES ($1, 'customizing', NOW()), ($2, 'deploying', NOW() - interval '5 hours')`, [busy, stale]);
+      px.stats.cloneCalls.length = 0;
+      await db.query(`UPDATE windows_pool_templates SET enabled = true, node = NULL, storage = 'ceph-pool', ready_target = 1`);
+      let result;
+      for (let i = 0; i < 5; i += 1) { result = await manager.tick(); await sleep(10); }
+      await manager.drain();
+      assert.equal(result.busyLabs, 1, 'lab stuck for 5 h ignored');
+      assert.equal(result.plans[0].onHold, 'LABS_BUSY');
+      assert.equal(px.stats.cloneCalls.length, 0, 'no clone while a lab is being customized');
+      await db.query(`UPDATE lab_deployments SET status = 'running' WHERE id = $1`, [busy]);
+      await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state = 'ready'`)).rows[0].n === 1);
+      assert.equal(px.stats.cloneCalls.length, 1, 'reserve refilled once the lab is done');
+      await db.query(`DELETE FROM lab_deployments WHERE id = ANY($1::uuid[])`, [[busy, stale]]);
+      await db.query(`UPDATE windows_pool_templates SET enabled = false`);
+      await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state <> 'deleted'`)).rows[0].n === 0);
+    });
+
     await t.test('no node seeing the storage: nothing allocated', async () => {
       px.stats.cloneCalls.length = 0;
       await db.query(`UPDATE windows_pool_templates SET enabled = true, node = NULL, storage = 'missing-store'`);

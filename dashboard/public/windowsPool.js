@@ -55,6 +55,9 @@ function renderWarnings() {
   for (const t of overview.templates.filter(item => item.config?.enabled && item.config.readyTarget === 0)) {
     warnings.push(`${t.name} is enabled with a ready reserve of 0: no VM is prepared in advance, labs will wait for a full preparation (about 7 minutes).`);
   }
+  if (overview.busyLabs > 0 && !overview.settings?.paused) {
+    warnings.push(`Reserve refill on hold: ${overview.busyLabs} lab(s) being deployed, customized, started, stopped or destroyed. Missing VMs are recreated once they are done (labs waiting for the pool are still served).`);
+  }
   element.innerHTML = warnings.map(text => `<p>${escapeHtml(text)}</p>`).join('');
   element.hidden = !warnings.length;
 }

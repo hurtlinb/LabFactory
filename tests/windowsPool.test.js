@@ -287,3 +287,13 @@ test('lease scopes: cluster always, node and storage if known', () => {
   assert.deepEqual(leaseScopes(), ['cluster']);
   assert.deepEqual(leaseScopes({ node: 'peda-pve2', storage: 'ceph-pool' }), ['cluster', 'node:peda-pve2', 'storage:ceph-pool']);
 });
+
+// User decision 2026-11-20: no reserve refill while other labs are in progress; the waiting
+// labs are still served (otherwise they could wait forever).
+test('replenishment: reserve on hold while labs are busy, waiting demand always served', () => {
+  const config = { ...baseConfig, enabled: true, readyTarget: 4, maxCapacity: 10, maxParallelPreparations: 10 };
+  assert.deepEqual(planReplenishment({ config, counts: { ready: 1 }, holdReserve: true }), { toStart: 0, blocked: null, onHold: 'LABS_BUSY' });
+  assert.deepEqual(planReplenishment({ config, counts: { ready: 1 }, waitingDemand: 3, holdReserve: true }), { toStart: 2, blocked: null, onHold: 'LABS_BUSY' });
+  assert.deepEqual(planReplenishment({ config, counts: { ready: 4 }, holdReserve: true }), { toStart: 0, blocked: null }, 'reserve full: nothing on hold');
+  assert.deepEqual(planReplenishment({ config, counts: { ready: 1 } }), { toStart: 3, blocked: null });
+});
