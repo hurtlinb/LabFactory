@@ -4081,7 +4081,11 @@ const getDashboardPoolProxmox = () => {
   return dashboardPoolProxmox;
 };
 const sendPoolAdminError = (res, error) => {
-  if (error instanceof PoolAdminError) return res.status(error.status).json({ error: error.message, code: error.code });
+  if (error instanceof PoolAdminError) {
+    // Traced: an admin refusal must stay diagnosable even if the page does not show it.
+    console.warn(`[windows-pool] ${res.req?.method ?? ''} ${res.req?.originalUrl ?? ''} refused: ${error.code} ${error.message}`);
+    return res.status(error.status).json({ error: error.message, code: error.code });
+  }
   throw error;
 };
 const poolActor = req => getRequestUser(req)?.email || getRequestUser(req)?.name || (auth.enabled ? 'unknown' : 'local');

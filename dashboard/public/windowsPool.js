@@ -32,13 +32,31 @@ async function api(url, options = {}) {
   return payload;
 }
 
-function status(message, kind = 'success') {
-  const element = $('poolStatus');
+// Message displayed NEXT TO the form or the action that triggered it (target), and brought
+// into view: an error far from the clicked button went unnoticed ("nothing happens").
+function status(message, kind = 'success', target = 'poolStatus') {
+  const element = $(target) ?? $('poolStatus');
   if (!element) return;
   element.textContent = message;
   element.className = `status-message ${kind}`;
   element.hidden = !message;
-  if (message && kind === 'success') setTimeout(() => { if (element.textContent === message) element.hidden = true; }, 4000);
+  if (message) element.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
+  if (message && kind === 'success') setTimeout(() => { if (element.textContent === message) element.hidden = true; }, 5000);
+}
+
+// Explicit warnings: suspended pool, or enabled template that prepares nothing in advance.
+function renderWarnings() {
+  const element = $('poolWarnings');
+  if (!element) return;
+  const warnings = [];
+  if (overview.settings?.paused) {
+    warnings.push('The pool is suspended: no VM is prepared or assigned. Uncheck "Suspended" and save the settings to start it.');
+  }
+  for (const t of overview.templates.filter(item => item.config?.enabled && item.config.readyTarget === 0)) {
+    warnings.push(`${t.name} is enabled with a ready reserve of 0: no VM is prepared in advance, labs will wait for a full preparation (about 7 minutes).`);
+  }
+  element.innerHTML = warnings.map(text => `<p>${escapeHtml(text)}</p>`).join('');
+  element.hidden = !warnings.length;
 }
 
 const formatSeconds = seconds => {
@@ -147,6 +165,7 @@ function renderQuarantine() {
 
 function render() {
   if (!overview) return;
+  renderWarnings();
   renderSettings();
   renderTemplates();
   renderRequests();
@@ -179,15 +198,17 @@ function openTemplateForm(templateId) {
   $('poolSourceVmid').focus();
 }
 
-async function act(fn, success) {
+async function act(fn, success, target = 'poolStatus') {
   try {
     const result = await fn();
     overview = result?.overview ?? (result?.templates ? result : overview);
     render();
-    if (success) status(typeof success === 'function' ? success(result) : success);
+    if (success) status(typeof success === 'function' ? success(result) : success, 'success', target);
     await load({ quiet: true });
+    return true;
   } catch (error) {
-    status(error.message, 'danger');
+    status(`Not saved: ${error.message}`, 'danger', target);
+    return false;
   }
 }
 
@@ -197,21 +218,31 @@ function bind() {
     event.preventDefault();
     const dnsServers = $('poolDnsServers').value.split(/[\s,;]+/).map(value => value.trim()).filter(Boolean);
     const proxmoxPool = $('poolProxmoxPool').value.trim();
+    if (!dnsServers.length) return status('Not saved: at least one DNS server is required.', 'danger', 'poolSettingsStatus');
     void act(() => api('/api/windows-pool/settings', { method: 'PUT', body: JSON.stringify({
       paused: $('poolPaused').checked, proxmoxPool: proxmoxPool || null, dnsServers
-    }) }), 'Settings saved.');
+    }) }), () => ($('poolPaused').checked ? 'Settings saved. The pool is suspended.' : 'Settings saved. The pool is active.'), 'poolSettingsStatus');
   });
   $('poolTemplateForm')?.addEventListener('submit', event => {
     event.preventDefault();
     const templateId = $('poolTemplateId').value;
     const number = id => Number($(id).value);
-    void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(templateId)}`, { method: 'PUT', body: JSON.stringify({
+    const body = {
       sourceTemplateVmid: number('poolSourceVmid'), node: $('poolNode').value.trim(), storage: $('poolStorage').value.trim(),
       readyTarget: number('poolReadyTarget'), maxCapacity: number('poolMaxCapacity'), maxParallelPreparations: number('poolMaxParallel')
-    }) }), result => {
+    };
+    // Immediate checks, with a visible message next to the form (instead of a silent refusal).
+    const problems = [];
+    if (!body.node || !body.storage) problems.push('node and storage are required');
+    if (!Number.isInteger(body.sourceTemplateVmid) || body.sourceTemplateVmid < 100) problems.push('the source template VMID must be ≥ 100');
+    if (body.readyTarget > body.maxCapacity) problems.push(`the ready reserve (${body.readyTarget}) must not exceed the maximum capacity (${body.maxCapacity})`);
+    if (problems.length) return status(`Not saved: ${problems.join('; ')}.`, 'danger', 'poolTemplateStatus');
+    void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(templateId)}`, { method: 'PUT', body: JSON.stringify(body) }), result => {
       $('poolTemplateForm').hidden = true;
-      return result.newRevision ? 'New revision: the template is disabled until it is qualified again.' : 'Template configuration saved.';
-    });
+      return result.newRevision
+        ? 'New revision: the template is disabled until it is qualified again.'
+        : result.created ? 'Template configured. Mark it qualified, then enable it.' : 'Template configuration saved.';
+    }, 'poolTemplateStatus');
   });
   $('poolTemplateCancel')?.addEventListener('click', () => { $('poolTemplateForm').hidden = true; });
 
@@ -223,26 +254,26 @@ function bind() {
     if (action === 'qualify') {
       const note = window.prompt('Qualification of the current revision (preparation without network, assignment, WinRM and persistence after reboot verified). Optional note:', '');
       if (note === null) return;
-      return void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(template)}/qualify`, { method: 'POST', body: JSON.stringify({ note }) }), 'Revision marked as qualified.');
+      return void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(template)}/qualify`, { method: 'POST', body: JSON.stringify({ note }) }), 'Revision marked as qualified. You can now enable it.', 'poolTemplateStatus');
     }
     if (action === 'enable' || action === 'disable') {
       const enabled = action === 'enable';
       if (!enabled && !window.confirm('Disable this template? Labs waiting for it will wait; labs already deployed are not affected.')) return;
       return void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(template)}/enabled`, { method: 'POST', body: JSON.stringify({ enabled }) }),
-        enabled ? 'Template enabled: new labs will use the pool.' : 'Template disabled.');
+        enabled ? 'Template enabled: new labs will use the pool.' : 'Template disabled.', 'poolTemplateStatus');
     }
     if (action === 'cancel-lab') {
       if (!window.confirm('Cancel this lab? It will stop waiting for the Windows pool.')) return;
-      return void act(() => api(`/api/lifecycle/deployments/${encodeURIComponent(deployment)}/cancel-pool-wait`, { method: 'POST' }), 'Lab cancelled.');
+      return void act(() => api(`/api/lifecycle/deployments/${encodeURIComponent(deployment)}/cancel-pool-wait`, { method: 'POST' }), 'Lab cancelled.', 'poolRequestsStatus');
     }
     if (action === 'limit') {
       const value = window.prompt(`New ceiling for "${CATEGORIES[category] ?? category}" (${scope}), 0 suspends this operation:`, max);
       if (value === null) return;
-      return void act(() => api('/api/windows-pool/limits', { method: 'PUT', body: JSON.stringify({ category, scope, maxActive: Number(value) }) }), 'Limit updated.');
+      return void act(() => api('/api/windows-pool/limits', { method: 'PUT', body: JSON.stringify({ category, scope, maxActive: Number(value) }) }), 'Limit updated.', 'poolLimitsStatus');
     }
     if (action === 'destroy-vm') {
       if (!window.confirm(`Destroy quarantined VM ${vmid}? Its diagnosis data will be lost.`)) return;
-      return void act(() => api(`/api/windows-pool/vms/${encodeURIComponent(vm)}/destroy`, { method: 'POST' }), `VM ${vmid} will be destroyed by the pool worker.`);
+      return void act(() => api(`/api/windows-pool/vms/${encodeURIComponent(vm)}/destroy`, { method: 'POST' }), `VM ${vmid} will be destroyed by the pool worker.`, 'poolQuarantineStatus');
     }
     if (action === 'timeline') {
       return void api(`/api/windows-pool/vms/${encodeURIComponent(vm)}/timeline`).then(timeline => {

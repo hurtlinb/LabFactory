@@ -102,6 +102,43 @@ test('pool page: actions call the right API', async t => {
   assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'] });
 });
 
+test('pool page: visible errors next to the form, warnings, unconfigured template configurable', async t => {
+  const { window, document, calls, page } = await setup(t);
+  // Warnings: suspended pool / enabled template with reserve 0.
+  overview.settings.paused = true;
+  overview.templates[0].config.readyTarget = 0;
+  await click(window, document.getElementById('poolRefreshButton'));
+  const warnings = document.getElementById('poolWarnings');
+  assert.equal(warnings.hidden, false);
+  assert.match(warnings.textContent, /suspended/);
+  assert.match(warnings.textContent, /Windows 2022 v2 is enabled with a ready reserve of 0/);
+  overview.settings.paused = false;
+  overview.templates[0].config.readyTarget = 2;
+  // Inconsistent configuration: refused BEFORE sending, message next to the form.
+  await click(window, page.querySelector(`[data-pool-action="configure"][data-template="${tW11}"]`));
+  document.getElementById('poolReadyTarget').value = '5';
+  document.getElementById('poolMaxCapacity').value = '4';
+  const before = calls.length;
+  document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise(r => setTimeout(r, 20));
+  assert.equal(calls.length, before, 'no request sent');
+  const templateStatus = document.getElementById('poolTemplateStatus');
+  assert.equal(templateStatus.hidden, false);
+  assert.match(templateStatus.textContent, /Not saved: the ready reserve \(5\) must not exceed the maximum capacity \(4\)/);
+  // Server error: displayed next to the form (no longer only at the top of the page).
+  const failingFetch = globalThis.fetch;
+  globalThis.fetch = async (url, options = {}) => (options.method === 'PUT'
+    ? { ok: false, json: async () => ({ error: 'node: Invalid' }) } : failingFetch(url, options));
+  document.getElementById('poolReadyTarget').value = '2';
+  document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  await new Promise(r => setTimeout(r, 20));
+  assert.match(templateStatus.textContent, /Not saved: node: Invalid/);
+  assert.equal(document.getElementById('poolTemplateForm').hidden, false, 'form kept for correction');
+  globalThis.fetch = failingFetch;
+  // Pattern valid in the browsers' regular-expression mode (v flag).
+  assert.doesNotThrow(() => new RegExp(`^(?:${document.getElementById('poolNode').getAttribute('pattern')})$`, 'v'));
+});
+
 test('lab waiting for the pool: "Cancel" action offered in the lab list', () => {
   const source = readFileSync('dashboard/public/app.js', 'utf8');
   assert.match(source, /status === 'waiting_for_pool'\) \{\s*return \{ busy: false, items: \[\{ action: 'cancel-pool-wait'/);
