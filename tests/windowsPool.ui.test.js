@@ -135,6 +135,9 @@ test('pool page: visible errors next to the form, warnings, unconfigured templat
   assert.match(templateStatus.textContent, /Not saved: node: Invalid/);
   assert.equal(document.getElementById('poolTemplateForm').hidden, false, 'form kept for correction');
   globalThis.fetch = failingFetch;
+  // "Suspended" toggle visible: same structure as the other dashboard switches (the .switch CSS hides the native input).
+  const toggle = document.getElementById('poolPaused').closest('.switch');
+  assert.ok(toggle.querySelector('.switch-track .switch-thumb') && toggle.querySelector('.switch-label'));
   // Pattern valid in the browsers' regular-expression mode (v flag).
   assert.doesNotThrow(() => new RegExp(`^(?:${document.getElementById('poolNode').getAttribute('pattern')})$`, 'v'));
 });
