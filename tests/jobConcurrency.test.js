@@ -49,9 +49,14 @@ function lockPool() {
     locks, clients,
     async connect() {
       const client = new EventEmitter();
-      client.query = async ({ values }) => {
+      client.query = async ({ text, values }) => {
         if (!values) return { rows: [{}] };
         const key = values[1];
+        if (String(text).includes('pg_advisory_unlock')) {
+          const owned = locks.get(key) === client;
+          if (owned) locks.delete(key);
+          return { rows: [{ released: owned }] };
+        }
         if (locks.has(key) && locks.get(key) !== client) return { rows: [{ acquired: false }] };
         locks.set(key, client);
         return { rows: [{ acquired: true }] };
@@ -90,6 +95,23 @@ test('Terraform and Ansible cannot operate on the same lab and contention releas
   assert.equal(pool.locks.has('global:terraform-deploy'), false);
   const other = await acquireJobLocks(pool, jobFor('b', 'deploy'), 'other', null, { deploy: true });
   await other.release(); await ansible.release();
+});
+
+test('P4c: global:terraform-deploy released alone after apply, the lab lock kept', async () => {
+  const pool = lockPool();
+  const deploy = await acquireJobLocks(pool, jobFor('a', 'deploy'), 'a', null, { deploy: true });
+  assert.equal(deploy.holds('global:terraform-deploy'), true);
+  await deploy.releaseKey('global:terraform-deploy');
+  await deploy.releaseKey('global:terraform-deploy'); // idempotent
+  assert.equal(deploy.holds('global:terraform-deploy'), false);
+  assert.equal(pool.locks.has('global:terraform-deploy'), false);
+  assert.equal(pool.locks.has('lab:a'), true, 'the lab stays protected (readiness, hand-off to Ansible)');
+  // Another lab can start its Terraform creations right away...
+  const other = await acquireJobLocks(pool, jobFor('b', 'deploy'), 'b', null, { deploy: true });
+  // ...but not a second operation on the same lab.
+  await assert.rejects(acquireJobLocks(pool, jobFor('a', 'deploy'), 'a2', null, { deploy: true }), DelayedError);
+  await other.release(); await deploy.release();
+  assert.equal(pool.locks.size, 0);
 });
 
 test('lost lock connection aborts work and rejects successful completion', async () => {
@@ -136,7 +158,7 @@ test('concurrency configuration is bounded', () => {
 });
 
 test('Terraform processor runs start and stop concurrently, defers deploy contention and keeps workspace identity', async t => {
-  const pool = lockPool(), transitions = [], commands = [], directories = [], durations = [];
+  const pool = lockPool(), transitions = [], commands = [], directories = [], durations = [], readinessLocks = [];
   const source = await fs.readFile('workers/terraformWorker.js', 'utf8');
   let processor, options;
   let waiting = 0, releasePower;
@@ -162,12 +184,23 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     resolveVmNodesByVmid: async () => new Map(), runWithConcurrency: async () => {},
     waitForVmPowerState: async () => { waiting++; await powerGate; return true; },
     waitForStartedGuestAgents: async () => { waiting++; await powerGate; },
-    waitForGuestReadiness: async ({ action }) => {
+    waitForGuestReadiness: async ({ action, job }) => {
       assert.equal(action, 'deploy', 'only deployments may probe guest IPs');
+      // P4c: during the readiness waits, the global lock is released, the lab lock kept.
+      readinessLocks.push({ global: pool.locks.has('global:terraform-deploy'), lab: pool.locks.has(`lab:${job.data.deploymentId}`) });
       return { readyVmids: new Set(), failedVmids: new Set() };
     },
     STOP_STATE_CONFIRMATION_TIMEOUT_MS: 10,
     checkPlannedVmids, fetchProxmoxVmResources: async () => [],
+    readWindowsPoolVmidRange: async () => ({ name: 'Windows pool', min: 70000, max: 79999 }),
+    // Windows pool (P4b) with no enabled template: historical flow unchanged.
+    preparePoolDeployment: async () => null,
+    startPoolAssignments: async () => null,
+    settlePoolAssignments: async () => ({ assigned: [] }),
+    applyAssignmentsToPayload: vms => vms,
+    terraformManagedVms: vms => vms.filter(vm => vm.manager !== 'windows-pool'),
+    teardownDeploymentPool: async () => ({ vms: 0 }),
+    getPoolProxmox: () => null,
     runCommand: async (_command, args, opts) => { commands.push({ args, ...opts }); return args[0] === 'show' ? '{"format_version":"1.2","resource_changes":[]}' : ''; }
   };
   t.after(async () => { releasePower(); for (const dir of directories) await fs.rm(dir, { recursive: true, force: true }); });
@@ -193,6 +226,8 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
   assert(!transitions.some(([id, status]) => id === 'agent-failed' && status === 'running'));
   await processor(jobFor('d', 'deploy'), 'd');
   assert.deepEqual(durations, [['start', 'd-deploy'], ['finish', 'd-deploy']]);
+  assert.deepEqual(readinessLocks, [{ global: false, lab: true }], 'readiness outside the global lock, inside the lab lock');
+  assert.equal(pool.locks.size, 0, 'every lock released at the end of the job');
   assert(commands.some(({ args }) => args.join(' ') === 'workspace select blueprint-d'));
   assert(commands.every(({ cwd, env }) => env.TF_DATA_DIR === path.join(cwd, '.terraform')));
   sandbox.runCommand = async (_command, args) => args[0] === 'show'

@@ -38,7 +38,7 @@ test('owner transfer requires admin and validates the user and operation state b
       deploymentBusyStatuses: new Set(['deploying', 'destroying']),
       fetchDeploymentById: async id => ({ id, teacherEmail: 'new@example.test', blueprint: { id: 'bp' }, classroom: { id: 'room' } }),
       fetchBlueprintById: async () => ({}), fetchClassroomById: async () => ({}),
-      buildTerraformDeploymentPayload: () => ({ vms: [] }), mapTeacher: row => row,
+      buildEffectiveDeploymentPayload: () => ({ vms: [] }), mapTeacher: row => row,
       readTerraformEnvSettings: () => ({}), assertRequiredTerraformEnvSettings() {},
       fetchClusterVmResources: async () => [],
       transferDeploymentMetadata: async ({ persist }) => persist(),
@@ -73,7 +73,7 @@ test('destroy checks live VMs for an idle lab while preserving owner and availab
       denyDeploymentManagement: res => res.status(403).json({ error: 'forbidden' }),
       deploymentBusyStatuses: new Set(['destroying']),
       fetchBlueprintById: async () => ({}), fetchClassroomById: async () => ({}),
-      buildTerraformDeploymentPayload: () => ({ vms: [{ vmid: 123 }] }),
+      buildEffectiveDeploymentPayload: () => ({ vms: [{ vmid: 123 }] }),
       fetchClusterVmResources: async () => {
         if (scenario === 'unavailable') throw new Error('Proxmox unavailable');
         return [{ vmid: scenario === 'existing' ? 123 : 999 }];

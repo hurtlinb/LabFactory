@@ -1,6 +1,6 @@
 import { finishDeploymentDuration, safelyRecordDuration } from '../lib/deploymentDurations.js';
 import { runReadinessCommand } from '../lib/readinessConcurrency.js';
-import { activeAnsibleTasks } from '../lib/ansibleTasks.js';
+import { activeAnsibleTasks, guestPasswordFor } from '../lib/ansibleTasks.js';
 import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { runAnsibleTaskBlock } from '../lib/runAnsibleTasks.js';
 import { getFileUploads, resolveFileUpload } from '../lib/blueprintFiles.js';
@@ -12,10 +12,24 @@ import { Pool } from 'pg';
 import { promises as fs } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runCommand } from '../lib/runCommand.js';
-import { runCustomization } from '../lib/runCustomization.js';
+import { runCustomization, createLocalLimiter, customizationConcurrency } from '../lib/runCustomization.js';
+import { createLeaseLimiter } from '../lib/windowsPool/leases.js';
+import { hostname as osHostname } from 'node:os';
 import { commandFailure, isTransientConnectionError } from '../lib/customizationRecovery.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Customization Ansible commands (lot P4d): global 'customize' budget shared by every
+// worker replica and every lab (windows_pool_operation_limits), instead of 5 per lab hardcoded.
+// Local fallback (CUSTOMIZATION_CONCURRENCY, default 5) if the migration is not applied.
+let customizationLimiterInstance = null;
+const customizationLimiter = fn => {
+  customizationLimiterInstance ??= createLeaseLimiter({
+    pool: dbPool, category: 'customize', holder: `${osHostname()}:${process.pid}`,
+    fallback: createLocalLimiter(customizationConcurrency(process.env.CUSTOMIZATION_CONCURRENCY))
+  });
+  return customizationLimiterInstance(fn);
+};
 const ansibleDir = path.resolve(__dirname, '../ansible');
 const isWindowsOsType = osType => ['windows11', 'windows-server'].includes(String(osType ?? '').trim());
 const isLinuxOsType = osType => !isWindowsOsType(osType);
@@ -156,7 +170,7 @@ const buildWindowsInventoryHosts = ({ windowsAdminPassword, timezoneTargets, all
         `        ${hostName}:`,
         `          ansible_host: ${target.ipAddress}`,
         `          ansible_user: ${JSON.stringify(windowsAdminUsername)}`,
-        `          ansible_password: ${JSON.stringify(String(target.windowsAdminPassword ?? windowsAdminPassword ?? ''))}`,
+        `          ansible_password: ${JSON.stringify(guestPasswordFor(target, windowsAdminPassword))}`,
         '          ansible_connection: winrm',
         '          ansible_port: 5986',
         '          ansible_winrm_scheme: https',
@@ -216,8 +230,8 @@ const buildLinuxInventoryHosts = ({ linuxUser, linuxPassword, timezoneTargets })
         '          ansible_connection: ssh',
         '          ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"',
         '          ansible_become: true',
-        `          ansible_password: ${JSON.stringify(String(target.windowsAdminPassword ?? linuxPassword ?? ''))}`,
-        `          ansible_become_password: ${JSON.stringify(String(target.windowsAdminPassword ?? linuxPassword ?? ''))}`,
+        `          ansible_password: ${JSON.stringify(guestPasswordFor(target, linuxPassword))}`,
+        `          ansible_become_password: ${JSON.stringify(guestPasswordFor(target, linuxPassword))}`,
         `          target_vm_name: ${JSON.stringify(target.name ?? hostName)}`
       ];
       if (target.stagedFileUploads) {
@@ -314,7 +328,7 @@ export function startAnsibleWorker(connection) {
         const inventoryParts = [];
 
         if (windowsTimezoneTargets.length) {
-          if (windowsTimezoneTargets.some(target => !String(target.windowsAdminPassword ?? extraVars.windows_admin_password ?? '').trim())) {
+          if (windowsTimezoneTargets.some(target => !guestPasswordFor(target, extraVars.windows_admin_password).trim())) {
             throw new Error('windows_admin_password is required for Windows timezone customization');
           }
           inventoryParts.push(
@@ -333,7 +347,7 @@ export function startAnsibleWorker(connection) {
           if (!linuxUser) {
             throw new Error('linux_default_username is required for Linux guest customization');
           }
-          if (linuxTimezoneTargets.some(target => !String(target.windowsAdminPassword ?? linuxPassword ?? '').trim())) {
+          if (linuxTimezoneTargets.some(target => !guestPasswordFor(target, linuxPassword).trim())) {
             throw new Error('A lab password is required for Linux guest customization');
           }
 
@@ -367,7 +381,8 @@ export function startAnsibleWorker(connection) {
           job, windowsTargets: windowsTimezoneTargets, linuxTargets: linuxTimezoneTargets,
           directory: fileStagingDirectory, inventoryPath, extraVars, ansibleDir, runCommand,
           reconnect: waitForWindowsHostReconnect, buildProbeInventory: buildWindowsReconnectInventory,
-          probePlaybook: windowsReconnectCheckPlaybook, signal: abortController.signal
+          probePlaybook: windowsReconnectCheckPlaybook, signal: abortController.signal,
+          limit: customizationLimiter
         });
 
         lease.assertHeld();

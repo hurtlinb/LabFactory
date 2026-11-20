@@ -5,7 +5,15 @@ import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
-import { checkPlannedVmids } from '../lib/vmidAvailability.js';
+import { checkPlannedVmids, readWindowsPoolVmidRange } from '../lib/vmidAvailability.js';
+import { createHttpRequest, createPoolProxmox } from '../lib/windowsPool/proxmox.js';
+import { createPoolAssigner } from '../lib/windowsPool/assignment.js';
+import { awaitPoolReservation } from '../lib/windowsPool/waiting.js';
+import {
+  classifyDeploymentVms, ensureRunPoolRequest, buildAssignmentSlots, runPoolAssignments,
+  finishRunPoolRequest, applyAssignmentsToPayload, terraformManagedVms, teardownDeploymentPool, retireReplacedVms
+} from '../lib/windowsPool/deployment.js';
+import { hostname as osHostname } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -1340,7 +1348,7 @@ const waitForGuestReadiness = async ({
   const fallbackPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
   const failedTargets = new Map();
   for (const target of allReadinessTargets) {
-    const password = String(target.password ?? fallbackPassword).trim();
+    const password = (String(target.password ?? '').trim() || fallbackPassword);
     const reason = !target.host
       ? 'static IPv4 address is missing'
       : !password
@@ -1363,7 +1371,7 @@ const waitForGuestReadiness = async ({
         try {
           await waitForWindowsHostReadiness({
             target,
-            password: String(target.password ?? fallbackPassword).trim(),
+            password: (String(target.password ?? '').trim() || fallbackPassword),
             signal: abortController.signal
           });
           await activateVmHaAfterReadiness({ action, merged, target });
@@ -1387,7 +1395,7 @@ const waitForGuestReadiness = async ({
           await waitForLinuxSshAndCloudInit({
             host: target.host,
             user: linuxUser,
-            password: String(target.password ?? fallbackPassword).trim(),
+            password: (String(target.password ?? '').trim() || fallbackPassword),
             signal: abortController.signal
           });
           await activateVmHaAfterReadiness({ action, merged, target });
@@ -1476,6 +1484,131 @@ const createDeploymentReadinessReporter = job => {
   };
 };
 
+// ---------------------------------------------------------------------------
+// Windows pool (lot P4b). The Windows VMs whose template is enabled in the pool are
+// not cloned by Terraform: they come from the pool and are assigned in parallel with
+// Terraform. Without an enabled template, these helpers return null: unchanged flow.
+// ---------------------------------------------------------------------------
+
+let poolProxmoxSingleton = null;
+const getPoolProxmox = () => {
+  if (!poolProxmoxSingleton) {
+    const settings = readTerraformEnvSettings();
+    poolProxmoxSingleton = createPoolProxmox(createHttpRequest({
+      apiUrl: settings.proxmox_api_url,
+      tokenId: settings.proxmox_api_token_id,
+      tokenSecret: settings.proxmox_api_token_secret,
+      tlsInsecure: settings.proxmox_tls_insecure
+    }));
+  }
+  return poolProxmoxSingleton;
+};
+
+const windowsWinrmPingPlaybook = `- name: Check WinRM of an assigned pool VM
+  hosts: windows_readiness_targets
+  gather_facts: false
+  tasks:
+    - name: WinRM ping
+      ansible.windows.win_ping:
+`;
+
+// WinRM check of a pool VM after network connection: same mechanism as the readiness
+// (ansible-playbook, shared readiness limit), but WITHOUT the Cloudbase-Init done.flag
+// check (prepared in advance, it predates the current boot).
+const checkPoolVmWinrm = async ({ ipAddress, username, password, signal }) => {
+  const attemptDir = path.join(tmpdir(), `labfactory-pool-winrm-${process.pid}-${Date.now()}-${Math.random().toString(16).slice(2)}`);
+  await mkdir(attemptDir, { recursive: true, mode: 0o700 });
+  try {
+    const inventoryPath = path.join(attemptDir, 'inventory.yml');
+    const playbookPath = path.join(attemptDir, 'playbook.yml');
+    await writeFile(inventoryPath, buildWindowsReadinessInventory({ vmid: 'pool', host: ipAddress, user: username }, password), { encoding: 'utf8', mode: 0o600 });
+    await writeFile(playbookPath, windowsWinrmPingPlaybook, 'utf8');
+    await runReadinessCommand(
+      'timeout',
+      [`${WINDOWS_WINRM_ATTEMPT_TIMEOUT_SECONDS}s`, 'ansible-playbook', '--inventory', inventoryPath, playbookPath],
+      { cwd: ansibleDir, env: { ...process.env }, signal }
+    );
+  } finally {
+    await rm(attemptDir, { recursive: true, force: true });
+  }
+};
+
+let poolAssignerSingleton = null;
+const getPoolAssigner = () => {
+  poolAssignerSingleton ??= createPoolAssigner({
+    db: dbPool,
+    proxmox: getPoolProxmox(),
+    holder: `${osHostname()}:${process.pid}`,
+    winrmCheck: checkPoolVmWinrm
+  });
+  return poolAssignerSingleton;
+};
+
+// Before any lock: classification, run request, waiting for the pool (DelayedError while
+// waiting: no attempt, slot or lock consumed). Returns null (unchanged flow), { stale: true }
+// or the pool context of the run.
+const preparePoolDeployment = async ({ job, token, replaceVmids }) => {
+  const vms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
+  if (!job.data?.deploymentId || !vms.length) return null;
+  const classification = await classifyDeploymentVms(dbPool, { deploymentId: job.data.deploymentId, vms, replaceVmids });
+  const { poolVms, terraformVms } = classification;
+  if (!poolVms.length) {
+    const unchanged = terraformVms.length === vms.length && !(classification.terraformTargetVmids && classification.terraformTargetVmids.length !== replaceVmids.length);
+    return unchanged ? null : { ...classification, request: null, reservedVms: [] };
+  }
+  const request = await ensureRunPoolRequest({
+    db: dbPool, proxmox: getPoolProxmox(), deploymentId: job.data.deploymentId, runId: job.data.runId, poolVms, kind: classification.kind
+  });
+  if (request.status === 'waiting_for_pool') {
+    const claimed = await safeUpdateLifecycleStatus(job.data.labInstanceId, 'waiting_for_pool', {
+      action: 'deploy', jobId: String(job.id), runId: job.data.runId
+    });
+    if (!claimed) return { stale: true };
+  }
+  const { vms: reservedVms } = await awaitPoolReservation({ db: dbPool, requestId: request.id, job, token });
+  return { ...classification, request, reservedVms };
+};
+
+// Starts the assignment chains (in parallel with Terraform). Returns { promise } (the promise
+// is NOT awaited here, otherwise Terraform would wait for the end of the assignments);
+// the promise never rejects.
+const startPoolAssignments = async ({ poolContext, job, ipConfigFor, signal }) => {
+  if (!poolContext?.poolVms?.length) return null;
+  const settings = (await dbPool.query('SELECT dns_servers FROM windows_pool_settings WHERE id')).rows[0];
+  const storages = new Map((await dbPool.query('SELECT template_id, storage FROM windows_pool_templates')).rows.map(r => [r.template_id, r.storage]));
+  const plan = buildAssignmentSlots({
+    poolVms: poolContext.poolVms,
+    reservedVms: poolContext.reservedVms,
+    requestId: poolContext.request.id,
+    deploymentId: job.data.deploymentId,
+    deploymentNumber: job.data.deploymentNumber ?? null,
+    dnsServers: settings?.dns_servers ?? [],
+    templateStorage: templateId => storages.get(templateId),
+    ipConfigFor,
+    defaultPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
+    adminUserFor: getWindowsAdminUsername,
+    replacements: poolContext.replacements
+  });
+  // Redeploy: the old VMs of the slots are disconnected and stopped BEFORE any new
+  // VM connects (same IP). The replacements are already reserved (reserve first).
+  if (poolContext.replacements?.size) {
+    await retireReplacedVms({ db: dbPool, proxmox: getPoolProxmox(), replacements: poolContext.replacements });
+  }
+  return { promise: runPoolAssignments({ assigner: getPoolAssigner(), plan, signal }) };
+};
+
+// Waits for the assignments, closes the run request and returns the VMIDs to add to the
+// ready ones. Throws if a slot could not be assigned (lab failed, as a readiness failure).
+const settlePoolAssignments = async ({ poolContext, assignmentPromise }) => {
+  if (!assignmentPromise) return { assigned: [] };
+  const { assigned, failed } = await assignmentPromise;
+  await finishRunPoolRequest(dbPool, poolContext.request.id, { allAssigned: failed.length === 0 });
+  if (failed.length) {
+    throw new Error(`Windows pool assignment failed for ${failed.map(item => `${item.payloadVm.name} (VM ${item.vmid}: ${item.error?.code ?? 'ERROR'} ${item.error?.message ?? ''})`).join('; ')}`);
+  }
+  return { assigned };
+};
+
 export const terraformQueueName = 'terraform-workflows';
 
 export function startTerraformWorker(connection) {
@@ -1508,8 +1641,30 @@ export function startTerraformWorker(connection) {
       const deploymentLabel = job.data.deploymentNumber ? `#${job.data.deploymentNumber}` : String(job.data.labInstanceId);
       let lease;
       let terraformDir;
+      let assignmentPromise = null;
+      let poolTeardown = null; // destroy: pool share, in parallel with terraform destroy (never rejects)
       try {
-        lease = await acquireJobLocks(dbPool, job, token, abortController, { deploy: action === 'deploy' });
+        // Windows pool: waiting BEFORE the locks (a waiting lab holds no lock and no slot).
+        const poolContext = action === 'deploy'
+          ? await preparePoolDeployment({ job, token, replaceVmids: normalizeVmids(job.data?.replaceVmids) })
+          : null;
+        if (poolContext?.stale) {
+          console.log(`Skipping stale Terraform job ${job.id} for deployment ${deploymentLabel} (pool)`);
+          return { planOutput: '', labInstanceId: job.data.labInstanceId, runId: job.data.runId, status: 'stale-job-skipped' };
+        }
+        // Slots served by the pool (manager 'windows-pool', effective dashboard plan) never
+        // enter the Terraform definitions, whatever the action (deploy, destroy...).
+        const terraformBlueprintVms = poolContext
+          ? poolContext.terraformVms
+          : terraformManagedVms(Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : []);
+        // Lab with only pool VMs: no Terraform (and never the main.tf fallback VM).
+        // Redeploy: Terraform only targets its own VMs; empty list = no Terraform (a plan
+        // without -target would touch the whole lab).
+        const terraformTargets = action === 'deploy' && Array.isArray(poolContext?.terraformTargetVmids) ? poolContext.terraformTargetVmids : null;
+        const skipTerraform = action === 'deploy' && Boolean(poolContext) &&
+          (terraformBlueprintVms.length === 0 || (terraformTargets !== null && terraformTargets.length === 0));
+        let poolIpConfigFor = null;
+        lease = await acquireJobLocks(dbPool, job, token, abortController, { deploy: action === 'deploy' && !skipTerraform });
         lease.assertHeld();
         terraformDir = await createTerraformJobDirectory(terraformSourceDir);
         env.TF_DATA_DIR = path.join(terraformDir, '.terraform');
@@ -1519,8 +1674,13 @@ export function startTerraformWorker(connection) {
         console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
         const terraformParallelism = resolveTerraformParallelism();
         const replaceVmids = normalizeVmids(job.data?.replaceVmids);
-        const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(replaceVmids) : [];
-        const targetArgs = action === 'deploy' && replaceVmids.length > 0 ? buildTerraformTargetArgs(replaceVmids) : [];
+        // Windows pool: the historical Windows switching to the pool are TARGETED (destroyed, absent
+        // from the config) but not -replace'd; the slots served by the pool never appear here.
+        const retiredVmids = new Set(poolContext?.retiredTerraformVmids ?? []);
+        const terraformReplaceVmids = terraformTargets ? terraformTargets.filter(vmid => !retiredVmids.has(vmid)) : replaceVmids;
+        const terraformTargetVmids = terraformTargets ?? replaceVmids;
+        const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(terraformReplaceVmids) : [];
+        const targetArgs = action === 'deploy' && terraformTargetVmids.length > 0 ? buildTerraformTargetArgs(terraformTargetVmids) : [];
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -1547,6 +1707,10 @@ export function startTerraformWorker(connection) {
           await safelyRecordDuration(startDeploymentDuration, dbPool, job);
           await readinessReporter.publish();
         }
+        if (action === 'destroy' && job.data?.deploymentId) {
+          poolTeardown = teardownDeploymentPool({ db: dbPool, proxmox: getPoolProxmox(), deploymentId: job.data.deploymentId })
+            .then(result => ({ ok: true, result }), error => ({ ok: false, error }));
+        }
 
       let preparedVarFile;
       let merged;
@@ -1568,10 +1732,17 @@ export function startTerraformWorker(connection) {
           merged.network_vlan_mask = job.data?.blueprint?.networkVlanMask ?? merged.network_vlan_mask;
           const networkGateway = job.data?.blueprint?.networkGateway ?? merged.network_gateway;
           merged.linux_default_username = String(job.data?.linuxDefaultUsername ?? job.data?.blueprint?.linuxDefaultUsername ?? '').trim() || 'ubuntu';
-          if (Array.isArray(job.data?.blueprint?.vms) && job.data.blueprint.vms.length > 0) {
+          // Network of the pool VMs: same rules as Terraform (single source: buildCloudInitIpConfig).
+          poolIpConfigFor = vm => buildCloudInitIpConfig({
+            subnetBase: vm.subnetBase,
+            mask: merged.network_vlan_mask,
+            ipLastOctet: vm.ipLastOctet == null ? null : Number(vm.ipLastOctet),
+            gatewayIp: networkGateway
+          });
+          if (terraformBlueprintVms.length > 0) {
             const resolvedBlueprintVms = await resolveTemplateNamesByVmid(
               merged,
-              job.data.blueprint.vms
+              terraformBlueprintVms
             );
             merged.vm_definitions = resolvedBlueprintVms.map(vm => ({
               vmid: Number(vm.vmid),
@@ -1762,28 +1933,37 @@ export function startTerraformWorker(connection) {
           replaceVmids.length > 0
             ? blueprintVms.filter(vm => replaceVmids.includes(Number(vm.vmid)))
             : blueprintVms;
+        // Pool VMs: neither Terraform nor the Cloudbase-Init readiness; their chains start now,
+        // in parallel with Terraform (independent steps).
+        const poolVmIds = new Set((poolContext?.poolVms ?? []).map(vm => vm.id));
+        const terraformScopedVms = scopedBlueprintVms.filter(vm => !poolVmIds.has(vm.id));
+        assignmentPromise = (await startPoolAssignments({ poolContext, job, ipConfigFor: poolIpConfigFor, signal: abortController.signal }))?.promise ?? null;
 
-        await runCommand('terraform', ['init', '-input=false'], {
-          cwd: terraformDir,
-          env,
-          signal: abortController.signal
-        });
-        try {
-          await runCommand('terraform', ['workspace', 'select', workspaceName], {
+        if (!skipTerraform) {
+          await runCommand('terraform', ['init', '-input=false'], {
             cwd: terraformDir,
             env,
             signal: abortController.signal
           });
-        } catch {
-          await runCommand('terraform', ['workspace', 'new', workspaceName], {
-            cwd: terraformDir,
-            env,
-            signal: abortController.signal
-          });
+          try {
+            await runCommand('terraform', ['workspace', 'select', workspaceName], {
+              cwd: terraformDir,
+              env,
+              signal: abortController.signal
+            });
+          } catch {
+            await runCommand('terraform', ['workspace', 'new', workspaceName], {
+              cwd: terraformDir,
+              env,
+              signal: abortController.signal
+            });
+          }
         }
 
         let planOutput = '';
-        if (action === 'destroy') {
+        if (skipTerraform) {
+          planOutput = 'Terraform skipped: every lab VM comes from the Windows pool';
+        } else if (action === 'destroy') {
           planOutput = await runCommand(
             'terraform',
             ['destroy', '-auto-approve', '-input=false', `-parallelism=${terraformParallelism}`, `-var-file=${preparedVarFile}`],
@@ -1820,7 +2000,7 @@ export function startTerraformWorker(connection) {
                 cwd: terraformDir, env, signal: abortController.signal, quiet: true
               });
               await checkPlannedVmids(JSON.parse(planJson), () => fetchProxmoxVmResources(merged),
-                vmid => checkProxmoxFreeVmid(merged, vmid));
+                vmid => checkProxmoxFreeVmid(merged, vmid), [await readWindowsPoolVmidRange(dbPool)]);
               lease.assertHeld();
               try {
                 await runCommand(
@@ -1847,7 +2027,7 @@ export function startTerraformWorker(connection) {
                     '-input=false',
                     `-parallelism=${terraformParallelism}`,
                     `-var-file=${preparedVarFile}`,
-                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => replaceVmids.includes(vmid))),
+                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => terraformReplaceVmids.includes(vmid))),
                     ...buildTerraformTargetArgs(failedVmids)
                   ],
                   { cwd: terraformDir, env, signal: abortController.signal }
@@ -1861,6 +2041,10 @@ export function startTerraformWorker(connection) {
           } catch (error) {
             throw error;
           }
+          // P4c: the creations are done; the readiness waits (WinRM/SSH, up to tens of minutes)
+          // and the hand-off to Ansible no longer block the other labs' deployments.
+          // The lab lock stays held until the end of the job.
+          await lease.releaseKey?.('global:terraform-deploy');
         }
 
         let guestReadiness = {
@@ -1871,7 +2055,7 @@ export function startTerraformWorker(connection) {
           await readinessReporter.markStartedAll();
           guestReadiness = await waitForGuestReadiness({
             action,
-            targets: scopedBlueprintVms,
+            targets: terraformScopedVms,
             merged,
             job,
             terraformParallelism,
@@ -1879,9 +2063,14 @@ export function startTerraformWorker(connection) {
             readinessReporter
           });
         }
+        // Pool VMs: their readiness = successful assignment (QGA checks + WinRM).
+        const { assigned: poolAssigned } = await settlePoolAssignments({ poolContext, assignmentPromise });
+        assignmentPromise = null;
+        for (const item of poolAssigned) guestReadiness.readyVmids.add(Number(item.vmid));
+        const effectiveScopedVms = applyAssignmentsToPayload(scopedBlueprintVms, poolAssigned);
 
         const customizationTargets = Array.isArray(job.data?.blueprint?.vms)
-          ? scopedBlueprintVms
+          ? effectiveScopedVms
               .filter(
                 vm =>
                   (
@@ -1905,9 +2094,10 @@ export function startTerraformWorker(connection) {
                 windowsAdminUsername: String(vm.windowsAdminUsername ?? '').trim() || null,
                 windowsAdminPassword: String(vm.windowsAdminPassword ?? '').trim(),
                 ipAddress:
-                  vm.ipLastOctet != null && vm.subnetBase
+                  vm.assignedIpAddress ??
+                  (vm.ipLastOctet != null && vm.subnetBase
                     ? `${String(vm.subnetBase).split('.').slice(0, 3).join('.')}.${Number(vm.ipLastOctet)}`
-                    : null,
+                    : null),
                 timezone: String(vm.timezone ?? '').trim() || null,
                 domainRole: String(vm.domainRole ?? '').trim() || null,
                 domainName: String(vm.domainName ?? '').trim() || null,
@@ -1949,6 +2139,12 @@ export function startTerraformWorker(connection) {
             runId: job.data.runId
           });
         } else if (action === 'destroy') {
+          // The lab is deleted only once EVERY manager has succeeded (Terraform above, pool here).
+          if (poolTeardown) {
+            const outcome = await poolTeardown;
+            poolTeardown = null;
+            if (!outcome.ok) throw outcome.error;
+          }
           const removed = await removeDestroyedDeployment(dbPool, job.data.labInstanceId, job.data.runId);
           if (!removed) console.warn(`Skipping stale deployment cleanup for ${job.data.labInstanceId} (runId=${job.data.runId})`);
         } else {
@@ -1972,6 +2168,20 @@ export function startTerraformWorker(connection) {
         };
       } catch (error) {
         if (error instanceof DelayedError) throw error;
+        // Pool destruction still running (e.g. terraform destroy failed): wait for it before
+        // releasing the lab lock; the lab stays (status failed) with its information.
+        if (poolTeardown) { const pending = poolTeardown; poolTeardown = null; await pending; }
+        // Assignment chains still running (e.g. Terraform failed): wait for them before releasing the
+        // locks, then close the run request (the VMs already modified are quarantined/kept).
+        if (assignmentPromise) {
+          const pending = assignmentPromise;
+          assignmentPromise = null;
+          await pending.catch(() => undefined);
+          await dbPool.query(
+            `UPDATE windows_pool_requests SET status = 'failed', finished_at = NOW(), version = version + 1, updated_at = NOW()
+              WHERE status = 'reserved' AND deployment_id = $1 AND run_id = $2`,
+            [job.data.deploymentId, job.data.runId]).catch(() => undefined);
+        }
         console.error(`Terraform job ${job.id} failed for deployment ${deploymentLabel} (${action})`, error);
         await safeUpdateLifecycleStatus(job.data.labInstanceId, 'failed', {
           action,
@@ -2017,7 +2227,7 @@ export function startTerraformWorker(connection) {
 export async function resetStalledTerraformDeployments(connection) {
   const queue = new Queue(terraformQueueName, { connection });
   try {
-    const count = await recoverDeploymentJobs(dbPool, queue, ['queued', 'deploying', 'destroying', 'starting', 'stopping'], 'worker-restarted');
+    const count = await recoverDeploymentJobs(dbPool, queue, ['queued', 'waiting_for_pool', 'deploying', 'destroying', 'starting', 'stopping'], 'worker-restarted');
     if (count) console.log(`[startup] Recovered ${count} abandoned deployment(s)`);
   } catch (error) {
     console.error('[startup] Unable to recover abandoned deployments:', error);
