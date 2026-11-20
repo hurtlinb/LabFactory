@@ -76,6 +76,29 @@ test('Windows pool: stock surplus destroyed', { skip: !url }, async t => {
       await until(async () => { const s = await states(); return !s.ready && !s.deleting; });
       assert.equal((await states()).reserved, 1, 'still never the reserved VMs');
     });
+
+    await t.test('disabled template: in-flight clones and preparations abandoned, never orphaned', async () => {
+      // Slow preparation: VMs stay 'creating'/'preparing' when the template is disabled.
+      const slow = fakeProxmox({ cloneMs: 150, prepMs: 60_000 });
+      const m2 = createPoolManager({ db, proxmox: createPoolProxmox(slow.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'trim-2', log: quiet,
+        options: { firstProbeDelayMs: 0, probeIntervalMs: 15, retryBackoffMs: [20, 40], cloneTimeoutMs: 5_000, powerTimeoutMs: 5_000 } });
+      await db.query(`UPDATE windows_pool_settings SET paused = false`);
+      await db.query('UPDATE windows_pool_templates SET enabled = true, ready_target = 4, max_parallel_preparations = 4');
+      const inFlight = async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state IN ('creating','preparing')`)).rows[0].n;
+      for (let i = 0; i < 200 && (await inFlight()) < 4; i++) { await m2.tick(); await sleep(10); }
+      assert.ok(await inFlight() >= 1, 'preparations in progress');
+      await db.query('UPDATE windows_pool_templates SET enabled = false');
+      for (let i = 0; i < 400; i++) {
+        await m2.tick(); await sleep(15);
+        if (!(await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state IN ('creating','preparing','deleting')`)).rows[0].n) break;
+      }
+      await m2.drain();
+      const s = await states();
+      assert.ok(!s.creating && !s.preparing && !s.deleting, `nothing left in progress: ${JSON.stringify(s)}`);
+      const codes = (await db.query(`SELECT detail->>'code' AS code, COUNT(*)::int AS n FROM windows_pool_vm_events WHERE detail->>'code' = 'TEMPLATE_DISABLED' GROUP BY 1`)).rows;
+      assert.ok(codes[0]?.n >= 1);
+      assert.equal([...slow.guests.keys()].filter(id => id !== 147).length, 0, 'no orphan VM on the Proxmox side (clone in progress waited for then destroyed)');
+    });
   } finally {
     await db.end();
     await admin.query('DROP SCHEMA ' + schema + ' CASCADE');

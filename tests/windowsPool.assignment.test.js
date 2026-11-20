@@ -80,7 +80,8 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       assert.deepEqual(g.net, { dhcp: 'Disabled', enableDhcp: 0, ip: '10.10.72.10', prefix: 25, gateway: '10.10.72.1', dns: ['195.186.4.162', '195.186.4.163'] });
       assert.equal(g.adminPassword, slot.password, 'final password applied');
       // Order: guest network (link down) -> connection -> post-connection check.
-      const events = px.stats.events.filter(e => e.vmid === vm.vmid).map(e => `${e.at}${e.linkDown === undefined ? '' : e.linkDown ? ':down' : ':up'}`);
+      const assignmentSteps = new Set(['pool-move', 'guest-network', 'connect', 'post-connect']);
+      const events = px.stats.events.filter(e => e.vmid === vm.vmid && assignmentSteps.has(e.at)).map(e => `${e.at}${e.linkDown === undefined ? '' : e.linkDown ? ':down' : ':up'}`);
       assert.deepEqual(events, ['pool-move', 'guest-network:down', 'connect', 'post-connect:up'], 'leaves the stock pool before any network');
       assert.deepEqual(px.stats.events.filter(e => e.vmid === vm.vmid && e.at === 'pool-move').map(e => [e.from, e.to]), [['pool-dev', 'labs-dev']]);
       assert.equal(g.pool, 'labs-dev', 'assigned VM in the labs Proxmox pool');

@@ -142,9 +142,12 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
                       VALUES ($1, $2, 1, 147, 'default', 'pve-b', $3, 'creating', $4)`, [id, templateId, vmid, JSON.stringify({ cloneUpid: upid })]);
       const clonesBefore = px.stats.clones;
       const restarted = createPoolManager({ db, proxmox: createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'test-2', log: quiet, options: fast });
-      await until(restarted, async () => (await db.query('SELECT state FROM windows_pool_vms WHERE id = $1', [id])).rows[0].state === 'ready');
+      // "Has REACHED ready" (journal): with a reserve of 0, the stock-surplus rule may destroy it right after.
+      await until(restarted, async () => (await db.query(`SELECT 1 FROM windows_pool_vm_events WHERE pool_vm_id = $1 AND to_state = 'ready'`, [id])).rowCount > 0);
       assert.equal(px.stats.clones, clonesBefore, 'no new clone');
-      assert.match(px.guests.get(vmid).history.find(h => h.at === 'start').config.net0, /link_down=1/);
+      const boot = px.stats.events.find(e => e.vmid === vmid && e.at === 'boot');
+      assert.ok(boot, 'VM started after the resumed clone');
+      assert.equal(boot.linkDown, true, 'first boot with the NIC disconnected');
     });
 
     await t.test('new revision: old ready VMs drained and destroyed, replaced', async () => {
