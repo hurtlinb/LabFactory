@@ -11,7 +11,7 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
   const volumes = [];
   const execs = new Map();
   const log = [];
-  const stats = { clones: 0, activeClones: 0, maxActiveClones: 0, cloneCalls: [], preparingNow: 0, maxPreparing: 0 };
+  const stats = { clones: 0, activeClones: 0, maxActiveClones: 0, cloneCalls: [], preparingNow: 0, maxPreparing: 0, execBodies: [], events: [] };
   let seq = 0;
   const now = () => Date.now();
   for (const vmid of templates) {
@@ -66,16 +66,20 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       const g = guest(m[2]);
       if (method === 'GET') return { ...g.config, ...(g.lock ? { lock: g.lock } : {}) };
       const { delete: del, digest, ...rest } = body;
+      if (rest.net0 && /link_down=0/.test(rest.net0) && !/link_down=0/.test(g.config.net0 ?? '')) stats.events.push({ vmid: Number(m[2]), at: 'connect', t: now() });
       Object.assign(g.config, rest);
       for (const key of String(del ?? '').split(',').filter(Boolean)) delete g.config[key];
       g.history.push({ at: 'config', config: { ...g.config } });
       return null;
     }
     if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/status\/current$/))) return { status: guest(m[2]).status };
-    if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/status\/(start|stop)$/)) && method === 'POST') {
+    if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/status\/(start|stop|reboot)$/)) && method === 'POST') {
       const g = guest(m[2]);
       return task(m[1], `qm${m[3]}`, m[2], 10, () => {
-        if (m[3] === 'start') {
+        if (m[3] === 'reboot') {
+          g.history.push({ at: 'reboot', config: { ...g.config } });
+          g.bootAt = now(); g.doneCounted = true;
+        } else if (m[3] === 'start') {
           g.history.push({ at: 'start', config: { ...g.config } });
           g.status = 'running'; g.bootAt = now();
           stats.preparingNow += 1; stats.maxPreparing = Math.max(stats.maxPreparing, stats.preparingNow);
@@ -86,9 +90,35 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       const g = guest(m[2]);
       if (g.status !== 'running' || now() - g.bootAt < agentDelayMs) throw new ProxmoxError(500, 'QEMU guest agent is not running');
       const script = Buffer.from(body.command.at(-1), 'base64').toString('utf16le');
+      stats.execBodies.push(body);
       const pid = ++seq;
       let out;
-      if (script.includes('pool-ready.json') && script.includes('Set-Content')) {
+      let exitcode = 0;
+      const connected = /link_down=0/.test(g.config.net0 ?? '');
+      g.net ??= { dhcp: 'Enabled', enableDhcp: 1, ip: null, prefix: null, gateway: null, dns: [] };
+      const apipa = { ip: '169.254.172.144', prefix: 16, origin: 'WellKnown' };
+      const readPassword = () => { if (body['input-data']) g.adminPassword = JSON.parse(body['input-data']).password; };
+      if (script.includes('EnableDHCP -Value 0')) {
+        stats.events.push({ vmid: Number(m[2]), at: 'guest-network', linkDown: !connected, t: now() });
+        if (connected) { exitcode = 1; out = ''; } else {
+          const [, ip, mask, gateway] = /address=([\d.]+) mask=([\d.]+) gateway=([\d.]+)/.exec(script);
+          const prefix = mask.split('.').reduce((n, part) => n + Number(part).toString(2).split('1').length - 1, 0);
+          const dns = [...(/-ServerAddresses ((?:'[^']+',?)+)/.exec(script)?.[1] ?? '').matchAll(/'([^']+)'/g)].map(x => x[1]);
+          Object.assign(g.net, g.dhcpDefect ? { dhcp: 'Enabled', enableDhcp: 1 } : { dhcp: 'Disabled', enableDhcp: 0 }, { ip, prefix, gateway, dns });
+          readPassword();
+          out = JSON.stringify({ nic: 'Disconnected', dhcp: g.net.dhcp, enableDhcp: g.net.enableDhcp, addresses: [apipa, { ip, prefix }], gateways: [gateway], dns });
+        }
+      } else if (script.includes('EnableDHCP -Value 1')) {
+        stats.events.push({ vmid: Number(m[2]), at: 'guest-network', linkDown: !connected, t: now() });
+        Object.assign(g.net, { dhcp: 'Enabled', enableDhcp: 1, ip: null });
+        readPassword();
+        out = JSON.stringify({ nic: connected ? 'Up' : 'Disconnected', dhcp: 'Enabled', enableDhcp: 1, addresses: [apipa] });
+      } else if (script.includes('Get-NetIPAddress -IPAddress')) {
+        stats.events.push({ vmid: Number(m[2]), at: 'post-connect', linkDown: !connected, t: now() });
+        out = JSON.stringify({ state: g.ipConflict ? 'Duplicate' : (connected ? 'Preferred' : 'Tentative'), count: connected ? 1 : 2 });
+      } else if (script.includes('origin=') && script.includes('$nic=@(Get-NetAdapter')) {
+        out = JSON.stringify({ addresses: connected ? [{ ip: '10.10.99.50', state: 'Preferred', origin: 'Dhcp' }] : [{ ...apipa, state: 'Tentative' }] });
+      } else if (script.includes('pool-ready.json') && script.includes('Set-Content')) {
         const id = /poolVmId='([0-9a-f-]+)'/.exec(script)[1];
         const revision = Number(/revision=(\d+)/.exec(script)[1]);
         g.marker = { poolVmId: id, revision };
@@ -96,7 +126,7 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
       } else if (script.includes('ImageState')) {
         out = JSON.stringify(probeFor(Number(m[2]), g));
       } else out = '{}';
-      execs.set(pid, { exited: 1, exitcode: 0, 'out-data': out });
+      execs.set(pid, { exited: 1, exitcode, 'out-data': out, ...(exitcode ? { 'err-data': 'NIC_CONNECTED' } : {}) });
       return { pid };
     }
     if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/agent\/exec-status\?pid=(\d+)$/))) return execs.get(Number(m[3]));

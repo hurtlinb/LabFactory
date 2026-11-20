@@ -72,7 +72,7 @@ Statuts : `à faire`, `en cours`, `bloqué`, `à relire`, `validé`.
 | P1 — Contrats et données | P0 | Claude | validé | Migration 032, `lib/windowsPool/`, tests unitaires + 11 tests PostgreSQL réussis ; plage VMID vérifiée libre ; garde Terraform hors plage du pool ; validé par l’utilisateur le 2026-11-20 |
 | P2 — Préparation et alimentation | P1 | Claude | à relire | Manager + worker ; 9 tests simulés ; qualification réelle réussie (`output/p2-2026-11-20T10-08-58-481Z.json`) ; déploiement Kubernetes restant |
 | P3 — Réservation et attente | P1, P2 | Claude | à relire | Coordinateur, attente BullMQ, annulation vérifiée ; 6 tests P3 + 60/60 au total ; branchement dans le déploiement reporté à P4 |
-| P4 — Affectation et customizations | P2, P3 | Non attribué | à faire | — |
+| P4 — Affectation et customizations | P2, P3 | Claude | en cours | Étape 1 : cartographie du parcours deploy/redeploy actuel et plan d’intégration, à valider par l’utilisateur avant toute modification de `dashboard/server.js` et des workers |
 | P5 — Cycle de vie et compatibilité | P4 | Non attribué | à faire | — |
 | P6 — Interface, supervision et activation | P5 | Non attribué | à faire | — |
 
@@ -299,6 +299,41 @@ Fichiers : `lib/windowsPool/coordinator.js`, `lib/windowsPool/waiting.js`, `lib/
 Tests `tests/windowsPool.reservation.test.js` (PostgreSQL réel en schéma isolé + Proxmox simulé), **6/6** : pool vide → attente explicite → préparation déclenchée par la demande → réservation par la seule notification ; lab en attente sans effet sur un lab indépendant ni sur le réapprovisionnement ; tête de file (demande impossible, template désactivé) ; attente BullMQ (progression, `moveToDelayed`, promotion, VM retournées, demande close) ; annulation vérifiée (1 intacte libérée, NIC reconnectée et marqueur erroné détruits) ; 3 coordinateurs concurrents sans double réservation. Ensemble des suites pool + `jobConcurrency` : **60/60 sur 2 exécutions**. Le démarrage du worker complet (Redis + LISTEN) n’a pas été exécuté localement (pas de Redis local) : contrôle syntaxique seulement.
 
 ## P4 — Affectation et customizations
+
+### Cartographie du parcours actuel (2026-11-20, lecture seule)
+
+- **VMID jamais persistés** : `buildTerraformDeploymentPayload` (`dashboard/server.js` ~1379) les recalcule (`10000 + (hash(uuid) % 5000) * 10 + index`) pour deploy, statut, start/stop, reset IP/mot de passe, redeploy, destroy. Seule donnée par VM persistée : `lab_deployments.workstation_passwords`.
+- **Deploy** : `POST /api/lifecycle/deployments/:id/deploy` → statut `queued` → job `apply` (file `terraform-workflows`) → `acquireJobLocks` (`lab:<id>` + `global:terraform-deploy`) → vars → plan/préflight VMID/apply → readiness WinRM/SSH (`waitForGuestReadiness`) → job Ansible `customize-timezone` (`customizing`) ou `deployed`.
+- **`global:terraform-deploy` tenu jusqu’à la fin du job Terraform, readiness incluse** : les déploiements de labs sont sérialisés à l’échelle du cluster pendant les attentes WinRM/SSH.
+- **Lab 100 % Windows** : liste `vm_definitions` vide → `terraform/main.tf` planifie une VM de repli (`labfactory-empty-vm`, VMID 150). À ne jamais déclencher.
+- **Réseau** : `ipconfig0` statique (`buildCloudInitIpConfig`, masque /24–/30, passerelle calculée) ou `ip=dhcp` si `ipLastOctet` absent ; VLAN = `startingVlan (+ index du poste)`. **Aucun DNS passé par Terraform** (P2 : métadonnées cloud-init avec DNS du nœud `10.1.0.20/21`, `emfnet.ch`) ; le reset IP impose `195.186.4.162/163` et choisit la NIC `Up`.
+- **Mots de passe** : `shared` (blueprint) ou `per-workstation` (`workstation_passwords`) ; `cipassword` par VM ; Ansible utilise le mot de passe par cible, **sauf les blocs de tâches qui reçoivent toujours le mot de passe partagé** (`lib/runCustomization.js:126`, écart existant à signaler).
+- **Redeploy d’un poste** : `replaceVmids` → `terraform -replace/-target`, readiness et customization limitées au poste.
+- **Destroy** : `terraform destroy` puis **suppression de la ligne `lab_deployments`** (`removeDestroyedDeployment`) — bloquée par les FK `RESTRICT` du pool tant que P5 n’adapte pas ce chemin.
+
+### Plan P4 proposé (à valider)
+
+Principe : **tout le nouveau parcours est derrière un mode** (`windows_pool_settings`, défaut = parcours historique inchangé). P4 et P5 sont développés avant toute activation ; aucun lab existant ne change de comportement tant que le mode n’est pas activé.
+
+1. **P4a — Module d’affectation** (`lib/windowsPool/assignment.js`), une chaîne par VM, sans verrou global : renommage/tags/description lab (marqueur conservé) → ressources/disque additionnel, avec redémarrage **réseau toujours coupé** si nécessaire → bridge/VLAN Proxmox → IP/préfixe/passerelle/DNS + mot de passe final via QGA (stdin) → vérification lien coupé → connexion → vérification post-connexion (1 IPv4 `Preferred`) → WinRM depuis le worker. Transitions `reserved → configuring → assigned`, ligne `lab_vm_assignments`. Revérification du statut de la demande avant chaque mutation (annulation). Mode DHCP pris en charge (`ipLastOctet` absent). Tests simulés + qualification réelle (1 VM du pool affectée à un poste A43 de test).
+2. **P4b — Branchement deploy/redeploy** (`dashboard/server.js`, `workers/terraformWorker.js`) : plan des emplacements (Linux → Terraform, Windows → pool) ; création de la demande ; attente `awaitPoolReservation` **avant** de prendre les verrous (statut lab `waiting_for_pool`, ajouté aux statuts occupés) ; Terraform limité aux VM Linux et **sauté s’il n’y en a aucune** ; affectations Windows en parallèle de Terraform ; readiness Linux inchangée ; transmission à Ansible avec les VMID réels des affectations. Redeploy d’un poste du pool : réserver les remplaçantes avant de libérer les anciennes (ancienne VM → `deleting`).
+3. **P4c — Réduction de `global:terraform-deploy`** au seul plan/apply (pas les attentes readiness), avec tests de non-régression sur les labs historiques et les collisions VMID.
+4. **P4d — Customizations par graphe de dépendances** (`dependencies.js` + baux `customize`) : suppression de l’enchaînement Linux puis Windows et des limites codées à 5, barrières métier conservées (contrôleur avant membres par domaine/réseau, aucune injection de panne après échec de préparation) ; correction de l’écart de mot de passe des blocs de tâches à décider séparément.
+5. **Puis P5** (statut, start/stop, reset, destroy, propriétaire, exports lisant `lab_vm_assignments`) avant toute activation.
+
+### P4a — Module d’affectation (2026-11-20, simulé)
+
+Fichiers : `lib/windowsPool/assignment.js` (`createPoolAssigner`), `lib/windowsPool/qga.js` (mode DHCP), migration 032 (`dns_servers`), `tests/helpers/windowsPoolFakeProxmox.js` (réseau invité, reboot, journal d’ordre), `tests/windowsPool.assignment.test.js`.
+
+- Chaîne par VM sous verrou `pool-vm:<id>` et bail `assign` : configuration Proxmox (nom, tags `labfactory-pool;<enseignant>`, description avec marqueur conservé, VLAN sur `net0`, autres NIC inchangées, cœurs/mémoire avec **reboot réseau coupé** puis re-vérification QGA, disque additionnel marqué `serial=lf-disk2` pour l’idempotence) → réseau invité (statique ou DHCP) + mot de passe final par stdin, vérifié lien coupé → statut de la demande revérifié → connexion → contrôle post-connexion → WinRM (fonction injectée) → statut revérifié → `assigned` + ligne `lab_vm_assignments` dans la même transaction.
+- Échec après le début de la configuration : NIC re-déconnectée, VM en quarantaine avec le code de l’étape, erreur remontée (l’emplacement doit recevoir une nouvelle VM). VM réservée non encore touchée (demande annulée avant le début) : laissée intacte. Reprise : étapes idempotentes, VM déjà `assigned` pour la même demande → retour de l’affectation existante.
+- Tests simulés **9/9 ×3** : ordre réseau invité (lien coupé) → connexion → contrôle ; mot de passe jamais en ligne de commande ; ressources + disque (reboot NIC coupée, disque ajouté une fois) ; DHCP ; conflit IP → quarantaine + NIC recoupée ; défaut DHCP P0 détecté avant connexion ; WinRM indisponible ; annulation ; 3 VM en parallèle sous plafond `assign` 2. Suite complète 60/60.
+- **Qualification réelle réussie (2026-11-20, 11:41–11:51 CET)** — harnais `tmp/p4a-qualify.mjs`, rapport `output/p4a-2026-11-20T10-41-51-280Z.json` : demande sur pool vide → `INSUFFICIENT_STOCK` → préparation déclenchée par la demande → VM 70000 réservée après **6 min 43 s** → affectation au poste de test A43 (VLAN 72, `10.10.72.121/25`, passerelle `.1`, DNS `195.186.4.162/163`, mot de passe aléatoire non conservé) en **52 s**. Vérifié : nom Proxmox, `tag=72` + `link_down=0`, marqueur conservé, état `assigned` + affectation enregistrée ; côté invité 1 seule IPv4 `Preferred` /25, DHCP désactivé, passerelle et DNS exacts, Cloudbase-Init désactivé ; **après reboot** : configuration réseau identique et **WinRM OK avec le même mot de passe** (depuis `labfactory-ansible-worker` dev). VM détruite par le gestionnaire (contrôle de propriété), aucun guest restant dans 70000–79999, schéma supprimé.
+- **Reste pour P4a** : implémentation de production du contrôle WinRM (dans le worker, sans `kubectl exec`) — à faire avec P4b.
+
+**Décisions utilisateur (2026-11-20)** :
+- **Transition par template** : un template Windows activé et qualifié dans le pool passe par le pool ; les autres restent sur Terraform jusqu’à leur qualification. Pour un template activé, aucun repli : stock insuffisant ⇒ le lab attend. (Remplace l’idée de mode global : le « mode » est `windows_pool_templates.enabled`, plus `windows_pool_settings.paused`.)
+- **DNS des Windows affectées : `195.186.4.162`, `195.186.4.163`** (valeurs du reset IP actuel), stockés dans `windows_pool_settings.dns_servers` (modifiable sans déploiement).
 
 - [ ] Persister les VMID attribués et utiliser ces identités dans tous les payloads.
 - [ ] Appliquer nom, tags, ressources et disques ; gérer les éventuels redémarrages avant connexion réseau.

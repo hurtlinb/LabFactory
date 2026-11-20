@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS windows_pool_settings (
   paused BOOLEAN NOT NULL DEFAULT TRUE,
   -- Proxmox resource pool of the pool VMs (e.g. labs-dev); NULL = no resource pool.
   proxmox_pool TEXT CHECK (proxmox_pool IS NULL OR proxmox_pool ~ '^[A-Za-z0-9._-]{1,64}$'),
+  -- DNS applied to Windows VMs on lab assignment (user decision 2026-11-20).
+  dns_servers TEXT[] NOT NULL DEFAULT ARRAY['195.186.4.162', '195.186.4.163']
+    CHECK (cardinality(dns_servers) BETWEEN 1 AND 4),
   version INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT windows_pool_settings_vmid_range CHECK (vmid_min >= 100 AND vmid_max <= 999999999 AND vmid_min <= vmid_max)
