@@ -1113,7 +1113,15 @@ const windowsCloudbaseReadinessPlaybook = `- name: Wait for Windows Cloudbase-In
             exit 1
           }
 
-          Write-Output "Cloudbase-Init completed at $flagTime and WinRM is reachable"
+          # Cloudbase-Init runs during the OOBE boot after sysprep; Windows may still reboot
+          # once more to finish OOBE. Only IMAGE_STATE_COMPLETE means setup is really over.
+          $setupState = (Get-ItemProperty -LiteralPath 'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Setup\\State' -ErrorAction SilentlyContinue).ImageState
+          if ($setupState -and $setupState -ne 'IMAGE_STATE_COMPLETE') {
+            Write-Error "Windows setup is still in progress: $setupState"
+            exit 1
+          }
+
+          Write-Output "Cloudbase-Init completed at $flagTime, Windows setup state $setupState and WinRM is reachable"
 `;
 
 const buildWindowsReadinessInventory = (target, password) => `all:

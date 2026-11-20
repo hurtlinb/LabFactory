@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [2.3.3] — 2026-11-20
+
+- Fix Windows 11 check for OOBE end
+
 ## [2.3.2] — 2026-11-19
 
 - Fix deployment: VMID must be unique

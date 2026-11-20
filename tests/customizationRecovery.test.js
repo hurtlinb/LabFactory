@@ -4,7 +4,7 @@ import { promises as fs } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import vm from 'node:vm';
-import { retryConnectionOperation, isTransientConnectionError, commandFailure } from '../lib/customizationRecovery.js';
+import { retryConnectionOperation, retryRebootOperation, isShutdownInProgressError, isTransientConnectionError, commandFailure } from '../lib/customizationRecovery.js';
 import { runCustomization } from '../lib/runCustomization.js';
 
 test('transient copy failure waits progressively and probes before retrying', async () => {
@@ -146,4 +146,64 @@ test('lab card shows partial success and exposes resume only when eligible', asy
   deployment.canResumeCustomization = false;
   vm.runInNewContext('renderLifecycleLabs();', context);
   assert.doesNotMatch(list.innerHTML, /data-action="resume-customization"/);
+});
+
+test('Windows error 1115 is recognised as a reboot already in progress', () => {
+  const fatal = 'fatal: [vm_5]: FAILED! => {"changed": false, "elapsed": 0, "msg": "ansible.windows.win_reboot: Reboot command failed", "rc": 1115, "rebooted": false, "stderr": "Un arrêt système est en cours.(1115)", "stdout": "", "unreachable": false}';
+  assert.equal(isShutdownInProgressError(fatal), true);
+  assert.equal(isShutdownInProgressError('A system shutdown is in progress.(1115)'), true);
+  assert.equal(isShutdownInProgressError('fatal: [vm_1]: FAILED! => {"rc": 5, "msg": "Access denied"}'), false);
+  assert.equal(isShutdownInProgressError('{"rc": 11150}'), false);
+});
+
+test('reboot hitting an in-progress shutdown waits for the guest, then reboots again', async () => {
+  const events = [];
+  let calls = 0;
+  await retryRebootOperation({
+    run: async () => {
+      events.push('reboot');
+      if (++calls === 1) throw Object.assign(new Error('cmd'), { stdout: 'fatal: [vm_5]: FAILED! => {"rc": 1115, "stderr": "Un arrêt système est en cours.(1115)"}' });
+    },
+    waitForGuest: async () => events.push('wait'),
+    report: async () => {}, sleep: async ms => events.push(ms)
+  });
+  assert.deepEqual(events, ['reboot', 30000, 'wait', 'reboot']);
+});
+
+test('reboot retries are bounded and permanent reboot errors fail immediately', async () => {
+  let reboots = 0;
+  await assert.rejects(retryRebootOperation({
+    run: async () => { reboots++; throw new Error('Connection refused'); },
+    waitForGuest: async () => {}, report: async () => {}, sleep: async () => {}
+  }), /Connection refused/);
+  assert.equal(reboots, 4);
+
+  await assert.rejects(retryRebootOperation({
+    run: async () => { throw new Error('Access denied'); },
+    waitForGuest: () => assert.fail('must not wait'), report: async () => {}, sleep: () => assert.fail('must not sleep')
+  }), /Access denied/);
+});
+
+test('customization survives a guest that was already rebooting when the reboot step ran', async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'customization-test-'));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const job = jobMock();
+  const calls = [];
+  let rebootAttempts = 0;
+  await runCustomization({
+    job, windowsTargets: [{ vmid: 7, name: 'VM 7', stagedFileUploads: [] }], linuxTargets: [], directory,
+    inventoryPath: 'inventory.yml', extraVars: { windows_admin_password: 'pw' }, ansibleDir: 'ansible',
+    reconnect: async () => calls.push('reconnect'),
+    buildProbeInventory: () => '', probePlaybook: '',
+    runCommand: async (command, args) => {
+      const tags = args[args.indexOf('--tags') + 1];
+      calls.push(tags);
+      if (tags === 'reboot' && ++rebootAttempts === 1) {
+        throw Object.assign(new Error('cmd'), { stdout: 'fatal: [vm_1]: FAILED! => {"rc": 1115, "stderr": "Un arrêt système est en cours.(1115)"}' });
+      }
+    },
+    rebootRetrySleep: async () => {}
+  });
+  assert.deepEqual(calls, ['setup', 'reboot', 'reconnect', 'reboot', 'reconnect']);
+  assert.equal(job.data.customizationResults[7].status, 'succeeded');
 });
