@@ -164,7 +164,8 @@ INSERT INTO windows_pool_operation_limits (category, scope, max_active) VALUES
   ('prepare', 'cluster', 4),
   ('guest_probe', 'cluster', 8),
   ('assign', 'cluster', 4),
-  ('customize', 'cluster', 5),
+  -- 10 = current maximum (1 ansible-worker replica x 2 jobs x 5 commands per job), now global.
+  ('customize', 'cluster', 10),
   ('lifecycle', 'cluster', 8),
   ('destroy', 'cluster', 4)
 ON CONFLICT (category, scope) DO NOTHING;

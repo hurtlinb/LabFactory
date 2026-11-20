@@ -72,7 +72,7 @@ Statuts : `à faire`, `en cours`, `bloqué`, `à relire`, `validé`.
 | P1 — Contrats et données | P0 | Claude | validé | Migration 032, `lib/windowsPool/`, tests unitaires + 11 tests PostgreSQL réussis ; plage VMID vérifiée libre ; garde Terraform hors plage du pool ; validé par l’utilisateur le 2026-11-20 |
 | P2 — Préparation et alimentation | P1 | Claude | à relire | Manager + worker ; 9 tests simulés ; qualification réelle réussie (`output/p2-2026-11-20T10-08-58-481Z.json`) ; déploiement Kubernetes restant |
 | P3 — Réservation et attente | P1, P2 | Claude | à relire | Coordinateur, attente BullMQ, annulation vérifiée ; 6 tests P3 + 60/60 au total ; branchement dans le déploiement reporté à P4 |
-| P4 — Affectation et customizations | P2, P3 | Claude | en cours | Étape 1 : cartographie du parcours deploy/redeploy actuel et plan d’intégration, à valider par l’utilisateur avant toute modification de `dashboard/server.js` et des workers |
+| P4 — Affectation et customizations | P2, P3 | Claude | à relire | P4a (qualifié sur A43), P4b (non activé), P4c, P4d ; suite 235/0 ; validation cluster de bout en bout après P5 |
 | P5 — Cycle de vie et compatibilité | P4 | Non attribué | à faire | — |
 | P6 — Interface, supervision et activation | P5 | Non attribué | à faire | — |
 
@@ -352,19 +352,31 @@ Fichiers : `lib/windowsPool/deployment.js` (classification, demande par run, cr�
 - **Validation** : tests `jobConcurrency` 14/14 (nouveau test `releaseKey` ; dans le processeur réel en bac à sable, readiness exécutée **hors verrou global et sous verrou du lab**, tous verrous libérés en fin de job) ; suite complète 186 réussis / 0 échec ; comportement vérifié sur **PostgreSQL réel** (dev, clés `p4c-test:*`) : libération d’une seule clé, l’autre conservée, session toujours valide.
 - **Effet attendu** : plusieurs labs peuvent enchaîner leurs créations Terraform pendant que les précédents attendent leur readiness ; à mesurer sur le cluster (P6), sans supposer de gain linéaire (charge Proxmox/Ceph).
 
+### P4d — Customizations par dépendances (2026-11-20)
+
+Fichiers : `lib/runCustomization.js` (réécriture de l’orchestration), `lib/windowsPool/dependencies.js` (`domainControllersFor`, règle unique domaine + réseau /24), `lib/windowsPool/leases.js` (`createLeaseLimiter`), `workers/ansibleWorker.js` (budget distribué `customize`), migration 032 (budget `customize` = 10), `tests/customizationScheduling.test.js`, `tests/windowsPool.db.test.js`.
+
+- **Avant** : validations des blocs une par une ; toutes les Linux **puis** toutes les Windows ; tous les contrôleurs du lab **puis** tous les membres ; injection de panne ; limite 5 codée en dur par job (soit au plus 10 commandes en tout : 1 réplica × 2 jobs).
+- **Après** : validations en parallèle ; une chaîne par VM démarrée immédiatement (Linux et Windows en parallèle ; setup → fichiers → reboot → reconnexion dans l’ordre pour chaque VM) ; un membre attend **seulement** le(s) contrôleur(s) de son domaine sur son réseau ; blocs de tâches en parallèle entre VM, dans l’ordre pour une même VM. Seules les commandes Ansible tiennent un créneau (attentes de reconnexion, backoffs, attente du contrôleur : aucun). Créneaux = budget distribué `customize` (PostgreSQL, partagé entre réplicas et labs, renouvelé pendant les longues commandes), **10 par défaut = maximum actuel**, repli local `CUSTOMIZATION_CONCURRENCY` (5) si la migration manque.
+- **Barrières métier conservées à l’identique** : toutes les validations réussies avant toute mutation (désormais toutes les validations en échec sont enregistrées, pas seulement la première) ; aucune injection de panne si une préparation ou une readiness a échoué ; un membre tente toujours sa jonction une fois son contrôleur terminé, même en échec (sémantique historique, seul le périmètre d’attente est réduit). Checkpoints et reprise inchangés.
+- **Preuves** : `tests/customizationScheduling.test.js` 7/7 ; exécutés contre l’**ancienne** orchestration, les 4 tests de parallélisme **échouent** (Linux/Windows, domaine par réseau, validations parallèles, créneaux non tenus pendant les attentes) et les 3 tests de barrières passent : la sémantique est conservée, seule la sérialisation inutile disparaît. Budget `customize` : 2 réplicas, plafond 3 jamais dépassé (PostgreSQL réel). Suite complète avec base : **235 réussis, 0 échec, ×3**.
+- **Mots de passe des blocs de tâches — corrigé sur demande de l’utilisateur (2026-11-20)**. Diagnostic : les exécuteurs (Docker et Kubernetes) prenaient déjà le mot de passe de la cible avant le partagé, mais avec la règle `target.windowsAdminPassword ?? partagé`, qui **ne retombe pas sur le partagé pour une chaîne vide** ; or le worker Terraform construit les cibles avec `String(... ?? '')`. Selon l’endroit, une cible à mot de passe vide donnait un bloc exécuté **avec un mot de passe vide**, une readiness WinRM avec un mot de passe vide, ou un faux « mot de passe requis » à l’inventaire Ansible. Correction : règle unique `guestPasswordFor(target, partagé)` (`lib/ansibleTasks.js` : mot de passe propre s’il est non vide, sinon partagé), utilisée par `runAnsibleTasks.js` (inventaire, exécution, masquage), `runCustomization.js` (qui passe désormais explicitement le mot de passe de la VM aux blocs), `workers/ansibleWorker.js` (inventaires et contrôles) ; même correction dans la readiness de `workers/terraformWorker.js`. Tests : règle, inventaire Windows/Linux, et mot de passe reçu par chaque bloc (par poste, et repli sur le partagé si vide) ; suite complète 195 réussis / 0 échec.
+- S’applique à **tous** les labs dès le déploiement (comme P4c).
+
 **Décisions utilisateur (2026-11-20)** :
 - **Transition par template** : un template Windows activé et qualifié dans le pool passe par le pool ; les autres restent sur Terraform jusqu’à leur qualification. Pour un template activé, aucun repli : stock insuffisant ⇒ le lab attend. (Remplace l’idée de mode global : le « mode » est `windows_pool_templates.enabled`, plus `windows_pool_settings.paused`.)
 - **DNS des Windows affectées : `195.186.4.162`, `195.186.4.163`** (valeurs du reset IP actuel), stockés dans `windows_pool_settings.dns_servers` (modifiable sans déploiement).
 
-- [ ] Persister les VMID attribués et utiliser ces identités dans tous les payloads.
-- [ ] Appliquer nom, tags, ressources et disques ; gérer les éventuels redémarrages avant connexion réseau.
-- [ ] Configurer bridge/VLAN, puis IP/DNS et identifiants via QGA en conservant NIC et MAC.
-- [ ] Vérifier par QGA avant de reconnecter, puis vérifier WinRM depuis le worker.
-- [ ] Réutiliser les customizations existantes et leurs dépendances, notamment contrôleurs de domaine avant membres.
-- [ ] Exécuter en parallèle les chaînes d’affectation des VM et les branches Linux/Windows d’un lab mixte après réservation ; ne pas attendre toutes les VM avant une étape indépendante.
-- [ ] Revoir les barrières globales et le traitement Linux puis Windows dans les customizations ; conserver les barrières métier justifiées et ordonner les dépendances AD par poste/réseau/domaine.
-- [ ] Paralléliser les validations indépendantes des blocs Ansible tout en conservant la barrière « toutes les validations réussies avant mutation » ; remplacer les limites locales codées en dur par les budgets configurables définis en P1.
-- [ ] Exclure toute création Windows des plans Terraform ; ne pas lancer le repli Terraform avec une liste vide pour un lab 100 % Windows.
+- [x] Persister les VMID attribués et utiliser ces identités dans tous les payloads (affectations `lab_vm_assignments`, VMID réels transmis à readiness/Ansible ; lecture par statut/start/stop/reset = P5).
+- [x] Appliquer nom, tags, ressources et disques ; gérer les éventuels redémarrages avant connexion réseau.
+- [x] Configurer bridge/VLAN, puis IP/DNS et identifiants via QGA en conservant NIC et MAC.
+- [x] Vérifier par QGA avant de reconnecter, puis vérifier WinRM depuis le worker.
+- [x] Réutiliser les customizations existantes et leurs dépendances, notamment contrôleurs de domaine avant membres.
+- [x] Exécuter en parallèle les chaînes d’affectation des VM et les branches Linux/Windows d’un lab mixte après réservation ; ne pas attendre toutes les VM avant une étape indépendante.
+- [x] Revoir les barrières globales et le traitement Linux puis Windows dans les customizations ; conserver les barrières métier justifiées et ordonner les dépendances AD par poste/réseau/domaine.
+- [x] Paralléliser les validations indépendantes des blocs Ansible tout en conservant la barrière « toutes les validations réussies avant mutation » ; remplacer les limites locales codées en dur par les budgets configurables définis en P1.
+- [x] Exclure toute création Windows des plans Terraform ; ne pas lancer le repli Terraform avec une liste vide pour un lab 100 % Windows (Windows des templates activés uniquement ; les autres restent sur Terraform, décision de transition par template).
+- [ ] Validation de bout en bout sur le cluster (images dev déployées) — après P5, avant toute activation de template.
 
 ## P5 — Cycle de vie et compatibilité
 

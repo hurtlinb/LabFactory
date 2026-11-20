@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import { createPoolRequest, reservePoolRequest, cancelPoolRequest } from '../lib/windowsPool/reservation.js';
-import { tryAcquireLease, releaseLease, attachProxmoxTask, reconcileOrphanLeases } from '../lib/windowsPool/leases.js';
+import { tryAcquireLease, releaseLease, attachProxmoxTask, reconcileOrphanLeases, createLeaseLimiter } from '../lib/windowsPool/leases.js';
 import { allocatePoolVm } from '../lib/windowsPool/vmidAllocator.js';
 import { transitionPoolVm } from '../lib/windowsPool/states.js';
 
@@ -157,6 +157,20 @@ test('Windows pool: schema, reservation, limits and allocation under concurrency
       assert.equal(await reconcileOrphanLeases(db, async () => 'stopped'), 2, 'cluster + node released after reconciliation');
       const after = await tryAcquireLease(db, { category: 'clone', scopes: ['cluster', 'node:peda-pve2'], holder: 'n4' });
       assert.ok(after, 'the expired lease without a task (granted[1]) was reclaimed');
+    });
+
+    await t.test('customize budget shared by two replicas: ceiling never exceeded (P4d)', async () => {
+      await db.query(`UPDATE windows_pool_operation_limits SET max_active = 3 WHERE category = 'customize' AND scope = 'cluster'`);
+      const fallback = () => { throw new Error('no fallback expected'); };
+      const replicaA = createLeaseLimiter({ pool: db, category: 'customize', holder: 'worker-a', fallback, retryMs: 10 });
+      const replicaB = createLeaseLimiter({ pool: db, category: 'customize', holder: 'worker-b', fallback, retryMs: 10 });
+      let active = 0, max = 0;
+      // 300 ms: longer than a lease acquisition even on a loaded remote database (60 ms was not enough
+      // to guarantee 3 simultaneous commands when every test file runs at the same time).
+      const command = async () => { active += 1; max = Math.max(max, active); await new Promise(r => setTimeout(r, 300)); active -= 1; };
+      await Promise.all(Array.from({ length: 10 }, (_, i) => (i % 2 ? replicaA : replicaB)(command)));
+      assert.equal(max, 3, 'global ceiling (3) reached, never exceeded, across replicas');
+      assert.equal((await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_operation_leases WHERE category = 'customize'`)).rows[0].n, 0);
     });
 
     await t.test('optimistic concurrency: two workers transition the same VM, only one wins', async () => {

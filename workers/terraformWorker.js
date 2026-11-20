@@ -1348,7 +1348,7 @@ const waitForGuestReadiness = async ({
   const fallbackPassword = String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim();
   const failedTargets = new Map();
   for (const target of allReadinessTargets) {
-    const password = String(target.password ?? fallbackPassword).trim();
+    const password = (String(target.password ?? '').trim() || fallbackPassword);
     const reason = !target.host
       ? 'static IPv4 address is missing'
       : !password
@@ -1371,7 +1371,7 @@ const waitForGuestReadiness = async ({
         try {
           await waitForWindowsHostReadiness({
             target,
-            password: String(target.password ?? fallbackPassword).trim(),
+            password: (String(target.password ?? '').trim() || fallbackPassword),
             signal: abortController.signal
           });
           await activateVmHaAfterReadiness({ action, merged, target });
@@ -1395,7 +1395,7 @@ const waitForGuestReadiness = async ({
           await waitForLinuxSshAndCloudInit({
             host: target.host,
             user: linuxUser,
-            password: String(target.password ?? fallbackPassword).trim(),
+            password: (String(target.password ?? '').trim() || fallbackPassword),
             signal: abortController.signal
           });
           await activateVmHaAfterReadiness({ action, merged, target });
