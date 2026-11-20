@@ -5,7 +5,7 @@ import { getFileUploads } from '../lib/blueprintFiles.js';
 import { removeDestroyedDeployment } from '../lib/deploymentCleanup.js';
 import { acquireJobLocks, recoverDeploymentJobs, workerConcurrency } from '../lib/jobConcurrency.js';
 import { createTerraformJobDirectory } from '../lib/terraformJobDirectory.js';
-import { checkPlannedVmids } from '../lib/vmidAvailability.js';
+import { checkPlannedVmids, readWindowsPoolVmidRange } from '../lib/vmidAvailability.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -1820,7 +1820,7 @@ export function startTerraformWorker(connection) {
                 cwd: terraformDir, env, signal: abortController.signal, quiet: true
               });
               await checkPlannedVmids(JSON.parse(planJson), () => fetchProxmoxVmResources(merged),
-                vmid => checkProxmoxFreeVmid(merged, vmid));
+                vmid => checkProxmoxFreeVmid(merged, vmid), [await readWindowsPoolVmidRange(dbPool)]);
               lease.assertHeld();
               try {
                 await runCommand(
