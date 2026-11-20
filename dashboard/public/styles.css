@@ -1880,3 +1880,22 @@ a { color: var(--brand); }
 .ansible-task-result { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .ansible-task-result > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ansible-task-logs { flex-shrink: 0; padding: 2px 8px; }
+
+/* Windows pool (lot P6) */
+.pool-settings-form,
+.pool-template-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem 1rem;
+  align-items: end;
+  margin-top: 1rem;
+}
+.pool-settings-form .switch,
+.pool-settings-form .muted,
+.pool-template-form h4,
+.pool-template-form .inline-actions { grid-column: 1 / -1; }
+.pool-settings-form label,
+.pool-template-form label { display: grid; gap: 0.25rem; }
+.pool-templates-table td.inline-actions { white-space: nowrap; }
+.pool-timeline { margin-top: 1rem; }
+.pool-timeline ol { margin: 0.5rem 0 0; padding-left: 1.25rem; }

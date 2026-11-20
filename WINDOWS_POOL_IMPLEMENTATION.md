@@ -74,7 +74,7 @@ Statuts : `à faire`, `en cours`, `bloqué`, `à relire`, `validé`.
 | P3 — Réservation et attente | P1, P2 | Claude | à relire | Coordinateur, attente BullMQ, annulation vérifiée ; 6 tests P3 + 60/60 au total ; branchement dans le déploiement reporté à P4 |
 | P4 — Affectation et customizations | P2, P3 | Claude | à relire | P4a (qualifié sur A43), P4b (non activé), P4c, P4d ; suite 235/0 ; validation cluster de bout en bout après P5 |
 | P5 — Cycle de vie et compatibilité | P4 | Claude | à relire | Plan effectif, propriété, destroy multi-gestionnaires, redeploy par remplacement, audit dev ; suite 246/0 ; validation cluster restante |
-| P6 — Interface, supervision et activation | P5 | Non attribué | à faire | — |
+| P6 — Interface, supervision et activation | P5 | Claude | à relire | Page admin, API, qualification obligatoire (033), annulation des labs en attente ; suite 255/0 ; reste : mesures customization/délai total et attente des verrous |
 
 ## P0 — Première action : qualifier une VM Windows
 
@@ -407,13 +407,23 @@ Fichiers : `lib/windowsPool/deployment.js` (`fetchActiveAssignments`, `overlayAs
 
 ## P6 — Interface, supervision et activation
 
-- [ ] Ajouter configuration et compteurs par template : prêtes, en préparation, réservées, en erreur.
-- [ ] Afficher les besoins manquants et permettre l’annulation des labs en attente.
-- [ ] Adapter états occupés, récupération des jobs et reconstruction des statuts pour ne pas déclarer détruit un lab en attente.
-- [ ] Mesurer attente du pool, intégration réseau, customization et délai total utilisateur séparément.
-- [ ] Exposer opérations actives/en attente par catégorie, temps d’attente des limites/verrous et chronologie par VM ; comparer les durées avec pool prêt et pool vide sans confondre les deux scénarios.
-- [ ] Qualifier chaque template avant activation et documenter le dimensionnement.
-- [ ] Prévoir une suspension contrôlée : arrêter les nouvelles affectations sans repli direct ni impact sur les labs existants.
+- [x] Ajouter configuration et compteurs par template : prêtes, en préparation, réservées, en erreur.
+- [x] Afficher les besoins manquants et permettre l’annulation des labs en attente.
+- [x] Adapter états occupés, récupération des jobs et reconstruction des statuts pour ne pas déclarer détruit un lab en attente.
+- [~] Mesurer attente du pool, intégration réseau, customization et délai total utilisateur séparément — fait : préparation, attente du pool (toutes / stock vide séparées), affectation réseau ; **reste** : customization et délai total utilisateur dans la page (la durée totale de déploiement existe déjà dans `blueprint_deployment_durations`).
+- [~] Exposer opérations actives/en attente par catégorie, temps d’attente des limites/verrous et chronologie par VM ; comparer les durées avec pool prêt et pool vide sans confondre les deux scénarios — fait : baux actifs par catégorie/portée (dont tâches Proxmox en cours), chronologie par VM, attente avec stock prêt vs vide séparée ; **reste** : temps d’attente des limites/verrous (non mesuré).
+- [x] Qualifier chaque template avant activation et documenter le dimensionnement (qualification par révision obligatoire, appliquée par la base ; mesures P0/P2/dev consignées dans ce document).
+- [x] Prévoir une suspension contrôlée : arrêter les nouvelles affectations sans repli direct ni impact sur les labs existants (`paused` global ou template désactivé : réservations bloquées `POOL_PAUSED`/`TEMPLATE_DISABLED`, aucun réapprovisionnement ; affectations en place, destructions et labs existants inchangés).
+
+### Implémentation P6 (2026-11-20, branche `feature/windows-pool-p6`, non poussée)
+
+Fichiers : `db/migrations/033-windows-pool-qualification.sql`, `lib/windowsPool/admin.js`, `dashboard/server.js` (routes `/api/windows-pool*`, annulation `cancel-pool-wait`, « Cancel all jobs »), `dashboard/public/windowsPool.js` (page), `dashboard/public/index.html`, `dashboard/public/app.js` (titre, événement de vue, action « Cancel » d’un lab en attente), `dashboard/public/styles.css`, tests `windowsPool.admin.test.js` (6/6, PostgreSQL), `windowsPool.ui.test.js` (3/3, jsdom), `dashboardUx.api.test.js` (stubs).
+
+- **Qualification obligatoire avant activation** (migration 033) : `qualified_revision` doit égaler `revision` pour `enabled = true`, contrainte en base (même une mise à jour SQL directe est refusée). Changer le template Proxmox source crée une nouvelle révision, désactive le template et exige une nouvelle qualification.
+- **API admin** (`ADMIN_ONLY`) : vue d’ensemble (réglages, templates Windows + compteurs par état, labs en attente avec motif et VM manquantes, limites et baux actifs dont tâches Proxmox, quarantaines, mesures sur 7 jours : préparation, attente du pool — toutes / stock vide séparées —, affectation réseau), réglages (suspension, pool Proxmox, DNS ; plage VMID non modifiable), configuration/qualification/activation d’un template, plafonds par catégorie et portée, destruction d’une VM en quarantaine (jamais rendue au stock), chronologie d’une VM.
+- **Labs** : `POST /api/lifecycle/deployments/:id/cancel-pool-wait` (propriétaire ou admin, lab `waiting_for_pool`) : job retardé supprimé, demande annulée (VM intactes rendues au stock), lab `failed/cancelled` ; bouton « Cancel (waiting for Windows pool) » dans la liste des labs. « Cancel all jobs » ferme désormais les demandes du pool des labs interrompus (sinon VM réservées bloquées indéfiniment).
+- **Page « Windows pool »** (admin) : réglages, tableau des templates avec actions selon l’état (configurer, marquer qualifié, activer/désactiver), labs en attente avec annulation, mesures, limites modifiables, quarantaines (chronologie, destruction) ; rafraîchissement toutes les 10 s uniquement quand la page est affichée.
+- Validation : admin 6/6 et UI 3/3 ; chaîne de migrations 001→033 OK ; suite complète avec base **255 réussis / 0 échec**. Non déployé en dev.
 
 ## Tests d’acceptation transversaux
 
