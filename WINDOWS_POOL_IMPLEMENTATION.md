@@ -71,7 +71,7 @@ Statuts : `à faire`, `en cours`, `bloqué`, `à relire`, `validé`.
 | P0 — Qualification sur une VM | Aucune | Codex, Claude | validé | Série linked clone 4/4 réussie : `output/p0-2026-11-20T08-35-17-595Z.json` ; validé par l’utilisateur le 2026-11-20 ; VM de test détruites |
 | P1 — Contrats et données | P0 | Claude | validé | Migration 032, `lib/windowsPool/`, tests unitaires + 11 tests PostgreSQL réussis ; plage VMID vérifiée libre ; garde Terraform hors plage du pool ; validé par l’utilisateur le 2026-11-20 |
 | P2 — Préparation et alimentation | P1 | Claude | à relire | Manager + worker ; 9 tests simulés ; qualification réelle réussie (`output/p2-2026-11-20T10-08-58-481Z.json`) ; déploiement Kubernetes restant |
-| P3 — Réservation et attente | P1, P2 | Non attribué | à faire | — |
+| P3 — Réservation et attente | P1, P2 | Claude | à relire | Coordinateur, attente BullMQ, annulation vérifiée ; 6 tests P3 + 60/60 au total ; branchement dans le déploiement reporté à P4 |
 | P4 — Affectation et customizations | P2, P3 | Non attribué | à faire | — |
 | P5 — Cycle de vie et compatibilité | P4 | Non attribué | à faire | — |
 | P6 — Interface, supervision et activation | P5 | Non attribué | à faire | — |
@@ -276,14 +276,27 @@ Tests `tests/windowsPool.manager.test.js` (PostgreSQL réel en schéma isolé + 
 
 ## P3 — Réservation et attente
 
-- [ ] Calculer les besoins par template/révision et réserver toutes les Windows d’un lab dans une transaction courte.
-- [ ] En pénurie : ne réserver aucun lot partiel, enregistrer `waiting_for_pool`, différer sans consommer une tentative ou conserver un worker/verrou.
-- [ ] Réveiller les demandes lors de l’arrivée de stock, avec réconciliation périodique de secours.
-- [ ] Prévenir la famine des gros labs et les doubles affectations entre workers.
-- [ ] Vérifier qu’un lab en attente n’empêche ni d’autres labs indépendants de progresser, ni le pool de se remplir.
-- [ ] Distinguer réserve et plafond : une demande supérieure à la réserve doit pouvoir déclencher une préparation suffisante.
-- [ ] Afficher un blocage explicite si le plafond ou la suspension du pool empêche la satisfaction de la demande ; aucun clonage direct.
-- [ ] Permettre l’annulation et libérer uniquement les réservations intactes et revérifiées.
+- [x] Calculer les besoins par template/révision et réserver toutes les Windows d’un lab dans une transaction courte.
+- [x] En pénurie : ne réserver aucun lot partiel, enregistrer `waiting_for_pool`, différer sans consommer une tentative ou conserver un worker/verrou.
+- [x] Réveiller les demandes lors de l’arrivée de stock, avec réconciliation périodique de secours.
+- [x] Prévenir la famine des gros labs et les doubles affectations entre workers.
+- [x] Vérifier qu’un lab en attente n’empêche ni d’autres labs indépendants de progresser, ni le pool de se remplir.
+- [x] Distinguer réserve et plafond : une demande supérieure à la réserve doit pouvoir déclencher une préparation suffisante.
+- [x] Afficher un blocage explicite si le plafond ou la suspension du pool empêche la satisfaction de la demande ; aucun clonage direct. (Motif stocké dans `blocked_reason` et publié dans la progression du job ; affichage dans l’interface = P6.)
+- [x] Permettre l’annulation et libérer uniquement les réservations intactes et revérifiées.
+- [ ] Brancher la création de demande et l’attente dans le parcours deploy/redeploy — **reporté à P4** : réserver sans affecter casserait les labs actuels (Windows encore clonées par Terraform).
+
+### Implémentation P3 (2026-11-20)
+
+Fichiers : `lib/windowsPool/coordinator.js`, `lib/windowsPool/waiting.js`, `lib/windowsPool/cancellation.js`, `lib/windowsPool/reservation.js` (correctif FIFO + notification à la création), `workers/startWindowsPoolWorkerService.js` (coordinateur branché), `tests/helpers/windowsPoolFakeProxmox.js` (Proxmox simulé partagé), `tests/windowsPool.reservation.test.js`.
+
+- **Coordinateur** (dans le worker du pool) : parcourt les demandes en attente par ancienneté ; réveillé par `LISTEN windows_pool_stock` (VM prête) et `windows_pool_requests` (demande créée, notifiée au commit) ; réconciliation de secours à chaque tick ; écoute rétablie automatiquement si la connexion tombe ; passes fusionnées (une seule à la fois). Plusieurs réplicas possibles.
+- **Correctif P1 (blocage en tête de file)** : une demande qui ne peut pas être servie pour une autre raison que le stock (`DEMAND_EXCEEDS_CAPACITY`, `TEMPLATE_DISABLED`) ne bloque plus les demandes plus récentes du même template ; elle retrouve son rang dès que la cause est levée. Le FIFO reste strict pour l’attente de stock (pas de famine des gros labs).
+- **Attente côté job** (`awaitPoolReservation`) : `reserved` → VM retournées ; en attente → motif publié dans la progression du job, `moveToDelayed` + `DelayedError` (ni tentative ni créneau consommés, aucun verrou à tenir) ; demande close → `PoolRequestClosedError`, jamais de clonage direct. `promoteDeploymentJob` réveille immédiatement le job retardé du lab dès la réservation (hook du coordinateur, file `terraform-workflows`).
+- **Annulation vérifiée** (`cancelPoolRequestVerified`) : chaque VM réservée est contrôlée en parallèle — présente, marqueur de propriété, sans verrou, allumée, toutes NIC `link_down=1`, verdict QGA complet `READY` (marqueur lié à la VM et à la révision). Seules les VM prouvées intactes reviennent en `ready` ; les autres (et toute VM déjà `configuring`) passent en `deleting` et sont détruites par le gestionnaire.
+- **Contrat pour P4** : le job doit libérer ses verrous avant `awaitPoolReservation` ; une annulation peut survenir pendant l’affectation — le job doit revérifier le statut de la demande avant chaque étape de mutation.
+
+Tests `tests/windowsPool.reservation.test.js` (PostgreSQL réel en schéma isolé + Proxmox simulé), **6/6** : pool vide → attente explicite → préparation déclenchée par la demande → réservation par la seule notification ; lab en attente sans effet sur un lab indépendant ni sur le réapprovisionnement ; tête de file (demande impossible, template désactivé) ; attente BullMQ (progression, `moveToDelayed`, promotion, VM retournées, demande close) ; annulation vérifiée (1 intacte libérée, NIC reconnectée et marqueur erroné détruits) ; 3 coordinateurs concurrents sans double réservation. Ensemble des suites pool + `jobConcurrency` : **60/60 sur 2 exécutions**. Le démarrage du worker complet (Redis + LISTEN) n’a pas été exécuté localement (pas de Redis local) : contrôle syntaxique seulement.
 
 ## P4 — Affectation et customizations
 
@@ -367,5 +380,6 @@ Pièges déjà identifiés : reset IP sélectionnant une NIC `Up`, DNS codés en
 | 2026-11-20 | Claude | P1 | Fichiers : `db/migrations/032-windows-pool.sql`, `lib/windowsPool/*.js`, `tests/windowsPool.test.js`, `tests/windowsPool.db.test.js`. Validation : `node --test tests/windowsPool.test.js` (16/16) ; `WINDOWS_POOL_TEST_DATABASE_URL=… node --test tests/windowsPool.db.test.js` (11/11, base dev, schéma isolé) ; chaîne de migrations 001→032 + rejeu OK ; tests existants concurrence/readiness/reprise 30/30. Limites : modules non branchés (aucun worker) ; plafonds initiaux non mesurés ; reprise après rollout du worker à concevoir en P2/P4 | Relecture P1 par l’utilisateur, puis P2 (worker d’alimentation) |
 | 2026-11-20 | Claude | P1 | Relecture utilisateur : plage 70000–79999 et reste validés, exigence de VMID libres et exclusifs. Plage vérifiée libre (inventaire, volumes, 10 000 `nextid`). Ajouts : `createProxmoxVmidCheck` (3 sources), garde Terraform hors plage du pool (`lib/vmidAvailability.js`, `workers/terraformWorker.js`), stub de test dans `tests/jobConcurrency.test.js`. Validation : 81/81 sur `windowsPool`, `jobConcurrency` et suites worker liées | Commit P1 puis P2 ; P2 doit rappeler `createProxmoxVmidCheck` juste avant chaque clone |
 | 2026-11-20 | Claude | P2 | Fichiers : `lib/windowsPool/{proxmox,manager}.js`, `workers/startWindowsPoolWorkerService.js`, `package.json`, `tests/windowsPool.manager.test.js`, `vmidAllocator.js` (volumes ciblés), migration 032 (`proxmox_pool`). Validation : unitaires 20/20, PostgreSQL 11/11, manager simulé 9/9 (×3), qualification réelle 2 VM réussie puis nettoyée. Limites : worker non déployé ; réserve et plafonds non calibrés ; VM prêtes laissées allumées (budget RAM à valider) | Relecture P2 ; manifeste Kubernetes (dépôt gitops) ; puis P3 (réservation et attente) |
+| 2026-11-20 | Claude | P3 | Fichiers : `lib/windowsPool/{coordinator,waiting,cancellation}.js`, `reservation.js`, `workers/startWindowsPoolWorkerService.js`, `tests/helpers/windowsPoolFakeProxmox.js`, `tests/windowsPool.reservation.test.js`, `tests/windowsPool.manager.test.js` (helper extrait). Validation : 60/60 ×2 (unitaires, PostgreSQL, manager, réservation, jobConcurrency) sur base dev en schémas isolés, supprimés. Limites : non branché dans deploy/redeploy ; worker complet non démarré localement | Relecture P3 ; P4 (affectation, branchement deploy/redeploy, customizations) |
 
 Pour chaque passation, ajouter les fichiers touchés, commandes de validation, résultats, limites connues et décisions à confirmer. Les paramètres dépendant de l’infrastructure (template pilote, capacité, placement, permissions QGA et politique de révision) restent à préciser pendant P0/P1.

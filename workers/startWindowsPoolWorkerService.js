@@ -5,6 +5,13 @@ import { redisConnectionOptions } from '../config/redis.js';
 import { readTerraformEnvSettings } from '../lib/terraformSettings.js';
 import { createHttpRequest, createPoolProxmox } from '../lib/windowsPool/proxmox.js';
 import { createPoolManager } from '../lib/windowsPool/manager.js';
+import { createReservationCoordinator } from '../lib/windowsPool/coordinator.js';
+import { promoteDeploymentJob } from '../lib/windowsPool/waiting.js';
+import { Queue } from 'bullmq';
+
+// Same name as terraformQueueName (workers/terraformWorker.js), not imported so that
+// the Terraform worker module (DB pool, etc.) is not loaded here.
+const DEPLOY_QUEUE_NAME = 'terraform-workflows';
 
 // Windows pool worker (lot P2): feeds the pool in the background, outside BullMQ and
 // without the global Terraform lock. Several replicas may run: coordination goes
@@ -32,6 +39,21 @@ const SHUTDOWN_GRACE_MS = Math.max(5_000, Number(process.env.WINDOWS_POOL_SHUTDO
   const manager = createPoolManager({ db, proxmox, holder });
 
   const connection = redisConnectionOptions();
+  const deployQueue = new Queue(DEPLOY_QUEUE_NAME, { connection });
+  const coordinator = createReservationCoordinator({
+    db,
+    onReserved: ({ requestId }) => promoteDeploymentJob({ db, queue: deployQueue, requestId })
+  });
+  let stopListening = null;
+  const ensureListening = async () => {
+    if (stopListening) return;
+    try {
+      // onClose: LISTEN connection lost -> re-established on the next tick.
+      const stop = await coordinator.listen({ onClose: () => { stopListening = null; } });
+      stopListening = stop;
+    } catch (error) { console.warn(`[windows-pool] LISTEN unavailable: ${error.message}`); }
+  };
+  await ensureListening();
   const redisClient = createClient({ socket: { host: connection.host, port: connection.port }, password: connection.password });
   await redisClient.connect();
   const subscriber = redisClient.duplicate();
@@ -58,7 +80,12 @@ const SHUTDOWN_GRACE_MS = Math.max(5_000, Number(process.env.WINDOWS_POOL_SHUTDO
   const loop = async () => {
     while (!stopping) {
       if (status === 'running') {
-        ticking = manager.tick().catch(error => console.error(`[windows-pool] tick: ${error.message}`));
+        ticking = (async () => {
+          await manager.tick().catch(error => console.error(`[windows-pool] tick: ${error.message}`));
+          // Periodic fallback of the reservations (lost notification, LISTEN cut).
+          await coordinator.reconcile().catch(error => console.error(`[windows-pool] reservations: ${error.message}`));
+          await ensureListening();
+        })();
         await ticking;
         ticking = null;
       }
@@ -77,6 +104,9 @@ const SHUTDOWN_GRACE_MS = Math.max(5_000, Number(process.env.WINDOWS_POOL_SHUTDO
     // Every step is resumable (checkpoints + UPID): past the grace period, a later
     // restart resumes the interrupted operations without restarting them blindly.
     await Promise.race([manager.drain(), new Promise(resolve => setTimeout(resolve, SHUTDOWN_GRACE_MS))]);
+    await stopListening?.().catch(() => undefined);
+    await coordinator.idle().catch(() => undefined);
+    await deployQueue.close().catch(() => undefined);
     await subscriber.unsubscribe(CONTROL_CHANNEL).catch(() => undefined);
     await subscriber.disconnect().catch(() => undefined);
     await redisClient.hSet(STATUS_KEY, { status: 'stopped', lastHeartbeat: Date.now().toString() }).catch(() => undefined);
