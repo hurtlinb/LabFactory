@@ -73,7 +73,7 @@ Statuts : `à faire`, `en cours`, `bloqué`, `à relire`, `validé`.
 | P2 — Préparation et alimentation | P1 | Claude | à relire | Manager + worker ; 9 tests simulés ; qualification réelle réussie (`output/p2-2026-11-20T10-08-58-481Z.json`) ; déploiement Kubernetes restant |
 | P3 — Réservation et attente | P1, P2 | Claude | à relire | Coordinateur, attente BullMQ, annulation vérifiée ; 6 tests P3 + 60/60 au total ; branchement dans le déploiement reporté à P4 |
 | P4 — Affectation et customizations | P2, P3 | Claude | à relire | P4a (qualifié sur A43), P4b (non activé), P4c, P4d ; suite 235/0 ; validation cluster de bout en bout après P5 |
-| P5 — Cycle de vie et compatibilité | P4 | Non attribué | à faire | — |
+| P5 — Cycle de vie et compatibilité | P4 | Claude | à relire | Plan effectif, propriété, destroy multi-gestionnaires, redeploy par remplacement, audit dev ; suite 246/0 ; validation cluster restante |
 | P6 — Interface, supervision et activation | P5 | Non attribué | à faire | — |
 
 ## P0 — Première action : qualifier une VM Windows
@@ -380,15 +380,28 @@ Fichiers : `lib/runCustomization.js` (réécriture de l’orchestration), `lib/w
 
 ## P5 — Cycle de vie et compatibilité
 
-- [ ] Utiliser les affectations réelles pour affichage, statut, start/stop, snapshots, reset IP/mot de passe, propriétaire, exports et customizations.
-- [ ] Réserver les remplaçantes avant suppression des anciennes Windows lors d’un redéploiement de poste.
-- [ ] Terminer la destruction d’un lab seulement après succès de tous ses gestionnaires ; conserver les informations nécessaires en cas d’échec partiel.
-- [ ] Reprendre chaque opération sur la même affectation après crash ; ne pas libérer aveuglément une réservation expirée.
-- [ ] Vérifier l’identité de propriété avant toute opération sensible.
-- [ ] Paralléliser les opérations de cycle de vie sur VM indépendantes, agréger tous les résultats et reprendre uniquement les opérations incomplètes après échec partiel.
-- [ ] Conserver la gestion historique des VM existantes sans retrait implicite de leur état Terraform.
-- [ ] Adapter les remplacements historiques pour que toute nouvelle Windows passe par le pool.
-- [ ] Auditer les éventuelles VM laissées par l’ancien pool, sans adoption ou suppression automatique.
+- [x] Utiliser les affectations réelles pour affichage, statut, start/stop, snapshots, reset IP/mot de passe, propriétaire, exports et customizations.
+- [x] Réserver les remplaçantes avant suppression des anciennes Windows lors d’un redéploiement de poste.
+- [x] Terminer la destruction d’un lab seulement après succès de tous ses gestionnaires ; conserver les informations nécessaires en cas d’échec partiel.
+- [x] Reprendre chaque opération sur la même affectation après crash ; ne pas libérer aveuglément une réservation expirée.
+- [x] Vérifier l’identité de propriété avant toute opération sensible (reset IP/mot de passe, pause des mises à jour, snapshots, retrait avant remplacement, destruction ; start/stop : VMID issus du plan effectif, sans relecture du marqueur — à renforcer en P6 si souhaité).
+- [x] Paralléliser les opérations de cycle de vie sur VM indépendantes, agréger tous les résultats et reprendre uniquement les opérations incomplètes après échec partiel (destroy Terraform ∥ pool ; start/stop existants déjà parallèles).
+- [x] Conserver la gestion historique des VM existantes sans retrait implicite de leur état Terraform.
+- [x] Adapter les remplacements historiques pour que toute nouvelle Windows passe par le pool.
+- [x] Auditer les éventuelles VM laissées par l’ancien pool, sans adoption ou suppression automatique.
+
+### Implémentation P5 (2026-11-20, simulé, non activé)
+
+Fichiers : `lib/windowsPool/deployment.js` (`fetchActiveAssignments`, `overlayAssignments`, `terraformManagedVms`, `teardownDeploymentPool`, `purgeDeploymentPoolRecords`, `retireReplacedVms`, classification de redeploy), `lib/windowsPool/assignment.js` (remplacement dans la transaction d’enregistrement), `dashboard/server.js`, `workers/terraformWorker.js`, tests `windowsPool.deployment.test.js`, `windowsPool.redeploy.test.js`, `vmSnapshots.api.test.js`, stubs de tests du dashboard.
+
+- **Plan effectif unique** : `buildEffectiveDeploymentPayload` (plan calculé + affectations actives : VMID réel, `manager: 'windows-pool'`, `poolVmId`) remplace les 11 appels de `buildTerraformDeploymentPayload` (liste et réconciliation des statuts, propriétaire, start/stop/destroy/deploy, redeploy, snapshots, reset IP/mot de passe, pause des mises à jour). Sans affectation (labs historiques, migration absente) : plan inchangé.
+- **Propriété** : `checkPoolVmOwnership` relit le marqueur `labfactory-pool:<id>` avant snapshot, reset IP, reset mot de passe, pause des mises à jour → `409` sinon.
+- **Terraform** n’a jamais les VM du pool dans ses définitions, quelle que soit l’action (deploy, destroy, redeploy).
+- **Destroy** : Terraform et pool en parallèle ; côté pool, demandes ouvertes annulées (VM intactes rendues au stock), affectations closes, VM du lab → `deleting` (détruites par le gestionnaire après contrôle du marqueur), attente, purge des lignes ; la ligne du lab n’est supprimée qu’après succès des deux. Échec/délai (ex. worker du pool arrêté) : lab `failed`, informations conservées, suppression bloquée par les FK. Suppression de la fiche d’un lab : refusée (`409`) tant que des VM du pool vivent, sinon lignes du pool purgées.
+- **Redeploy de poste** : emplacement servi par le pool → nouvelle demande `redeploy-workstation` réservée **avant** toute suppression ; puis anciennes VM coupées (`link_down=1`) et arrêtées (marqueur vérifié) **avant** la connexion de la nouvelle (même IP) ; à l’enregistrement, ancienne affectation `replaced` + ancienne VM `deleting` dans la même transaction (historique `replaces_assignment_id`). Windows historique dont le template est désormais activé → VM du pool, l’ancienne coupée puis détruite par Terraform (ciblée, absente de la config). Terraform ne cible que ses propres VM ; **aucune cible ⇒ Terraform sauté** (un plan sans `-target` toucherait tout le lab).
+- **Audit ancien pool (dev, 2026-11-20, lecture seule)** : migrations 025–028 appliquées le 2026-10-20, retirées par 029 le 2026-10-21 ; table `vm_pool` absente ; aucun guest ≥ 900000 (plage de l’ancien pool), aucun nom/tag « pool » sur 464 guests. **Production non auditée.**
+- Tests : déploiement 11/11 (plan effectif, destroy complet, destroy sans worker), redeploy 5/5 ×2 (remplacement réservé avant, ancienne coupée avant connexion de la nouvelle, historique Windows → pool, propriété perdue), snapshot refusé sans marqueur ; suite complète avec base **246 réussis / 0 échec ×2**.
+- **Reste** : validation de bout en bout sur le cluster (images dev, worker du pool déployé, template activé) ; manifeste Kubernetes du worker du pool ; audit production.
 
 ## P6 — Interface, supervision et activation
 

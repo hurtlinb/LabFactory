@@ -16,7 +16,9 @@ function setup(overrides = {}) {
     canManageDeployment: () => true, denyDeploymentManagement: res => res.status(403).json({ error: 'forbidden' }),
     deploymentBusyStatuses: new Set(['deploying', 'destroying', 'customizing']),
     fetchBlueprintById: async () => ({}), fetchClassroomById: async () => ({}),
-    buildTerraformDeploymentPayload: () => ({ vms: [{ vmid: 101 }] }),
+    buildEffectiveDeploymentPayload: () => ({ vms: [{ vmid: 101 }] }),
+    // Windows pool (P5): historical VM -> no ownership check needed.
+    checkPoolVmOwnership: async () => null,
     fetchClusterVmResources: async () => [{ vmid: 101, type: 'qemu', node: 'pve' }],
     isQemuResource: vm => vm.type === 'qemu', readTerraformEnvSettings: () => ({}), assertRequiredTerraformEnvSettings: () => {},
     startVmSnapshotAction: async (_request, _resource, action) => { calls.push(action); return { task: 'task' }; },
@@ -37,7 +39,7 @@ test('snapshot routes enforce ownership, deployment membership, busy state and r
   for (const [overrides, status] of [
     [{ canManageDeployment: () => false }, 403],
     [{ fetchDeploymentById: async () => null }, 404],
-    [{ buildTerraformDeploymentPayload: () => ({ vms: [{ vmid: 999 }] }) }, 404],
+    [{ buildEffectiveDeploymentPayload: () => ({ vms: [{ vmid: 999 }] }) }, 404],
     [{ deploymentBusyStatuses: new Set(['running']) }, 409],
     [{ fetchClusterVmResources: async () => [] }, 404],
     [{ fetchClusterVmResources: async () => { throw new Error('offline'); } }, 502]
@@ -51,4 +53,15 @@ test('invalid VM IDs are rejected; Proxmox conflicts are surfaced', async () => 
   await routes.post(req, res); assert.equal(res.statusCode, 400);
   const conflict = setup({ startVmSnapshotAction: async () => { throw Object.assign(new Error('already exists'), { statusCode: 409 }); } });
   await conflict.routes.post(conflict.req, conflict.res); assert.equal(conflict.res.statusCode, 409);
+});
+
+test('Windows pool (P5): snapshot refused if the VM no longer carries the marker of its pool slot', async () => {
+  const { routes, calls, req, res } = setup({
+    buildEffectiveDeploymentPayload: () => ({ vms: [{ vmid: 101, manager: 'windows-pool', poolVmId: 'p' }] }),
+    checkPoolVmOwnership: async (_env, node, vm) => (vm.manager === 'windows-pool' ? `VM ${vm.vmid} marker missing` : null)
+  });
+  await routes.post(req, res);
+  assert.equal(res.statusCode, 409);
+  assert.match(res.body.error, /marker missing/);
+  assert.deepEqual(calls, [], 'no snapshot action');
 });

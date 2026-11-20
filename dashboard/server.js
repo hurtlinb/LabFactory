@@ -26,6 +26,8 @@ import {
   readTerraformEnvSettings,
   assertRequiredTerraformEnvSettings
 } from '../lib/terraformSettings.js';
+import { fetchActiveAssignments, overlayAssignments, purgeDeploymentPoolRecords } from '../lib/windowsPool/deployment.js';
+import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
 
 const require = createRequire(import.meta.url);
 const { Queue, QueueEvents } = require('bullmq');
@@ -1444,6 +1446,30 @@ const buildTerraformDeploymentPayload = ({ deploymentId, blueprint, classroom, t
   };
 };
 
+// Windows pool (lot P5): EFFECTIVE plan of a lab = computed plan + active assignments.
+// The slots served by the pool carry their real VMID (outside the computed range),
+// `manager: 'windows-pool'` and `poolVmId`. Every lab route goes through here: a pool VM is
+// never confused with a computed VMID (which may belong to nobody, or to another VM).
+const buildEffectiveDeploymentPayload = async args => {
+  const payload = buildTerraformDeploymentPayload(args);
+  const assignments = await fetchActiveAssignments(dbPool, args.deploymentId);
+  return assignments.length ? { ...payload, vms: overlayAssignments(payload.vms, assignments) } : payload;
+};
+
+// Before a sensitive operation (reset IP/password, snapshot, guest action) on a pool VM:
+// the Proxmox VM must carry the ownership marker of ITS pool VM. Returns an error or null.
+const checkPoolVmOwnership = async (envSettings, node, vm) => {
+  if (vm?.manager !== 'windows-pool') return null;
+  try {
+    const config = await requestProxmoxJson(envSettings, `nodes/${encodeURIComponent(node)}/qemu/${Number(vm.vmid)}/config`);
+    const description = String(config?.data?.description ?? config?.description ?? '');
+    return description.includes(ownershipMarker(vm.poolVmId)) ? null
+      : `VM ${vm.vmid} no longer carries the ownership marker of its pool slot: operation refused`;
+  } catch (error) {
+    return `Unable to verify the ownership of VM ${vm.vmid}: ${error.message}`;
+  }
+};
+
 const fetchClusterVmResources = async ({ context = 'Proxmox VM resources request' } = {}) => {
   const envSettings = readTerraformEnvSettings();
   assertRequiredTerraformEnvSettings(envSettings);
@@ -2286,7 +2312,7 @@ app.get(
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
+      const vmPlan = await buildEffectiveDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
       const readinessProgress = await fetchDeploymentReadinessProgress(deployment);
       const customizationProgress = (deployment.lastAction === 'customize' && ['customizing', 'failed', 'deployed', 'running', 'stopped', 'mixed'].includes(deployment.status))
         ? await fetchAnsibleCustomizationProgress(deployment)
@@ -2350,8 +2376,8 @@ app.put('/api/lifecycle/deployments/:id/owner', auth.requireRole(auth.ROLE_GROUP
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     const args = { deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom };
-    const previousVms = buildTerraformDeploymentPayload({ ...args, teacher: deployment.teacher }).vms;
-    const nextVms = buildTerraformDeploymentPayload({ ...args, teacher: mapTeacher(teacher.rows[0]) }).vms;
+    const previousVms = (await buildEffectiveDeploymentPayload({ ...args, teacher: deployment.teacher })).vms;
+    const nextVms = (await buildEffectiveDeploymentPayload({ ...args, teacher: mapTeacher(teacher.rows[0]) })).vms;
     const env = readTerraformEnvSettings();
     assertRequiredTerraformEnvSettings(env);
     await transferDeploymentMetadata({
@@ -2393,12 +2419,12 @@ app.post(
       if (deploymentBusyStatuses.has(deployment.status)) continue;
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const vmids = buildTerraformDeploymentPayload({
+      const vmids = (await buildEffectiveDeploymentPayload({
         deploymentId: deployment.id, testMode: deployment.testMode,
         blueprint,
         classroom,
         teacher: deployment.teacher
-      }).vms.map(vm => vm.vmid);
+      })).vms.map(vm => vm.vmid);
 
       const reconciledStatus = deriveDeploymentStatusFromResources(
         deployment.status,
@@ -2483,7 +2509,7 @@ app.get(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({
+    const vmPlan = await buildEffectiveDeploymentPayload({
       deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
@@ -2614,7 +2640,7 @@ app.get(
     }
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({
+    const vmPlan = await buildEffectiveDeploymentPayload({
       deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
@@ -2675,7 +2701,7 @@ for (const method of ['get', 'post']) {
       }
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
       const classroom = await fetchClassroomById(deployment.classroom.id);
-      const plan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
+      const plan = await buildEffectiveDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
       if (!plan.vms.some(vm => Number(vm.vmid) === vmid)) return res.status(404).json({ error: 'VM not found in deployment plan' });
       try {
         const resources = await fetchClusterVmResources({ context: 'VM snapshot' });
@@ -2683,6 +2709,8 @@ for (const method of ['get', 'post']) {
         if (!resource?.node) return res.status(404).json({ error: 'VM not found in Proxmox cluster' });
         const env = readTerraformEnvSettings();
         assertRequiredTerraformEnvSettings(env);
+        const ownershipError = await checkPoolVmOwnership(env, resource.node, plan.vms.find(vm => Number(vm.vmid) === vmid));
+        if (ownershipError) return res.status(409).json({ error: ownershipError });
         const request = (apiPath, options) => requestProxmoxJson(env, apiPath, { ...options, timeoutMs: 15000 });
         res.set('Cache-Control', 'no-store');
         if (method === 'get') return res.json(await getVmSnapshotTask(request, resource, req.query.task));
@@ -2712,7 +2740,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = await buildEffectiveDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -2744,6 +2772,13 @@ app.post(
     }
     if (vmResource.status !== 'running') {
       res.status(409).json({ error: 'VM must be running to reset IP' });
+      return;
+    }
+
+    // Windows pool (P5): sensitive operation only on the VM that carries the marker of its slot.
+    const ownershipError = await checkPoolVmOwnership(envSettings, vmResource.node, targetVm);
+    if (ownershipError) {
+      res.status(409).json({ error: ownershipError });
       return;
     }
 
@@ -2858,7 +2893,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({
+    const vmPlan = await buildEffectiveDeploymentPayload({
       deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
@@ -2896,6 +2931,13 @@ app.post(
     }
     if (vmResource.status !== 'running') {
       res.status(409).json({ error: 'VM must be running to reset password' });
+      return;
+    }
+
+    // Windows pool (P5): sensitive operation only on the VM that carries the marker of its slot.
+    const ownershipError = await checkPoolVmOwnership(envSettings, vmResource.node, targetVm);
+    if (ownershipError) {
+      res.status(409).json({ error: ownershipError });
       return;
     }
 
@@ -2986,7 +3028,7 @@ app.post(
 
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
-    const vmPlan = buildTerraformDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
+    const vmPlan = await buildEffectiveDeploymentPayload({ deploymentId: deployment.id, testMode: deployment.testMode, blueprint, classroom, teacher: deployment.teacher });
 
     const targetVm = vmPlan.vms.find(vm => Number(vm.vmid) === vmid);
     if (!targetVm) {
@@ -3021,6 +3063,13 @@ app.post(
     }
     if (vmResource.status !== 'running') {
       res.status(409).json({ error: 'VM must be running to pause Windows updates' });
+      return;
+    }
+
+    // Windows pool (P5): sensitive operation only on the VM that carries the marker of its slot.
+    const ownershipError = await checkPoolVmOwnership(envSettings, vmResource.node, targetVm);
+    if (ownershipError) {
+      res.status(409).json({ error: ownershipError });
       return;
     }
 
@@ -3115,7 +3164,7 @@ app.post(
     const blueprint = await fetchBlueprintById(deployment.blueprint.id);
     const classroom = await fetchClassroomById(deployment.classroom.id);
     await ensureDeploymentWorkstationPasswords(deployment, classroom, blueprint.guestPasswordMode);
-    const terraformBlueprintPayload = buildTerraformDeploymentPayload({
+    const terraformBlueprintPayload = await buildEffectiveDeploymentPayload({
       deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
@@ -3267,7 +3316,7 @@ app.post(
         : action === 'destroy'
           ? 'destroy'
           : action;
-    const terraformBlueprintPayload = buildTerraformDeploymentPayload({
+    const terraformBlueprintPayload = await buildEffectiveDeploymentPayload({
       deploymentId: deployment.id, testMode: deployment.testMode,
       blueprint,
       classroom,
@@ -3344,6 +3393,18 @@ app.delete(
     if (!['idle', 'failed', 'destroyed'].includes(deployment.status)) {
       res.status(409).json({ error: 'deployment can only be deleted when it is not deployed' });
       return;
+    }
+
+    // Windows pool (P5): a 'failed' lab can still own pool VMs -> must be destroyed first;
+    // otherwise its (closed) pool rows are purged so that the RESTRICT FKs do not block deletion.
+    try {
+      await purgeDeploymentPoolRecords(dbPool, req.params.id);
+    } catch (error) {
+      if (error.code === 'POOL_VMS_LIVING') {
+        res.status(409).json({ error: error.message });
+        return;
+      }
+      throw error;
     }
 
     const result = await dbPool.query('DELETE FROM lab_deployments WHERE id = $1 RETURNING id', [req.params.id]);

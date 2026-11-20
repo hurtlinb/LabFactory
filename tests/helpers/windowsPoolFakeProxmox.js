@@ -83,7 +83,7 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
           g.history.push({ at: 'start', config: { ...g.config } });
           g.status = 'running'; g.bootAt = now();
           stats.preparingNow += 1; stats.maxPreparing = Math.max(stats.maxPreparing, stats.preparingNow);
-        } else { g.status = 'stopped'; }
+        } else { g.status = 'stopped'; stats.events.push({ vmid: Number(m[2]), at: 'stop', t: now(), linkDown: /link_down=1/.test(g.config.net0 ?? '') }); }
       });
     }
     if ((m = path.match(/^nodes\/([^/]+)\/qemu\/(\d+)\/agent\/exec$/)) && method === 'POST') {

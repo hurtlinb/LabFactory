@@ -198,6 +198,9 @@ test('Terraform processor runs start and stop concurrently, defers deploy conten
     startPoolAssignments: async () => null,
     settlePoolAssignments: async () => ({ assigned: [] }),
     applyAssignmentsToPayload: vms => vms,
+    terraformManagedVms: vms => vms.filter(vm => vm.manager !== 'windows-pool'),
+    teardownDeploymentPool: async () => ({ vms: 0 }),
+    getPoolProxmox: () => null,
     runCommand: async (_command, args, opts) => { commands.push({ args, ...opts }); return args[0] === 'show' ? '{"format_version":"1.2","resource_changes":[]}' : ''; }
   };
   t.after(async () => { releasePower(); for (const dir of directories) await fs.rm(dir, { recursive: true, force: true }); });

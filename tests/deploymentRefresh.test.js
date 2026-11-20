@@ -43,7 +43,7 @@ test('Refresh API accepts failed labs, persists live state and guards concurrent
     fetchDeploymentRows: async () => [deployment], mapDeployment: row => row,
     fetchClusterVmResources: async () => [{ vmid: 1, status: 'running' }, { vmid: 2, status: 'stopped' }],
     fetchBlueprintById: async () => ({}), fetchClassroomById: async () => ({}),
-    buildTerraformDeploymentPayload: () => ({ vms: [{ vmid: 1 }, { vmid: 2 }] }),
+    buildEffectiveDeploymentPayload: () => ({ vms: [{ vmid: 1 }, { vmid: 2 }] }),
     deriveDeploymentStatusFromResources: context.derive, deploymentBusyStatuses: context.TRANSIENT_DEPLOYMENT_STATUSES,
     dbPool: { query: async (...args) => writes.push(args) }, fetchDeploymentById: async () => ({ ...deployment, status: 'mixed' })
   };

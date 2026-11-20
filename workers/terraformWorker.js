@@ -11,7 +11,7 @@ import { createPoolAssigner } from '../lib/windowsPool/assignment.js';
 import { awaitPoolReservation } from '../lib/windowsPool/waiting.js';
 import {
   classifyDeploymentVms, ensureRunPoolRequest, buildAssignmentSlots, runPoolAssignments,
-  finishRunPoolRequest, applyAssignmentsToPayload
+  finishRunPoolRequest, applyAssignmentsToPayload, terraformManagedVms, teardownDeploymentPool, retireReplacedVms
 } from '../lib/windowsPool/deployment.js';
 import { hostname as osHostname } from 'node:os';
 import path from 'node:path';
@@ -1550,10 +1550,14 @@ const getPoolAssigner = () => {
 const preparePoolDeployment = async ({ job, token, replaceVmids }) => {
   const vms = Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : [];
   if (!job.data?.deploymentId || !vms.length) return null;
-  const { poolVms, terraformVms } = await classifyDeploymentVms(dbPool, { deploymentId: job.data.deploymentId, vms, replaceVmids });
-  if (!poolVms.length) return terraformVms.length === vms.length ? null : { poolVms, terraformVms, request: null, reservedVms: [] };
+  const classification = await classifyDeploymentVms(dbPool, { deploymentId: job.data.deploymentId, vms, replaceVmids });
+  const { poolVms, terraformVms } = classification;
+  if (!poolVms.length) {
+    const unchanged = terraformVms.length === vms.length && !(classification.terraformTargetVmids && classification.terraformTargetVmids.length !== replaceVmids.length);
+    return unchanged ? null : { ...classification, request: null, reservedVms: [] };
+  }
   const request = await ensureRunPoolRequest({
-    db: dbPool, proxmox: getPoolProxmox(), deploymentId: job.data.deploymentId, runId: job.data.runId, poolVms
+    db: dbPool, proxmox: getPoolProxmox(), deploymentId: job.data.deploymentId, runId: job.data.runId, poolVms, kind: classification.kind
   });
   if (request.status === 'waiting_for_pool') {
     const claimed = await safeUpdateLifecycleStatus(job.data.labInstanceId, 'waiting_for_pool', {
@@ -1562,7 +1566,7 @@ const preparePoolDeployment = async ({ job, token, replaceVmids }) => {
     if (!claimed) return { stale: true };
   }
   const { vms: reservedVms } = await awaitPoolReservation({ db: dbPool, requestId: request.id, job, token });
-  return { poolVms, terraformVms, request, reservedVms };
+  return { ...classification, request, reservedVms };
 };
 
 // Starts the assignment chains (in parallel with Terraform). Returns { promise } (the promise
@@ -1582,8 +1586,14 @@ const startPoolAssignments = async ({ poolContext, job, ipConfigFor, signal }) =
     templateStorage: templateId => storages.get(templateId),
     ipConfigFor,
     defaultPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
-    adminUserFor: getWindowsAdminUsername
+    adminUserFor: getWindowsAdminUsername,
+    replacements: poolContext.replacements
   });
+  // Redeploy: the old VMs of the slots are disconnected and stopped BEFORE any new
+  // VM connects (same IP). The replacements are already reserved (reserve first).
+  if (poolContext.replacements?.size) {
+    await retireReplacedVms({ db: dbPool, proxmox: getPoolProxmox(), replacements: poolContext.replacements });
+  }
   return { promise: runPoolAssignments({ assigner: getPoolAssigner(), plan, signal }) };
 };
 
@@ -1632,6 +1642,7 @@ export function startTerraformWorker(connection) {
       let lease;
       let terraformDir;
       let assignmentPromise = null;
+      let poolTeardown = null; // destroy: pool share, in parallel with terraform destroy (never rejects)
       try {
         // Windows pool: waiting BEFORE the locks (a waiting lab holds no lock and no slot).
         const poolContext = action === 'deploy'
@@ -1641,9 +1652,17 @@ export function startTerraformWorker(connection) {
           console.log(`Skipping stale Terraform job ${job.id} for deployment ${deploymentLabel} (pool)`);
           return { planOutput: '', labInstanceId: job.data.labInstanceId, runId: job.data.runId, status: 'stale-job-skipped' };
         }
-        const terraformBlueprintVms = poolContext ? poolContext.terraformVms : (Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : []);
+        // Slots served by the pool (manager 'windows-pool', effective dashboard plan) never
+        // enter the Terraform definitions, whatever the action (deploy, destroy...).
+        const terraformBlueprintVms = poolContext
+          ? poolContext.terraformVms
+          : terraformManagedVms(Array.isArray(job.data?.blueprint?.vms) ? job.data.blueprint.vms : []);
         // Lab with only pool VMs: no Terraform (and never the main.tf fallback VM).
-        const skipTerraform = action === 'deploy' && Boolean(poolContext) && terraformBlueprintVms.length === 0;
+        // Redeploy: Terraform only targets its own VMs; empty list = no Terraform (a plan
+        // without -target would touch the whole lab).
+        const terraformTargets = action === 'deploy' && Array.isArray(poolContext?.terraformTargetVmids) ? poolContext.terraformTargetVmids : null;
+        const skipTerraform = action === 'deploy' && Boolean(poolContext) &&
+          (terraformBlueprintVms.length === 0 || (terraformTargets !== null && terraformTargets.length === 0));
         let poolIpConfigFor = null;
         lease = await acquireJobLocks(dbPool, job, token, abortController, { deploy: action === 'deploy' && !skipTerraform });
         lease.assertHeld();
@@ -1655,8 +1674,13 @@ export function startTerraformWorker(connection) {
         console.log(`Terraform job ${job.id} started for deployment ${deploymentLabel} (${action})`);
         const terraformParallelism = resolveTerraformParallelism();
         const replaceVmids = normalizeVmids(job.data?.replaceVmids);
-        const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(replaceVmids) : [];
-        const targetArgs = action === 'deploy' && replaceVmids.length > 0 ? buildTerraformTargetArgs(replaceVmids) : [];
+        // Windows pool: the historical Windows switching to the pool are TARGETED (destroyed, absent
+        // from the config) but not -replace'd; the slots served by the pool never appear here.
+        const retiredVmids = new Set(poolContext?.retiredTerraformVmids ?? []);
+        const terraformReplaceVmids = terraformTargets ? terraformTargets.filter(vmid => !retiredVmids.has(vmid)) : replaceVmids;
+        const terraformTargetVmids = terraformTargets ?? replaceVmids;
+        const replaceArgs = action === 'deploy' ? buildTerraformReplaceArgs(terraformReplaceVmids) : [];
+        const targetArgs = action === 'deploy' && terraformTargetVmids.length > 0 ? buildTerraformTargetArgs(terraformTargetVmids) : [];
         const inProgressStatus =
           action === 'destroy'
             ? 'destroying'
@@ -1682,6 +1706,10 @@ export function startTerraformWorker(connection) {
         if (action === 'deploy') {
           await safelyRecordDuration(startDeploymentDuration, dbPool, job);
           await readinessReporter.publish();
+        }
+        if (action === 'destroy' && job.data?.deploymentId) {
+          poolTeardown = teardownDeploymentPool({ db: dbPool, proxmox: getPoolProxmox(), deploymentId: job.data.deploymentId })
+            .then(result => ({ ok: true, result }), error => ({ ok: false, error }));
         }
 
       let preparedVarFile;
@@ -1999,7 +2027,7 @@ export function startTerraformWorker(connection) {
                     '-input=false',
                     `-parallelism=${terraformParallelism}`,
                     `-var-file=${preparedVarFile}`,
-                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => replaceVmids.includes(vmid))),
+                    ...buildTerraformReplaceArgs(failedVmids.filter(vmid => terraformReplaceVmids.includes(vmid))),
                     ...buildTerraformTargetArgs(failedVmids)
                   ],
                   { cwd: terraformDir, env, signal: abortController.signal }
@@ -2111,6 +2139,12 @@ export function startTerraformWorker(connection) {
             runId: job.data.runId
           });
         } else if (action === 'destroy') {
+          // The lab is deleted only once EVERY manager has succeeded (Terraform above, pool here).
+          if (poolTeardown) {
+            const outcome = await poolTeardown;
+            poolTeardown = null;
+            if (!outcome.ok) throw outcome.error;
+          }
           const removed = await removeDestroyedDeployment(dbPool, job.data.labInstanceId, job.data.runId);
           if (!removed) console.warn(`Skipping stale deployment cleanup for ${job.data.labInstanceId} (runId=${job.data.runId})`);
         } else {
@@ -2134,6 +2168,9 @@ export function startTerraformWorker(connection) {
         };
       } catch (error) {
         if (error instanceof DelayedError) throw error;
+        // Pool destruction still running (e.g. terraform destroy failed): wait for it before
+        // releasing the lab lock; the lab stays (status failed) with its information.
+        if (poolTeardown) { const pending = poolTeardown; poolTeardown = null; await pending; }
         // Assignment chains still running (e.g. Terraform failed): wait for them before releasing the
         // locks, then close the run request (the VMs already modified are quarantined/kept).
         if (assignmentPromise) {

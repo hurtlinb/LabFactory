@@ -7,7 +7,8 @@ import { promises as fs } from 'node:fs';
 import { setTimeout as sleep } from 'node:timers/promises';
 import {
   parseSlotId, networkFromIpConfig, buildAssignmentSlots, classifyDeploymentVms, ensureRunPoolRequest,
-  runPoolAssignments, finishRunPoolRequest, applyAssignmentsToPayload
+  runPoolAssignments, finishRunPoolRequest, applyAssignmentsToPayload,
+  fetchActiveAssignments, overlayAssignments, terraformManagedVms, teardownDeploymentPool, purgeDeploymentPoolRecords
 } from '../lib/windowsPool/deployment.js';
 import { createPoolProxmox } from '../lib/windowsPool/proxmox.js';
 import { createPoolManager } from '../lib/windowsPool/manager.js';
@@ -107,10 +108,11 @@ test('pool deployment flow (P4b)', { skip: !url }, async t => {
       assert.equal((await db.query('SELECT status FROM windows_pool_requests WHERE id = $1', [first.id])).rows[0].status, 'cancelled');
     });
 
+    let px, proxmox, manager; // shared with the P5 tests (same lab, same simulated Proxmox)
     await t.test('end to end: reservation, parallel assignments, request closed, payload for Ansible', async () => {
-      const px = fakeProxmox({ cloneMs: 30 });
-      const proxmox = createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 });
-      const manager = createPoolManager({ db, proxmox, holder: 'dep', log: quiet,
+      px = fakeProxmox({ cloneMs: 30 });
+      proxmox = createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 });
+      manager = createPoolManager({ db, proxmox, holder: 'dep', log: quiet,
         options: { firstProbeDelayMs: 0, probeIntervalMs: 15, retryBackoffMs: [20, 40], cloneTimeoutMs: 5_000, powerTimeoutMs: 5_000 } });
       for (let i = 0; i < 400 && (await reservePoolRequest(db, request.id)).status !== 'reserved'; i++) { await manager.tick(); await sleep(20); }
       await manager.drain();
@@ -141,14 +143,64 @@ test('pool deployment flow (P4b)', { skip: !url }, async t => {
       assert.deepEqual(slots, [{ workstation_number: 1, manager: 'windows-pool' }, { workstation_number: 2, manager: 'windows-pool' }]);
     });
 
-    await t.test('redeploy: workstation served by the pool refused (P5), historical workstation unchanged', async () => {
+    await t.test('P5 effective plan: real VMIDs of the pool slots, historical VMs unchanged, Terraform excludes them', async () => {
+      const assignments = await fetchActiveAssignments(db, deploymentId);
+      const effective = overlayAssignments(vms, assignments);
+      const srv = effective.filter(v => v.name.endsWith('-srv'));
+      assert.ok(srv.every(v => v.vmid >= 70000 && v.manager === 'windows-pool' && v.poolVmId));
+      assert.deepEqual(effective.filter(v => !v.name.endsWith('-srv')).map(v => v.vmid), vms.filter(v => !v.name.endsWith('-srv')).map(v => v.vmid));
+      assert.deepEqual(terraformManagedVms(effective).map(v => v.name).sort(), ['lab-01-lnx', 'lab-01-old', 'lab-02-lnx', 'lab-02-old']);
+      assert.deepEqual(overlayAssignments(vms, []), vms, 'without assignment: computed plan unchanged');
+    });
+
+    await t.test('redeploy: workstation served by the pool replaced by the pool (P5), historical workstation unchanged', async () => {
       const ws1Pool = vms.find(v => v.name === 'lab-01-srv');
-      await assert.rejects(classifyDeploymentVms(db, { deploymentId, vms, replaceVmids: [ws1Pool.vmid] }), error => error.code === 'POOL_REDEPLOY_UNSUPPORTED');
+      const replaced = await classifyDeploymentVms(db, { deploymentId, vms, replaceVmids: [ws1Pool.vmid] });
+      assert.deepEqual(replaced.poolVms.map(v => v.name), ['lab-01-srv']);
+      assert.equal(replaced.kind, 'redeploy-workstation');
+      assert.ok(replaced.replacements.get(ws1Pool.id)?.assignment, 'old assignment to replace');
+      assert.deepEqual(replaced.terraformTargetVmids, [], 'no Terraform at all (no -target would mean the whole lab)');
       const legacy = vms.find(v => v.name === 'lab-02-old');
       const { poolVms, terraformVms } = await classifyDeploymentVms(db, { deploymentId, vms, replaceVmids: [legacy.vmid] });
       assert.equal(poolVms.length, 0);
       assert.ok(!terraformVms.some(v => v.templateId === tPool), 'slots served by the pool never in the Terraform definitions');
       assert.equal(terraformVms.length, 4);
+    });
+
+    await t.test('P5 destroy: assignments closed, pool VMs destroyed by the manager, lab purgeable', async () => {
+      const poolVmids = (await fetchActiveAssignments(db, deploymentId)).map(a => a.vmid);
+      assert.equal(poolVmids.length, 2);
+      await assert.rejects(purgeDeploymentPoolRecords(db, deploymentId), error => error.code === 'POOL_VMS_LIVING', 'deleting the record before the destroy is refused');
+      // The manager (pool worker) runs alongside: it destroys the VMs moved to 'deleting'.
+      let running = true;
+      const loop = (async () => { while (running) { await manager.tick(); await sleep(15); } })();
+      try {
+        const result = await teardownDeploymentPool({ db, proxmox, deploymentId, pollMs: 20, timeoutMs: 15_000, log: quiet });
+        assert.equal(result.vms, 2);
+      } finally { running = false; await loop; await manager.drain(); }
+      assert.ok(poolVmids.every(vmid => !px.guests.has(vmid)), 'pool VMs destroyed on the Proxmox side');
+      assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM lab_vm_assignments WHERE deployment_id = $1', [deploymentId])).rows[0].n, 0);
+      assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM windows_pool_requests WHERE deployment_id = $1', [deploymentId])).rows[0].n, 0);
+      await db.query('DELETE FROM lab_deployments WHERE id = $1', [deploymentId]); // the RESTRICT FKs no longer block
+      const events = (await db.query(`SELECT detail->>'code' AS code FROM windows_pool_vm_events WHERE to_state = 'deleting' AND detail->>'deploymentId' = $1`, [deploymentId])).rows;
+      assert.deepEqual(events.map(e => e.code), ['LAB_DESTROYED', 'LAB_DESTROYED']);
+    });
+
+    await t.test('P5 destroy without the pool worker: explicit timeout, the lab keeps its information', async () => {
+      const lab = randomUUID();
+      await db.query('INSERT INTO lab_deployments VALUES ($1, NULL)', [lab]);
+      const vmId = randomUUID(), requestId = randomUUID();
+      await db.query(`INSERT INTO windows_pool_requests (id, deployment_id, kind, demand, status) VALUES ($1, $2, 'deploy', $3, 'fulfilled')`,
+        [requestId, lab, JSON.stringify([{ templateId: tPool, count: 1 }])]);
+      await db.query(`INSERT INTO windows_pool_vms (id, template_id, revision, source_template_vmid, cluster, node, vmid, state, request_id)
+                      VALUES ($1, $2, 1, 147, 'default', 'pve-b', 70990, 'assigned', $3)`, [vmId, tPool, requestId]);
+      await db.query(`INSERT INTO lab_vm_assignments (id, deployment_id, workstation_number, blueprint_vm_id, manager, cluster, vmid, pool_vm_id, request_id)
+                      VALUES ($1, $2, 1, $3, 'windows-pool', 'default', 70990, $4, $5)`, [randomUUID(), lab, randomUUID(), vmId, requestId]);
+      await assert.rejects(teardownDeploymentPool({ db, proxmox: null, deploymentId: lab, pollMs: 10, timeoutMs: 100, log: quiet }),
+        error => error.code === 'POOL_TEARDOWN_TIMEOUT' && /70990/.test(error.message));
+      assert.equal((await db.query('SELECT state FROM windows_pool_vms WHERE id = $1', [vmId])).rows[0].state, 'deleting');
+      assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM windows_pool_requests WHERE deployment_id = $1', [lab])).rows[0].n, 1, 'information kept');
+      await assert.rejects(db.query('DELETE FROM lab_deployments WHERE id = $1', [lab]), /foreign key/, 'the lab cannot disappear while its VMs live');
     });
   } finally {
     await db.end();
