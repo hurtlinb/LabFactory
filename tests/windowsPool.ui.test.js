@@ -99,7 +99,7 @@ test('pool page: actions call the right API', async t => {
   document.getElementById('poolDnsServers').value = '10.0.0.1; 10.0.0.2';
   document.getElementById('poolSettingsForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'] });
+  assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'], vmidMin: 70000, vmidMax: 79999 });
 });
 
 test('pool page: visible errors next to the form, warnings, unconfigured template configurable', async t => {

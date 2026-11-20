@@ -553,7 +553,9 @@
               <label>Proxmox resource pool of the stock (prepared VMs) <input id="poolProxmoxPool" type="text" placeholder="pool-dev (dev) / pool (prod)" pattern="[A-Za-z0-9._\-]{1,64}"></label>
               <p class="muted">Once assigned to a lab, a VM moves to the labs resource pool (Terraform <code>vm_pool</code> setting: labs-dev / labs).</p>
               <label>DNS servers (comma-separated) <input id="poolDnsServers" type="text" placeholder="195.186.4.162, 195.186.4.163"></label>
-              <p class="muted" id="poolVmidRange"></p>
+              <label>First VMID of the pool <input id="poolVmidMin" type="number" min="100" step="1" placeholder="70000 (dev) / 80000 (prod)" required></label>
+              <label>Last VMID of the pool <input id="poolVmidMax" type="number" min="100" step="1" placeholder="79999 (dev) / 89999 (prod)" required></label>
+              <p class="muted" id="poolVmidRange">Dev and prod share the same Proxmox cluster: their ranges must not overlap (dev 70000–79999, prod 80000–89999). Never inside the Terraform labs (10000–60999).</p>
               <button type="submit" class="btn btn-primary">Save settings</button>
             </form>
             <div id="poolSettingsStatus" class="status-message" role="status" aria-live="polite" hidden></div>

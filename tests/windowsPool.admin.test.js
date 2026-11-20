@@ -69,7 +69,20 @@ test('Windows pool administration (P6)', { skip: !url }, async t => {
     await t.test('settings and limits: validation, controlled suspension', async () => {
       await updatePoolSettings(db, { paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'] });
       await assert.rejects(updatePoolSettings(db, { dnsServers: ['not-an-ip'] }), error => error.code === 'VALIDATION');
-      await assert.rejects(updatePoolSettings(db, { vmidMin: 1 }), error => error.code === 'VALIDATION', 'VMID range not editable');
+      await assert.rejects(updatePoolSettings(db, { vmidMin: 1 }), error => error.code === 'VALIDATION', 'min and max go together, min >= 100');
+      // VMID range (prod 80000-89999, dev 70000-79999: same Proxmox cluster).
+      await assert.rejects(updatePoolSettings(db, { vmidMin: 55000, vmidMax: 64999 }), /Terraform labs/, 'overlap with the labs refused');
+      await assert.rejects(updatePoolSettings(db, { vmidMin: 80000, vmidMax: 80010 }), /at least 100/);
+      const live = (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state <> 'deleted'`)).rows[0].n;
+      assert.equal(live, 0, 'no pool VM yet in this test');
+      await updatePoolSettings(db, { vmidMin: 80000, vmidMax: 89999 });
+      assert.deepEqual([(await getPoolOverview(db)).settings.vmidMin, (await getPoolOverview(db)).settings.vmidMax], [80000, 89999]);
+      const vmId = randomUUID();
+      await db.query(`INSERT INTO windows_pool_vms (id, template_id, revision, source_template_vmid, cluster, node, vmid, state)
+                      SELECT $1, template_id, revision, source_template_vmid, 'default', 'pve-a', 80005, 'ready' FROM windows_pool_templates WHERE template_id = $2`, [vmId, tWin]);
+      await assert.rejects(updatePoolSettings(db, { vmidMin: 70000, vmidMax: 79999 }), error => error.code === 'VMID_RANGE_IN_USE', 'live pool VM outside the new range');
+      await db.query(`DELETE FROM windows_pool_vms WHERE id = $1`, [vmId]);
+      await updatePoolSettings(db, { vmidMin: 70000, vmidMax: 79999 });
       await updateOperationLimit(db, { category: 'clone', scope: 'node:peda-pve2', maxActive: 1 });
       await assert.rejects(updateOperationLimit(db, { category: 'bogus', maxActive: 1 }), error => error.code === 'VALIDATION');
       const o = await getPoolOverview(db);

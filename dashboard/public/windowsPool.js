@@ -78,7 +78,8 @@ function renderSettings() {
   $('poolPaused').checked = s.paused;
   $('poolProxmoxPool').value = s.proxmoxPool ?? '';
   $('poolDnsServers').value = (s.dnsServers ?? []).join(', ');
-  $('poolVmidRange').textContent = `Dedicated VMID range: ${s.vmidMin}–${s.vmidMax} (never used by Terraform labs).`;
+  $('poolVmidMin').value = s.vmidMin ?? '';
+  $('poolVmidMax').value = s.vmidMax ?? '';
 }
 
 function templateState(t) {
@@ -219,8 +220,13 @@ function bind() {
     const dnsServers = $('poolDnsServers').value.split(/[\s,;]+/).map(value => value.trim()).filter(Boolean);
     const proxmoxPool = $('poolProxmoxPool').value.trim();
     if (!dnsServers.length) return status('Not saved: at least one DNS server is required.', 'danger', 'poolSettingsStatus');
+    const vmidMin = Number($('poolVmidMin').value);
+    const vmidMax = Number($('poolVmidMax').value);
+    if (!Number.isInteger(vmidMin) || !Number.isInteger(vmidMax) || vmidMin > vmidMax) {
+      return status('Not saved: the VMID range is invalid (first ≤ last).', 'danger', 'poolSettingsStatus');
+    }
     void act(() => api('/api/windows-pool/settings', { method: 'PUT', body: JSON.stringify({
-      paused: $('poolPaused').checked, proxmoxPool: proxmoxPool || null, dnsServers
+      paused: $('poolPaused').checked, proxmoxPool: proxmoxPool || null, dnsServers, vmidMin, vmidMax
     }) }), () => ($('poolPaused').checked ? 'Settings saved. The pool is suspended.' : 'Settings saved. The pool is active.'), 'poolSettingsStatus');
   });
   $('poolTemplateForm')?.addEventListener('submit', event => {
