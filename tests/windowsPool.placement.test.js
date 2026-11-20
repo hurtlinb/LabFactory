@@ -57,21 +57,24 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
          VALUES ($1, true, 2, 4, 2, NULL, 'ceph-pool', 147)`, [templateId]);
     });
 
-    // pve-b: 12 GiB free, pve-a: 10 GiB, pve-c: offline, pve-d: does not see ceph-pool.
-    // VM of 4 GiB: 1st on pve-b (12), then pve-b = 8 < pve-a = 10 -> 2nd on pve-a.
+    // pve-b: 60 GiB free, pve-a: 40 GiB, pve-e: 4 GiB (below the 10% margin), pve-c: offline,
+    // pve-d: does not see ceph-pool. VM of 4 GiB: 1st on pve-b (most free memory), 2nd on pve-a
+    // (fewer preparations in progress) although pve-b still has more free memory: spread first
+    // (dev 2026-11-20: 21 of 22 clones on the node with the most free memory).
     const px = fakeProxmox({
       nodes: [
-        { node: 'pve-a', status: 'online', mem: 54 * GiB, maxmem: 64 * GiB },
-        { node: 'pve-b', status: 'online', mem: 52 * GiB, maxmem: 64 * GiB },
+        { node: 'pve-a', status: 'online', mem: 24 * GiB, maxmem: 64 * GiB },
+        { node: 'pve-b', status: 'online', mem: 4 * GiB, maxmem: 64 * GiB },
         { node: 'pve-c', status: 'offline', mem: 0, maxmem: 64 * GiB },
-        { node: 'pve-d', status: 'online', mem: 0, maxmem: 512 * GiB }
+        { node: 'pve-d', status: 'online', mem: 0, maxmem: 512 * GiB },
+        { node: 'pve-e', status: 'online', mem: 60 * GiB, maxmem: 64 * GiB }
       ],
-      storages: { 'ceph-pool': ['pve-a', 'pve-b', 'pve-c'], 'local-lvm': ['pve-d'] }
+      storages: { 'ceph-pool': ['pve-a', 'pve-b', 'pve-c', 'pve-e'], 'local-lvm': ['pve-d'] }
     });
     px.guests.get(147).config.memory = 4096;
     const manager = createPoolManager({ db, proxmox: createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'test-place', log: quiet, options: fast });
 
-    await t.test('placement: most free memory among the online nodes seeing the storage, in-flight counted', async () => {
+    await t.test('placement: preparations spread first, then free memory; node without margin excluded', async () => {
       await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state = 'ready'`)).rows[0].n === 2);
       const targets = px.stats.cloneCalls.map(call => call.target).sort();
       assert.deepEqual(targets, ['pve-a', 'pve-b']);
