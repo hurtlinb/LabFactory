@@ -216,27 +216,48 @@ test('VMID candidates: circular range, used IDs skipped, no immediate reuse', ()
   assert.throws(() => [...vmidCandidates({ min: 5, max: 4 })], /range/);
 });
 
+// Simulated Proxmox with the behaviours measured in P2 on ceph-pool.
+const vmidProxmox = ({ nextid = id => id, guests = [], volumes = [], storage = 'ok', calls = [] } = {}) => async (path, options = {}) => {
+  calls.push({ path, options });
+  const match = path.match(/^cluster\/nextid\?vmid=(\d+)$/);
+  if (match) { const r = nextid(Number(match[1])); if (r instanceof Error) throw r; return r; }
+  if (path === 'cluster/resources?type=vm') return guests;
+  const volume = path.match(/^nodes\/peda-pve2\/storage\/ceph-pool\/content\/(.+)$/);
+  if (volume) {
+    const volid = decodeURIComponent(volume[1]);
+    if (storage === 'timeout') throw new Error('Proxmox HTTP 596: Connection timed out');
+    if (volumes.includes(volid)) return { format: 'raw', size: 1 };
+    throw new Error(`Proxmox HTTP 500: rbd error: rbd: error opening image ${volid.split(':')[1]}: (2) No such file or directory`);
+  }
+  throw new Error('unexpected path ' + path);
+};
+
 test('pool VMID check: registry, inventory and volumes must all agree (fail closed)', async () => {
-  const proxmox = ({ nextid = id => id, guests = [], volumes = [] } = {}) => async path => {
-    const match = path.match(/^cluster\/nextid\?vmid=(\d+)$/);
-    if (match) { const r = nextid(Number(match[1])); if (r instanceof Error) throw r; return r; }
-    if (path === 'cluster/resources?type=vm') return guests;
-    if (path === 'nodes/peda-pve2/storage/ceph-pool/content') return volumes;
-    throw new Error('unexpected path ' + path);
-  };
   const check = request => createProxmoxVmidCheck({ request, node: 'peda-pve2', storage: 'ceph-pool' });
-  assert.equal(await check(proxmox())(70010), 70010);
+  assert.equal(await check(vmidProxmox())(70010), 70010);
   // Guest invisible to the inventory but known to the registry.
-  await assert.rejects(check(proxmox({ nextid: () => new Error('VM 70010 already exists') }))(70010), /already exists/);
-  await assert.rejects(check(proxmox({ nextid: () => 70011 }))(70010), /registry/);
+  await assert.rejects(check(vmidProxmox({ nextid: () => new Error('VM 70010 already exists') }))(70010), /already exists/);
+  await assert.rejects(check(vmidProxmox({ nextid: () => 70011 }))(70010), /registry/);
   // Visible guest (e.g. another lab, a template) even if the registry said yes.
-  await assert.rejects(check(proxmox({ guests: [{ vmid: 70010, name: 'other-lab', type: 'qemu', node: 'peda-pve1' }] }))(70010), /other-lab/);
-  // Orphan disk left by an interrupted clone (case observed in P0).
-  await assert.rejects(check(proxmox({ volumes: [{ volid: 'ceph-pool:vm-70010-disk-0' }] }))(70010), /vm-70010-disk-0/);
-  await assert.rejects(check(proxmox({ volumes: [{ volid: 'ceph-pool:base-147-disk-1/vm-70010-disk-1' }] }))(70010), /present/);
-  assert.equal(await check(proxmox({ volumes: [{ volid: 'ceph-pool:vm-700100-disk-0', vmid: 700100 }] }))(70010), 70010, 'no false positive on a longer VMID');
+  await assert.rejects(check(vmidProxmox({ guests: [{ vmid: 70010, name: 'other-lab', type: 'qemu', node: 'peda-pve1' }] }))(70010), /other-lab/);
+  // Orphan disks left by an interrupted clone (case observed in P0).
+  await assert.rejects(check(vmidProxmox({ volumes: ['ceph-pool:vm-70010-disk-0'] }))(70010), /vm-70010-disk-0 present/);
+  await assert.rejects(check(vmidProxmox({ volumes: ['ceph-pool:vm-70010-disk-2'] }))(70010), /present/);
+  await assert.rejects(check(vmidProxmox({ volumes: ['ceph-pool:vm-70010-cloudinit'] }))(70010), /cloudinit present/);
   await assert.rejects(check(async () => null)(70010), /registry|Invalid/);
   assert.throws(() => createProxmoxVmidCheck({ request: async () => 1, node: 'peda-pve2' }), /Incomplete/);
+});
+
+test('pool VMID check: targeted volume lookups, storage unavailable = allocation postponed', async () => {
+  const calls = [];
+  await createProxmoxVmidCheck({ request: vmidProxmox({ calls }), node: 'peda-pve2', storage: 'ceph-pool' })(70020);
+  const volumeCalls = calls.filter(call => call.path.includes('/content/'));
+  assert.deepEqual(volumeCalls.map(call => decodeURIComponent(call.path.split('/content/')[1])),
+    ['ceph-pool:vm-70020-disk-0', 'ceph-pool:vm-70020-disk-1', 'ceph-pool:vm-70020-disk-2', 'ceph-pool:vm-70020-disk-3', 'ceph-pool:vm-70020-cloudinit']);
+  assert.ok(volumeCalls.every(call => call.options.timeoutMs === 15_000));
+  assert.ok(!calls.some(call => call.path.endsWith('/content')), 'never the full listing (~30 s on ceph-pool, HTTP 596)');
+  await assert.rejects(createProxmoxVmidCheck({ request: vmidProxmox({ storage: 'timeout' }), node: 'peda-pve2', storage: 'ceph-pool' })(70020),
+    error => error.code === 'VOLUME_CHECK_UNAVAILABLE');
 });
 
 test('Terraform never creates a VMID in the pool range, even if Proxmox says it is free', async () => {

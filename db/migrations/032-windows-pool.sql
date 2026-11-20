@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS windows_pool_settings (
   vmid_max INTEGER NOT NULL DEFAULT 79999,
   -- Controlled suspension: no new assignment and no direct-clone fallback.
   paused BOOLEAN NOT NULL DEFAULT TRUE,
+  -- Proxmox resource pool of the pool VMs (e.g. labs-dev); NULL = no resource pool.
+  proxmox_pool TEXT CHECK (proxmox_pool IS NULL OR proxmox_pool ~ '^[A-Za-z0-9._-]{1,64}$'),
   version INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   CONSTRAINT windows_pool_settings_vmid_range CHECK (vmid_min >= 100 AND vmid_max <= 999999999 AND vmid_min <= vmid_max)

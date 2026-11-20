@@ -70,7 +70,7 @@ Statuts : `à faire`, `en cours`, `bloqué`, `à relire`, `validé`.
 |---|---|---|---|---|
 | P0 — Qualification sur une VM | Aucune | Codex, Claude | validé | Série linked clone 4/4 réussie : `output/p0-2026-11-20T08-35-17-595Z.json` ; validé par l’utilisateur le 2026-11-20 ; VM de test détruites |
 | P1 — Contrats et données | P0 | Claude | validé | Migration 032, `lib/windowsPool/`, tests unitaires + 11 tests PostgreSQL réussis ; plage VMID vérifiée libre ; garde Terraform hors plage du pool ; validé par l’utilisateur le 2026-11-20 |
-| P2 — Préparation et alimentation | P1 | Non attribué | à faire | — |
+| P2 — Préparation et alimentation | P1 | Claude | à relire | Manager + worker ; 9 tests simulés ; qualification réelle réussie (`output/p2-2026-11-20T10-08-58-481Z.json`) ; déploiement Kubernetes restant |
 | P3 — Réservation et attente | P1, P2 | Non attribué | à faire | — |
 | P4 — Affectation et customizations | P2, P3 | Non attribué | à faire | — |
 | P5 — Cycle de vie et compatibilité | P4 | Non attribué | à faire | — |
@@ -238,16 +238,41 @@ FK `RESTRICT` vers `lab_deployments` (demandes, affectations) : la suppression d
 
 ## P2 — Préparation et alimentation
 
-- [ ] Créer un worker dédié indépendant du verrou global Terraform.
-- [ ] Centraliser l’allocation des VMID (`allocatePoolVm`) ; rappeler `createProxmoxVmidCheck` (registre + inventaire + volumes) **juste avant chaque clone**, et traiter les collisions sans adopter ni détruire de VM étrangère.
-- [ ] Journaliser les tâches Proxmox et réconcilier les résultats incertains avant répétition.
-- [ ] Garantir la déconnexion persistante des NIC avant tout démarrage.
-- [ ] Créer un marqueur de préparation lié à la VM et à la révision, distinct de la disponibilité du boot courant.
-- [ ] Empêcher Cloudbase-Init de réappliquer les paramètres provisoires après affectation.
-- [ ] Limiter les préparations simultanées et renouveler le stock selon réserve et demandes en attente.
-- [ ] Exécuter clones et préparations en parallèle entre VM/templates ; appliquer des budgets partagés entre réplicas et réconcilier les opérations toujours actives après crash.
-- [ ] Limiter les sondages individuellement, sans garder leur créneau pendant les backoffs ou l’attente de fin de préparation.
-- [ ] Gérer les nouvelles révisions, la quarantaine et les reprises après arrêt du worker.
+- [x] Créer un worker dédié indépendant du verrou global Terraform (`workers/startWindowsPoolWorkerService.js`, `npm run windows-pool-worker`).
+- [x] Centraliser l’allocation des VMID (`allocatePoolVm`) ; rappeler `createProxmoxVmidCheck` (registre + inventaire + volumes) **juste avant chaque clone**, et traiter les collisions sans adopter ni détruire de VM étrangère.
+- [x] Journaliser les tâches Proxmox et réconcilier les résultats incertains avant répétition.
+- [x] Garantir la déconnexion persistante des NIC avant tout démarrage.
+- [x] Créer un marqueur de préparation lié à la VM et à la révision, distinct de la disponibilité du boot courant.
+- [x] Empêcher Cloudbase-Init de réappliquer les paramètres provisoires après affectation.
+- [x] Limiter les préparations simultanées et renouveler le stock selon réserve et demandes en attente.
+- [x] Exécuter clones et préparations en parallèle entre VM/templates ; appliquer des budgets partagés entre réplicas et réconcilier les opérations toujours actives après crash.
+- [x] Limiter les sondages individuellement, sans garder leur créneau pendant les backoffs ou l’attente de fin de préparation.
+- [x] Gérer les nouvelles révisions, la quarantaine et les reprises après arrêt du worker.
+- [x] Qualifier le worker sur l’infrastructure réelle (voir « Qualification P2 » ci-dessous).
+- [ ] Déploiement Kubernetes du worker (dépôt `labfactory-gitops`) — à faire après qualification.
+
+### Implémentation P2 (simulée, 2026-11-20)
+
+Fichiers : `lib/windowsPool/proxmox.js` (client HTTP, `waitTask` sans annulation, `guestRun` QGA), `lib/windowsPool/manager.js` (boucle de gestion), `workers/startWindowsPoolWorkerService.js`, `package.json` (script), migration 032 complétée par `windows_pool_settings.proxmox_pool` (jamais appliquée hors schémas de test, modifiée en place).
+
+Fonctionnement par tick (5 s, `WINDOWS_POOL_TICK_MS`) : réconciliation des baux orphelins → vidange des VM prêtes d’une ancienne révision → avancement de chaque VM `creating`/`preparing`/`deleting` (chaîne indépendante, verrou consultatif `pool-vm:<id>` partagé entre réplicas, version optimiste) → réapprovisionnement (`planReplenishment`). Rien n’attend la VM la plus lente ; attentes et backoffs = date de prochain passage en checkpoint, sans créneau ni verrou tenu.
+
+- **Création** : bail `clone` (cluster/nœud/stockage) → allocation VMID (contrôle 3 sources) → re-contrôle juste avant le clone → `clone` **linked** (`full=0`, `target`, pool Proxmox, description `labfactory-pool:<id>`) → UPID en checkpoint et rattaché au bail → configuration avant premier boot (`onboot=0`, `configdrive2`, `ipconfig0=ip=dhcp`, compte selon langue — `Administrateur` pour `fr` —, mot de passe provisoire aléatoire jamais stocké, tag `labfactory-pool`, **toutes les NIC `link_down=1` relues**) → entrée en préparation sous budget global `prepare` compté sur les VM `preparing` en base (résistant aux crashs).
+- **Préparation** : à chaque passage, relecture propriété + `link_down` (sinon quarantaine `NIC_CONNECTED`), démarrage si nécessaire, sonde QGA sous bail `guest_probe` court, écriture du marqueur (désactive Cloudbase-Init), `ready` seulement sur verdict `READY` ; suppression du `cipassword` de la config Proxmox ; `pg_notify('windows_pool_stock')`. Délai dépassé → `PREPARATION_TIMEOUT`.
+- **Destruction** : VM absente → `deleted` ; VM sans le marqueur → `deleted` **sans aucune action Proxmox** (`VMID_FOREIGN`) ; sinon arrêt + `DELETE purge`.
+- **Reprise** : UPID connu → attente de la même tâche (jamais de second clone) ; tâche échouée → UPID oublié, VMID re-contrôlé ; VM retrouvée avec notre marqueur → adoptée comme clonée. Erreurs transitoires (`cfs-lock`…) → backoff ; 6 échecs → quarantaine `REPEATED_FAILURE`.
+
+### Qualification P2 sur infrastructure réelle — 2026-11-20 — **réussie**
+
+Harnais jetable `tmp/p2-qualify.mjs` : manager réel + Proxmox réel + schéma isolé dans la base `labfactory-dev` (via `kubectl port-forward`), template 147 → `peda-pve2`/`ceph-pool`, pool Proxmox `labs-dev`, réserve 2 / plafond 3. Rapport : `output/p2-2026-11-20T10-08-58-481Z.json`.
+
+- **Première tentative (09:56) arrêtée, aucune VM créée** : la liste complète de `ceph-pool` (1910 volumes) prend ~30 s, limite du proxy Proxmox (HTTP 596), et échouait pendant un déploiement concurrent (clones du template 148). Le contrôle « fail closed » refusait donc tout VMID. **Correctif** : interrogation ciblée des noms de volumes qu’un clone créerait (`vm-N-disk-0..3`, `vm-N-cloudinit`) — un volume absent répond en < 300 ms ; stockage injoignable → `VOLUME_CHECK_UNAVAILABLE`, allocation reportée sans quarantaine ni VMID consommé.
+- **Seconde tentative (10:08) : 2 VM prêtes (70000, 70001)**, clones linked lancés à 1 s d’écart (plafond clone 2), préparations chevauchées sur 399 s ; création → prête en **6 min 43 s** et **6 min 50 s** (préparation seule 402 s / 410 s). Séquence QGA observée : `AGENT_UNAVAILABLE` → `SETUP_IN_PROGRESS` → `AGENT_UNAVAILABLE` (reboot OOBE) → `CLOUDBASE_RUNNING` → marqueur écrit → `ready`.
+- Vérifié sur Proxmox pour chaque VM : VMID dans la plage, `scsi0 = ceph-pool:base-147-disk-1/vm-N-disk-1` (linked clone), `link_down=1` toujours présent, `cipassword` retiré, marqueur `labfactory-pool:<id>`, membre de `labs-dev`, en marche.
+- Changement de révision (réserve 0) : 2 VM vidangées puis **détruites en 1 min 46 s** ; aucun bail résiduel. Après coup : aucun guest dans 70000–79999, VMID 70000/70001 de nouveau libres (registre, inventaire, volumes), schéma de test supprimé.
+- Non couvert ici (couvert par les tests simulés) : quarantaine, VM étrangère, reprise après crash, délai de préparation, stockage indisponible.
+
+Tests `tests/windowsPool.manager.test.js` (PostgreSQL réel en schéma isolé + Proxmox simulé), **9/9, stables sur 3 exécutions** (dont stockage indisponible : allocation reportée sans quarantaine puis reprise) : réapprovisionnement à la réserve en linked clones isolés avant boot (VMID caché et disque orphelin évités, plafond clone 2 atteint sans dépassement, préparations simultanées, mot de passe provisoire retiré, aucun bail résiduel, stabilité) ; demande au-delà de la réserve jusqu’au plafond ; quarantaine sur erreurs bootstrap et NIC reconnectée ; VM étrangère jamais touchée ; reprise après crash sans second clone ; nouvelle révision vidangée/détruite/remplacée ; délai de préparation.
 
 ## P3 — Réservation et attente
 
@@ -341,5 +366,6 @@ Pièges déjà identifiés : reset IP sélectionnant une NIC `Up`, DNS codés en
 | 2026-11-20 | Claude | P0 | Passage en linked clones ; correctifs Cloudbase-Init (configdrive2) et DHCP (registre `EnableDHCP=0`) qualifiés ; série 2 séquentielles + 2 parallèles réussie. Harnais : `tmp/p0-complete.mjs` | P0 validé par l’utilisateur ; VM 151–156 détruites. Prochaine action : P1 (intégrer linked clone, contrat de readiness QGA, contrat d’affectation réseau, reprise après rollout) |
 | 2026-11-20 | Claude | P1 | Fichiers : `db/migrations/032-windows-pool.sql`, `lib/windowsPool/*.js`, `tests/windowsPool.test.js`, `tests/windowsPool.db.test.js`. Validation : `node --test tests/windowsPool.test.js` (16/16) ; `WINDOWS_POOL_TEST_DATABASE_URL=… node --test tests/windowsPool.db.test.js` (11/11, base dev, schéma isolé) ; chaîne de migrations 001→032 + rejeu OK ; tests existants concurrence/readiness/reprise 30/30. Limites : modules non branchés (aucun worker) ; plafonds initiaux non mesurés ; reprise après rollout du worker à concevoir en P2/P4 | Relecture P1 par l’utilisateur, puis P2 (worker d’alimentation) |
 | 2026-11-20 | Claude | P1 | Relecture utilisateur : plage 70000–79999 et reste validés, exigence de VMID libres et exclusifs. Plage vérifiée libre (inventaire, volumes, 10 000 `nextid`). Ajouts : `createProxmoxVmidCheck` (3 sources), garde Terraform hors plage du pool (`lib/vmidAvailability.js`, `workers/terraformWorker.js`), stub de test dans `tests/jobConcurrency.test.js`. Validation : 81/81 sur `windowsPool`, `jobConcurrency` et suites worker liées | Commit P1 puis P2 ; P2 doit rappeler `createProxmoxVmidCheck` juste avant chaque clone |
+| 2026-11-20 | Claude | P2 | Fichiers : `lib/windowsPool/{proxmox,manager}.js`, `workers/startWindowsPoolWorkerService.js`, `package.json`, `tests/windowsPool.manager.test.js`, `vmidAllocator.js` (volumes ciblés), migration 032 (`proxmox_pool`). Validation : unitaires 20/20, PostgreSQL 11/11, manager simulé 9/9 (×3), qualification réelle 2 VM réussie puis nettoyée. Limites : worker non déployé ; réserve et plafonds non calibrés ; VM prêtes laissées allumées (budget RAM à valider) | Relecture P2 ; manifeste Kubernetes (dépôt gitops) ; puis P3 (réservation et attente) |
 
 Pour chaque passation, ajouter les fichiers touchés, commandes de validation, résultats, limites connues et décisions à confirmer. Les paramètres dépendant de l’infrastructure (template pilote, capacité, placement, permissions QGA et politique de révision) restent à préciser pendant P0/P1.
