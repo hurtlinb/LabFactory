@@ -786,6 +786,7 @@ function renderModelList() {
           <div class="panel-head">
             <div class="template-meta">
               <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
+              ${template.windowsPool?.enabled ? `<span class="mini-pill pool-pill" title="Windows pool enabled">Pool · ${template.windowsPool.ready}/${template.windowsPool.readyTarget} ready</span>` : ''}
             </div>
             <button class="icon-btn delete-model-button" type="button" data-template-id="${template.id}" aria-label="Delete VM model">${uiIcon('delete')}</button>
           </div>
@@ -2657,6 +2658,9 @@ function populateTemplateForm(template) {
   if (osRadio) {
     osRadio.checked = true;
   }
+  templateForm.elements.poolEnabled.checked = Boolean(template.windowsPool?.enabled);
+  templateForm.elements.poolReadyTarget.value = String(template.windowsPool?.readyTarget ?? 0);
+  syncTemplatePoolFieldset();
   state.editingTemplateId = template.id;
   state.isTemplateEditorVisible = true;
   if (templateSubmitButton) {
@@ -2669,10 +2673,20 @@ function populateTemplateForm(template) {
   renderModelList();
 }
 
+// Windows pool section of the VM model editor: Windows models only (user decision 2026-11-21).
+function syncTemplatePoolFieldset() {
+  const fieldset = document.getElementById('templatePoolFieldset');
+  if (!fieldset) return;
+  const osType = templateForm.querySelector('input[name="osType"]:checked')?.value;
+  fieldset.hidden = !['windows11', 'windows-server'].includes(osType);
+  templateForm.elements.poolReadyTarget.disabled = !templateForm.elements.poolEnabled.checked;
+}
+
 function resetTemplateForm({ keepVisible = false } = {}) {
   state.editingTemplateId = null;
   state.isTemplateEditorVisible = keepVisible;
   templateForm.reset();
+  syncTemplatePoolFieldset();
   if (templateSubmitButton) {
     templateSubmitButton.textContent = 'Add model';
   }
@@ -3459,6 +3473,10 @@ showOnlyMyLabsToggle?.addEventListener('change', () => {
   });
 });
 
+templateForm.addEventListener('change', event => {
+  if (event.target?.name === 'osType' || event.target?.name === 'poolEnabled') syncTemplatePoolFieldset();
+});
+
 templateForm.addEventListener('submit', async event => {
   event.preventDefault();
   if (templateForm.dataset.busy) return;
@@ -3476,15 +3494,39 @@ templateForm.addEventListener('submit', async event => {
     fullClone: form.get('fullClone') === 'on'
   };
 
+  const isWindows = ['windows11', 'windows-server'].includes(payload.osType);
+  const previousPool = state.templates.find(item => item.id === editingTemplateId)?.windowsPool ?? null;
+  const pool = { enabled: isWindows && form.get('poolEnabled') === 'on', readyTarget: Math.max(0, Number(templateForm.elements.poolReadyTarget.value || 0)) };
+  if (!pool.enabled) pool.readyTarget = previousPool?.readyTarget ?? 0;
+  const poolChanged = isWindows
+    ? (pool.enabled !== Boolean(previousPool?.enabled) || (pool.enabled && pool.readyTarget !== (previousPool?.readyTarget ?? 0)))
+    : false;
+  if (poolChanged && previousPool?.enabled && !pool.enabled &&
+      !window.confirm('Disable the Windows pool for this model? Its prepared VMs will be destroyed (VMs already in labs are not affected).')) {
+    delete templateForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy');
+    return;
+  }
+
   try {
-    await fetchJson(editingTemplateId ? `/api/templates/${editingTemplateId}` : '/api/templates', {
+    const saved = await fetchJson(editingTemplateId ? `/api/templates/${editingTemplateId}` : '/api/templates', {
       method: editingTemplateId ? 'PUT' : 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
+    let poolMessage = '';
+    if (poolChanged) {
+      try {
+        await fetchJson(`/api/templates/${saved?.id ?? editingTemplateId}/windows-pool`, {
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(pool)
+        });
+        poolMessage = pool.enabled ? ` Windows pool enabled (${pool.readyTarget} VM(s) kept ready).` : ' Windows pool disabled.';
+      } catch (error) {
+        poolMessage = ` Windows pool not changed: ${error.message}`;
+      }
+    }
     resetTemplateForm();
     await loadTemplates();
-    showMessage(globalStatus, editingTemplateId ? 'VM model updated.' : 'VM model created.', 'success');
+    showMessage(globalStatus, `${editingTemplateId ? 'VM model updated.' : 'VM model created.'}${poolMessage}`, poolMessage.includes('not changed') ? 'warning' : 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   } finally { delete templateForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }

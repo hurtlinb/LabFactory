@@ -8,13 +8,13 @@ const html = readFileSync('dashboard/public/index.html', 'utf8');
 const tWin = '11111111-1111-1111-1111-111111111111';
 const tW11 = '22222222-2222-2222-2222-222222222222';
 const overview = {
-  settings: { cluster: 'default', paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'], vmidMin: 70000, vmidMax: 79999 },
+  settings: { cluster: 'default', paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'], vmidMin: 70000, vmidMax: 79999, maxCapacity: 40 },
   templates: [
     { templateId: tWin, name: 'Windows 2022 v2', osType: 'windows-server', proxmoxTemplateVmid: 147, configured: true,
-      config: { enabled: true, readyTarget: 2, maxCapacity: 4, maxParallelPreparations: 2, node: 'peda-pve2', storage: 'ceph-pool', revision: 1, sourceTemplateVmid: 147, qualified: true },
+      config: { enabled: true, readyTarget: 2, maxParallelPreparations: 2, node: 'peda-pve2', storage: 'ceph-pool', revision: 1, sourceTemplateVmid: 147 },
       counts: { ready: 1, preparing: 1, reserved: 0, assigned: 3, quarantined: 1, deleting: 0 } },
     { templateId: tW11, name: 'Windows 11 26H2', osType: 'windows11', proxmoxTemplateVmid: 148, configured: true,
-      config: { enabled: false, readyTarget: 0, maxCapacity: 2, maxParallelPreparations: 1, node: 'peda-pve2', storage: 'ceph-pool', revision: 2, sourceTemplateVmid: 149, qualified: false },
+      config: { enabled: false, readyTarget: 0, maxParallelPreparations: 1, node: 'peda-pve2', storage: 'ceph-pool', revision: 2, sourceTemplateVmid: 149 },
       counts: { ready: 0, preparing: 0, reserved: 0, assigned: 0, quarantined: 0, deleting: 0 } }
   ],
   requests: [{ id: 'r1', deploymentId: 'lab-1', deploymentNumber: 42, blueprintName: 'Win domain', classroomName: 'A43', deploymentStatus: 'waiting_for_pool',
@@ -49,16 +49,17 @@ async function setup(t) {
 }
 const click = async (window, element) => { element.dispatchEvent(new window.MouseEvent('click', { bubbles: true })); await new Promise(r => setTimeout(r, 20)); };
 
-test('pool page: admin navigation, counters, state, qualification and missing needs', async t => {
+test('pool page: admin navigation, counters, state and missing needs', async t => {
   const { document, calls, page } = await setup(t);
   assert.ok(document.querySelector('nav [data-view="admin-windows-pool"][data-role-group="admin"], [data-view="admin-windows-pool"][data-role-group="admin"]'), 'admin-only entry');
   assert.equal(calls[0].url, '/api/windows-pool');
   const rows = [...page.querySelectorAll('#poolTemplatesBody tr')].map(tr => tr.textContent.replace(/\s+/g, ' '));
-  assert.match(rows[0], /Windows 2022 v2.*Enabled.*Qualified \(rev\. 1\).*1.*1.*0.*3.*1.*2 \/ 4/);
-  assert.match(rows[1], /Disabled.*Not qualified for rev\. 2/);
-  assert.ok(page.querySelector(`[data-pool-action="qualify"][data-template="${tW11}"]`), 'qualification offered for the non-qualified revision');
-  assert.ok(!page.querySelector(`[data-pool-action="enable"][data-template="${tW11}"]`), 'no enabling without qualification');
-  assert.ok(page.querySelector(`[data-pool-action="disable"][data-template="${tWin}"]`));
+  assert.match(rows[0], /Windows 2022 v2.*Enabled.*rev\. 1.*1.*1.*0.*3.*1.*2/);
+  assert.match(rows[1], /Disabled.*rev\. 2/);
+  // Activation on the VM Models page (2026-11-21): neither qualification nor Enable/Disable here.
+  assert.ok(!page.querySelector('[data-pool-action="qualify"], [data-pool-action="enable"], [data-pool-action="disable"]'));
+  assert.match(page.textContent, /VM Models/);
+  assert.equal(document.getElementById('poolMaxCapacity').value, '40', 'global ceiling in the settings');
   const request = page.querySelector('#poolRequestsBody tr').textContent;
   assert.match(request, /Win domain — A43 #42/);
   assert.match(request, /Waiting for VMs to be prepared/);
@@ -76,11 +77,6 @@ test('pool page: actions call the right API', async t => {
   const { window, document, calls, page } = await setup(t);
   await click(window, page.querySelector('[data-pool-action="cancel-lab"]'));
   assert.deepEqual(calls.find(c => c.url.includes('cancel-pool-wait')), { url: '/api/lifecycle/deployments/lab-1/cancel-pool-wait', method: 'POST', body: null });
-  calls.promptAnswer = 'P0 + e2e dev 2026-11-20';
-  await click(window, page.querySelector(`[data-pool-action="qualify"][data-template="${tW11}"]`));
-  assert.deepEqual(calls.find(c => c.url.endsWith('/qualify')).body, { note: 'P0 + e2e dev 2026-11-20' });
-  await click(window, page.querySelector(`[data-pool-action="disable"][data-template="${tWin}"]`));
-  assert.deepEqual(calls.find(c => c.url.endsWith('/enabled')).body, { enabled: false });
   calls.promptAnswer = '3';
   await click(window, page.querySelector('[data-pool-action="limit"]'));
   assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/limits').body, { category: 'clone', scope: 'cluster', maxActive: 3 });
@@ -89,17 +85,17 @@ test('pool page: actions call the right API', async t => {
   // Template configuration form.
   await click(window, page.querySelector(`[data-pool-action="configure"][data-template="${tWin}"]`));
   assert.equal(document.getElementById('poolTemplateForm').hidden, false);
-  document.getElementById('poolReadyTarget').value = '3';
+  document.getElementById('poolMaxParallel').value = '3';
   document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
   assert.deepEqual(calls.find(c => c.url === `/api/windows-pool/templates/${tWin}` && c.method === 'PUT').body,
-    { sourceTemplateVmid: 147, node: 'peda-pve2', storage: 'ceph-pool', readyTarget: 3, maxCapacity: 4, maxParallelPreparations: 2 });
+    { node: 'peda-pve2', storage: 'ceph-pool', maxParallelPreparations: 3 });
   // Global settings.
   document.getElementById('poolPaused').checked = true;
   document.getElementById('poolDnsServers').value = '10.0.0.1; 10.0.0.2';
   document.getElementById('poolSettingsForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'], vmidMin: 70000, vmidMax: 79999 });
+  assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'], vmidMin: 70000, vmidMax: 79999, maxCapacity: 40 });
 });
 
 test('pool page: visible errors next to the form, warnings, unconfigured template configurable', async t => {
@@ -116,20 +112,19 @@ test('pool page: visible errors next to the form, warnings, unconfigured templat
   overview.templates[0].config.readyTarget = 2;
   // Inconsistent configuration: refused BEFORE sending, message next to the form.
   await click(window, page.querySelector(`[data-pool-action="configure"][data-template="${tW11}"]`));
-  document.getElementById('poolReadyTarget').value = '5';
-  document.getElementById('poolMaxCapacity').value = '4';
+  document.getElementById('poolStorage').value = '';
   const before = calls.length;
   document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
   assert.equal(calls.length, before, 'no request sent');
   const templateStatus = document.getElementById('poolTemplateStatus');
   assert.equal(templateStatus.hidden, false);
-  assert.match(templateStatus.textContent, /Not saved: the ready reserve \(5\) must not exceed the maximum capacity \(4\)/);
+  assert.match(templateStatus.textContent, /Not saved: storage is required/);
   // Server error: displayed next to the form (no longer only at the top of the page).
   const failingFetch = globalThis.fetch;
   globalThis.fetch = async (url, options = {}) => (options.method === 'PUT'
     ? { ok: false, json: async () => ({ error: 'node: Invalid' }) } : failingFetch(url, options));
-  document.getElementById('poolReadyTarget').value = '2';
+  document.getElementById('poolStorage').value = 'ceph-pool';
   document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
   assert.match(templateStatus.textContent, /Not saved: node: Invalid/);

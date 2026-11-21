@@ -41,7 +41,7 @@ test('Windows pool: replacement of the VMs in error during the assignment', { sk
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, status TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());`);
-    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '035-windows-pool-replacements.sql']) {
+    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8')); // 035 replayed: idempotent
     }
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-test'`);

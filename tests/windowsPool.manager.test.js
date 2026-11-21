@@ -34,8 +34,8 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8'));
-    await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'labs-test'`);
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'labs-test', max_capacity = 6`); // global ceiling (migration 036)
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 2 WHERE category = 'clone'`);
     const templateId = randomUUID();
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'fr')`, [templateId]);
@@ -95,6 +95,7 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
 
     await t.test('fatal bootstrap and connected NIC: quarantine, never ready', async () => {
       await db.query(`UPDATE windows_pool_templates SET ready_target = 0, max_capacity = 8`);
+      await db.query('UPDATE windows_pool_settings SET max_capacity = 8'); // global ceiling (migration 036)
       const deploymentId = randomUUID();
       await db.query('INSERT INTO lab_deployments VALUES ($1)', [deploymentId]);
       await db.query(`INSERT INTO windows_pool_requests (id, deployment_id, kind, demand) VALUES ($1, $2, 'deploy', $3)`,
@@ -152,6 +153,7 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
 
     await t.test('new revision: old ready VMs drained and destroyed, replaced', async () => {
       await db.query(`UPDATE windows_pool_templates SET ready_target = 2, max_capacity = 4, revision = 2`);
+      await db.query('UPDATE windows_pool_settings SET max_capacity = 4'); // global ceiling (migration 036)
       const oldReady = (await db.query(`SELECT vmid FROM windows_pool_vms WHERE state = 'ready'`)).rows.map(r => r.vmid);
       await until(manager, async () => {
         const rows = (await db.query(`SELECT revision, state FROM windows_pool_vms WHERE state IN ('ready','deleting','creating','preparing')`)).rows;
@@ -164,6 +166,7 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
       const down = fakeProxmox();
       down.stats.storageDown = true;
       await db.query(`UPDATE windows_pool_templates SET ready_target = 3, max_capacity = 5`);
+      await db.query('UPDATE windows_pool_settings SET max_capacity = 5'); // global ceiling (migration 036)
       const m = createPoolManager({ db, proxmox: createPoolProxmox(down.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'test-5', log: quiet,
         options: fast });
       const before = (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms`)).rows[0].n;
@@ -179,6 +182,7 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
     await t.test('preparation timeout: quarantine', async () => {
       const slow = fakeProxmox({ prepMs: 60_000 });
       await db.query(`UPDATE windows_pool_templates SET ready_target = 3, max_capacity = 8, preparation_timeout_seconds = 300`);
+      await db.query('UPDATE windows_pool_settings SET max_capacity = 8'); // global ceiling (migration 036)
       // Simulated clock: +301 s once the VM is preparing.
       let offset = 0;
       const clocked = createPoolManager({ db, proxmox: createPoolProxmox(slow.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'test-4', log: quiet,

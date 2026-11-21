@@ -258,6 +258,19 @@
                   <input type="checkbox" name="fullClone">
                   <span>Use full clone instead of linked clone</span>
                 </label>
+                <fieldset id="templatePoolFieldset" class="field pool-model-fieldset" hidden>
+                  <legend>Windows pool</legend>
+                  <label class="switch">
+                    <input type="checkbox" name="poolEnabled">
+                    <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                    <span class="switch-label">Enabled: labs take VMs prepared in advance instead of cloning them</span>
+                  </label>
+                  <label class="field">
+                    <span>VMs ready in the pool</span>
+                    <input type="number" name="poolReadyTarget" min="0" max="500" step="1" value="0">
+                  </label>
+                  <p class="muted" id="templatePoolInfo">Disabling destroys the VMs prepared for this model (VMs already in labs are not affected). Placement, storage and the pool ceiling are on the Windows pool page.</p>
+                </fieldset>
                 <div class="split">
                   <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
                   <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
@@ -553,6 +566,7 @@
               <label>Proxmox resource pool of the stock (prepared VMs) <input id="poolProxmoxPool" type="text" placeholder="pool-dev (dev) / pool (prod)" pattern="[A-Za-z0-9._\-]{1,64}"></label>
               <p class="muted">Once assigned to a lab, a VM moves to the labs resource pool (Terraform <code>vm_pool</code> setting: labs-dev / labs).</p>
               <label>DNS servers (comma-separated) <input id="poolDnsServers" type="text" placeholder="195.186.4.162, 195.186.4.163"></label>
+              <label>Maximum VMs in the pool (all templates: in preparation + ready) <input id="poolMaxCapacity" type="number" min="1" max="2000" step="1" required></label>
               <label>First VMID of the pool <input id="poolVmidMin" type="number" min="100" step="1" placeholder="70000 (dev) / 80000 (prod)" required></label>
               <label>Last VMID of the pool <input id="poolVmidMax" type="number" min="100" step="1" placeholder="79999 (dev) / 89999 (prod)" required></label>
               <p class="muted" id="poolVmidRange">Dev and prod share the same Proxmox cluster: their ranges must not overlap (dev 70000–79999, prod 80000–89999). Never inside the Terraform labs (10000–60999).</p>
@@ -565,22 +579,18 @@
           <article class="panel" aria-labelledby="poolTemplatesTitle">
             <p class="eyebrow">Templates</p>
             <h3 id="poolTemplatesTitle">Windows templates</h3>
-            <p class="muted">Lowering the ready reserve destroys the surplus of ready VMs (beyond the reserve and the demand of waiting labs); disabling a template destroys its ready VMs. VMs already in labs are never affected.</p>
-            <p class="muted">A template must be qualified for its current revision before it can be enabled. Changing its Proxmox source template creates a new revision and disables it until it is qualified again.</p>
+            <p class="muted">Enable/disable a template and set its number of ready VMs on the <a href="#/models">VM Models</a> page. Lowering it destroys the surplus of ready VMs (beyond the demand of waiting labs); disabling destroys the prepared VMs. VMs already in labs are never affected. Changing the Proxmox VMID of a model replaces its prepared VMs (new revision).</p>
             <div class="table-wrap">
               <table class="queue-table pool-templates-table">
-                <thead><tr><th scope="col">Template</th><th scope="col">State</th><th scope="col">Ready</th><th scope="col">Preparing</th><th scope="col">Reserved</th><th scope="col">In labs</th><th scope="col">Errors</th><th scope="col">Reserve / ceiling</th><th scope="col">Actions</th></tr></thead>
+                <thead><tr><th scope="col">Template</th><th scope="col">State</th><th scope="col">Ready</th><th scope="col">Preparing</th><th scope="col">Reserved</th><th scope="col">In labs</th><th scope="col">Errors</th><th scope="col">Ready target</th><th scope="col">Actions</th></tr></thead>
                 <tbody id="poolTemplatesBody"><tr><td colspan="9" class="muted">Loading…</td></tr></tbody>
               </table>
             </div>
             <form id="poolTemplateForm" class="pool-template-form" hidden>
               <h4 id="poolTemplateFormTitle">Template configuration</h4>
               <input type="hidden" id="poolTemplateId">
-              <label>Proxmox source template VMID <input id="poolSourceVmid" type="number" min="100" required></label>
               <label>Node <input id="poolNode" type="text" pattern="[A-Za-z0-9._\-]{1,64}" placeholder="automatic" title="Leave empty for automatic placement (online node with the most free memory; HA moves the VMs afterwards)"></label>
               <label>Storage <input id="poolStorage" type="text" required pattern="[A-Za-z0-9._\-]{1,64}"></label>
-              <label>Ready reserve <input id="poolReadyTarget" type="number" min="0" max="500" required></label>
-              <label>Maximum capacity <input id="poolMaxCapacity" type="number" min="1" max="500" required></label>
               <label>Parallel preparations <input id="poolMaxParallel" type="number" min="1" max="32" required></label>
               <div class="inline-actions"><button type="submit" class="btn btn-primary">Save</button><button type="button" id="poolTemplateCancel" class="btn btn-secondary">Cancel</button></div>
             </form>

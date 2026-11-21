@@ -28,8 +28,8 @@ import {
 } from '../lib/terraformSettings.js';
 import { fetchActiveAssignments, overlayAssignments, purgeDeploymentPoolRecords } from '../lib/windowsPool/deployment.js';
 import {
-  PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, configureTemplate, qualifyTemplate,
-  setTemplateEnabled, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
+  PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, configureTemplate, setTemplatePool,
+  syncTemplateModel, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
 } from '../lib/windowsPool/admin.js';
 import { createHttpRequest, createPoolProxmox } from '../lib/windowsPool/proxmox.js';
 import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
@@ -847,6 +847,10 @@ const mapTemplate = row => ({
   language: row.language ?? 'en',
   proxmoxTemplateVmid: row.proxmox_template_vmid,
   fullClone: Boolean(row.full_clone),
+  // Windows pool (VM Models page): activation and number of ready VMs; null = never configured.
+  windowsPool: row.pool_enabled == null ? null : {
+    enabled: Boolean(row.pool_enabled), readyTarget: Number(row.pool_ready_target ?? 0), ready: Number(row.pool_ready ?? 0)
+  },
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at
 });
@@ -3427,7 +3431,17 @@ app.get(
   '/api/templates',
   auth.requireRole(auth.ROLE_GROUPS.LABS),
   wrapAsync(async (req, res) => {
-    const result = await dbPool.query('SELECT * FROM vm_templates ORDER BY name ASC');
+    let result;
+    try {
+      result = await dbPool.query(
+        `SELECT t.*, p.enabled AS pool_enabled, p.ready_target AS pool_ready_target,
+                (SELECT COUNT(*)::int FROM windows_pool_vms v WHERE v.template_id = t.id AND v.state = 'ready') AS pool_ready
+           FROM vm_templates t LEFT JOIN windows_pool_templates p ON p.template_id = t.id
+          ORDER BY t.name ASC`);
+    } catch (error) {
+      if (error?.code !== '42P01') throw error; // pool tables absent (migration 032 not applied)
+      result = await dbPool.query('SELECT * FROM vm_templates ORDER BY name ASC');
+    }
     res.json(result.rows.map(mapTemplate));
   })
 );
@@ -3499,6 +3513,8 @@ app.put(
       res.status(404).json({ error: 'vm model not found' });
       return;
     }
+    // Windows pool: follows the Proxmox VMID of the model (new revision), disabled if no longer Windows.
+    await syncTemplateModel(dbPool, req.params.id, { osType: parsed.data.osType, proxmoxTemplateVmid: parsed.data.proxmoxTemplateVmid });
 
     res.json(mapTemplate(result.rows[0]));
   })
@@ -4094,7 +4110,6 @@ const sendPoolAdminError = (res, error) => {
   }
   throw error;
 };
-const poolActor = req => getRequestUser(req)?.email || getRequestUser(req)?.name || (auth.enabled ? 'unknown' : 'local');
 
 app.get('/api/windows-pool', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (_req, res) => {
   res.set('Cache-Control', 'no-store');
@@ -4112,14 +4127,38 @@ app.put('/api/windows-pool/templates/:templateId', auth.requireRole(auth.ROLE_GR
   res.json({ ...result, overview: await getPoolOverview(dbPool) });
 }));
 
-app.post('/api/windows-pool/templates/:templateId/qualify', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
-  try { await qualifyTemplate(dbPool, req.params.templateId, { actor: poolActor(req), note: req.body?.note }); } catch (error) { return sendPoolAdminError(res, error); }
-  res.json(await getPoolOverview(dbPool));
-}));
+// Storage of the disk of a Proxmox template ("ceph-pool:base-147-disk-0,..." -> "ceph-pool"): the
+// linked clones of the pool live on it. null if unknown (template absent, Proxmox unreachable).
+const detectTemplateStorage = async vmid => {
+  try {
+    const proxmox = getDashboardPoolProxmox();
+    const guest = await proxmox.findGuest(vmid);
+    if (!guest) return null;
+    const config = await proxmox.getConfig(guest.node, vmid);
+    const disk = Object.keys(config).filter(key => /^(scsi|virtio|sata|ide)d+$/.test(key))
+      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(key => String(config[key])).find(value => !/media=cdrom/.test(value) && /^[A-Za-z0-9._-]+:/.test(value));
+    return disk ? disk.split(':')[0] : null;
+  } catch (error) {
+    console.warn(`Unable to detect the storage of Proxmox template ${vmid}: ${error.message}`);
+    return null;
+  }
+};
 
-app.post('/api/windows-pool/templates/:templateId/enabled', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
-  try { await setTemplateEnabled(dbPool, req.params.templateId, req.body?.enabled === true); } catch (error) { return sendPoolAdminError(res, error); }
-  res.json(await getPoolOverview(dbPool));
+// VM Models page (user decision 2026-11-21): Enable/Disable + number of ready VMs of a Windows model.
+app.put('/api/templates/:id/windows-pool', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  const body = { enabled: req.body?.enabled === true, readyTarget: Number(req.body?.readyTarget ?? 0) };
+  if (body.enabled) {
+    const configured = (await dbPool.query('SELECT 1 FROM windows_pool_templates WHERE template_id = $1', [req.params.id])).rowCount > 0;
+    if (!configured) {
+      const template = (await dbPool.query('SELECT proxmox_template_vmid FROM vm_templates WHERE id = $1', [req.params.id])).rows[0];
+      const storage = template ? await detectTemplateStorage(template.proxmox_template_vmid) : null;
+      if (storage) body.storage = storage;
+    }
+  }
+  let result;
+  try { result = await setTemplatePool(dbPool, req.params.id, body); } catch (error) { return sendPoolAdminError(res, error); }
+  res.json({ ...result, overview: await getPoolOverview(dbPool) });
 }));
 
 app.put('/api/windows-pool/limits', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {

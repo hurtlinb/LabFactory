@@ -37,8 +37,8 @@ test('Windows pool reservation and waiting (P3)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8'));
-    await db.query(`UPDATE windows_pool_settings SET paused = false`);
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(`UPDATE windows_pool_settings SET paused = false, max_capacity = 8`); // global ceiling (migration 036)
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 4 WHERE category = 'clone'`);
     const tA = randomUUID(), tB = randomUUID();
     for (const [id, vmid] of [[tA, 147], [tB, 148]]) {
@@ -98,7 +98,7 @@ test('Windows pool reservation and waiting (P3)', { skip: !url }, async t => {
         { step: () => manager.tick(), timeoutMs: 20_000 });
       await manager.drain();
       await db.query(`UPDATE windows_pool_templates SET ready_target = 0 WHERE template_id = $1`, [tA]);
-      const tooBig = await request([{ templateId: tA, count: 9 }]); // > ceiling 4
+      const tooBig = await request([{ templateId: tA, count: 9 }]); // > global ceiling 8
       const small = await request([{ templateId: tA, count: 1 }]);
       await coordinator.reconcile();
       assert.equal((await status(tooBig.id)).blocked_reason, 'DEMAND_EXCEEDS_CAPACITY');
@@ -167,8 +167,12 @@ test('Windows pool reservation and waiting (P3)', { skip: !url }, async t => {
       // The manager destroys the non-intact VMs.
       await waitFor(async () => !px.guests.has(reconnected.vmid) && !px.guests.has(foreignMarker.vmid), { step: () => manager.tick(), timeoutMs: 20_000 });
       await manager.drain();
-      assert.ok(px.guests.has(intact.vmid));
-      assert.equal((await db.query('SELECT state FROM windows_pool_vms WHERE id = $1', [intact.id])).rows[0].state, 'ready');
+      // The intact VM returned to the stock (journal). It may then be destroyed only as a surplus:
+      // the manager may have prepared a newer VM for the reserve meanwhile (most recent kept).
+      const journal = (await db.query('SELECT from_state, to_state, detail FROM windows_pool_vm_events WHERE pool_vm_id = $1 ORDER BY id', [intact.id])).rows;
+      assert.ok(journal.some(e => e.from_state === 'reserved' && e.to_state === 'ready'), 'returned to the stock by the cancellation');
+      const afterRelease = journal.slice(journal.findIndex(e => e.from_state === 'reserved' && e.to_state === 'ready') + 1);
+      assert.ok(afterRelease.every(e => e.to_state !== 'deleting' || e.detail?.code === 'STOCK_SURPLUS'), 'never destroyed as non-intact');
     });
 
     await t.test('concurrent coordinators (replicas): no double reservation', async () => {
