@@ -11,7 +11,8 @@ import { createPoolAssigner } from '../lib/windowsPool/assignment.js';
 import { awaitPoolReservation } from '../lib/windowsPool/waiting.js';
 import {
   classifyDeploymentVms, ensureRunPoolRequest, buildAssignmentSlots, runPoolAssignments,
-  finishRunPoolRequest, applyAssignmentsToPayload, terraformManagedVms, teardownDeploymentPool, retireReplacedVms
+  finishRunPoolRequest, applyAssignmentsToPayload, terraformManagedVms, teardownDeploymentPool, retireReplacedVms,
+  createPoolReplacer
 } from '../lib/windowsPool/deployment.js';
 import { hostname as osHostname } from 'node:os';
 import path from 'node:path';
@@ -1618,14 +1619,20 @@ const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxP
   }
   const assigner = getPoolAssigner();
   const limited = { assign: (...args) => withPoolAssignSlot(() => assigner.assign(...args)), warmUp: assigner.warmUp };
-  return { promise: runPoolAssignments({ assigner: limited, plan, signal, concurrency: POOL_ASSIGN_CONCURRENCY }) };
+  // A VM in error is quarantined and replaced by another one (up to 10% of the pool VMs of the
+  // lab, at least 1) instead of failing the lab.
+  const replace = createPoolReplacer({ db: dbPool, requestId: poolContext.request.id, total: plan.length, signal });
+  return { promise: runPoolAssignments({ assigner: limited, plan, signal, concurrency: POOL_ASSIGN_CONCURRENCY, replace }) };
 };
 
 // Waits for the assignments, closes the run request and returns the VMIDs to add to the
 // ready ones. Throws if a slot could not be assigned (lab failed, as a readiness failure).
 const settlePoolAssignments = async ({ poolContext, assignmentPromise }) => {
   if (!assignmentPromise) return { assigned: [] };
-  const { assigned, failed } = await assignmentPromise;
+  const { assigned, failed, replacements = [] } = await assignmentPromise;
+  for (const r of replacements) {
+    console.warn(`Windows pool: ${r.slot ?? '?'} - VM ${r.vmid} quarantined (${r.code}) and replaced: ${r.message}`);
+  }
   await finishRunPoolRequest(dbPool, poolContext.request.id, { allAssigned: failed.length === 0 });
   if (failed.length) {
     throw new Error(`Windows pool assignment failed for ${failed.map(item => `${item.payloadVm.name} (VM ${item.vmid}: ${item.error?.code ?? 'ERROR'} ${item.error?.message ?? ''})`).join('; ')}`);

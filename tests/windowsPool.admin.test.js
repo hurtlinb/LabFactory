@@ -22,7 +22,7 @@ test('Windows pool administration (P6)', { skip: !url }, async t => {
       CREATE TABLE lab_blueprints (id UUID PRIMARY KEY, name TEXT);
       CREATE TABLE classrooms (id UUID PRIMARY KEY, name TEXT);
       CREATE TABLE lab_deployments (id UUID PRIMARY KEY, status TEXT, deployment_number BIGINT, blueprint_id UUID, classroom_id UUID, last_job_id TEXT);`);
-    for (const file of ['032-windows-pool.sql', '033-windows-pool-qualification.sql', '033-windows-pool-qualification.sql']) {
+    for (const file of ['032-windows-pool.sql', '033-windows-pool-qualification.sql', '033-windows-pool-qualification.sql', '035-windows-pool-replacements.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8')); // 033 replayed: idempotent
     }
     const tWin = randomUUID(), tLinux = randomUUID();

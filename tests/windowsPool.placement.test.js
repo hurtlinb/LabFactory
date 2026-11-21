@@ -41,7 +41,7 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY);`);
-    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '034-windows-pool-auto-placement.sql']) {
+    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8')); // 034 replayed: idempotent
     }
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-test'`);

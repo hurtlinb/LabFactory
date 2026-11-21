@@ -34,7 +34,7 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8'));
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'labs-test'`);
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 2 WHERE category = 'clone'`);
     const templateId = randomUUID();

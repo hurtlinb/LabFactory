@@ -25,7 +25,7 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8'));
     // Stock in the pool's Proxmox pool ("pool-dev" in dev, "pool" in prod), labs in "labs-dev"/"labs".
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-dev'`);
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 2 WHERE category = 'assign'`);
