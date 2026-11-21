@@ -58,7 +58,7 @@ test('pool page: admin navigation, counters, state and missing needs', async t =
   assert.match(rows[1], /Disabled.*rev\. 2/);
   // Activation on the VM Models page (2026-11-21): neither qualification nor Enable/Disable here.
   assert.ok(!page.querySelector('[data-pool-action="qualify"], [data-pool-action="enable"], [data-pool-action="disable"]'));
-  assert.match(page.textContent, /VM Models/);
+  assert.match(page.textContent, /VM Templates/);
   assert.equal(document.getElementById('poolMaxCapacity').value, '40', 'global ceiling in the settings');
   const request = page.querySelector('#poolRequestsBody tr').textContent;
   assert.match(request, /Win domain — A43 #42/);

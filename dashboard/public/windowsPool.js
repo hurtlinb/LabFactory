@@ -86,7 +86,7 @@ function renderSettings() {
   $('poolVmidMax').value = s.vmidMax ?? '';
 }
 
-// Activation: VM Models page (user decision 2026-11-21).
+// Activation: VM Templates page (user decision 2026-11-21).
 function templateState(t) {
   if (!t.configured) return '<span class="muted">Not used</span>';
   return `${t.config.enabled ? '<strong>Enabled</strong>' : 'Disabled'} <span class="muted">· rev. ${t.config.revision}</span>`;
@@ -240,7 +240,7 @@ function bind() {
     if (problems.length) return status(`Not saved: ${problems.join('; ')}.`, 'danger', 'poolTemplateStatus');
     void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(templateId)}`, { method: 'PUT', body: JSON.stringify(body) }), result => {
       $('poolTemplateForm').hidden = true;
-      return result.created ? 'Template configured. Enable it on the VM Models page.' : 'Template configuration saved.';
+      return result.created ? 'Template configured. Enable it on the VM Templates page.' : 'Template configuration saved.';
     }, 'poolTemplateStatus');
   });
   $('poolTemplateCancel')?.addEventListener('click', () => { $('poolTemplateForm').hidden = true; });

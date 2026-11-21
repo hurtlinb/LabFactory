@@ -50,7 +50,7 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails };');
+  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails, renderModelList, setActiveView };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
@@ -403,7 +403,7 @@ test('modules search and edit dialog preserve data when cancelled and reset for 
   const search = document.getElementById('moduleSearch');
   search.value = 'Linux';
   search.dispatchEvent(new w.Event('input'));
-  assert.equal(document.querySelectorAll('.module-card').length, 1);
+  assert.equal(document.querySelectorAll('#courseList .module-card').length, 1);
   document.querySelector('.edit-course-button').click();
   const dialog = document.getElementById('moduleDialog');
   const number = document.getElementById('courseForm').elements.courseNumber;
@@ -561,4 +561,48 @@ test('lab card of a deployment using the Windows pool: transfers instead of crea
   assert.equal(helpers.deploymentProgressText(legacy, 4, 1), 'Created: 3/4 · Started: 2/4 · Ready: 1/4. Creating VMs.');
   assert.equal(helpers.deploymentStatusLabel({ status: 'deploying', poolProgress: { total: 22, assigned: 22, active: false } }, 22), 'Creating VMs', 'transfers done: usual label');
   assert.equal(helpers.labStatusLabel('waiting_for_pool'), 'Waiting for the VM pool');
+});
+
+test('VM Templates page: Modules-style cards, filters, modal editor, pool section for Windows only', async t => {
+  const { api, document, w } = setup(t);
+  await api.bootstrap();
+  api.state.templates = [
+    { id: 'w22', name: 'Windows 2022 v2', description: 'Domain servers', osType: 'windows-server', language: 'fr', proxmoxTemplateVmid: 147, fullClone: false,
+      windowsPool: { enabled: true, readyTarget: 4, ready: 3 }, updatedAt: new Date().toISOString() },
+    { id: 'ubu', name: 'Ubuntu 24.04', description: '', osType: 'ubuntu', language: 'en', proxmoxTemplateVmid: 9000, fullClone: true, windowsPool: null, updatedAt: new Date().toISOString() }
+  ];
+  api.setActiveView('models');
+  api.renderModelList();
+  assert.equal(document.querySelector('.page[data-view="models"] h2').textContent, 'VM Templates');
+  assert.match(document.querySelector('nav [data-view="models"]').textContent, /VM Templates/);
+  const cards = [...document.querySelectorAll('#modelList .module-card.template-card')];
+  assert.equal(cards.length, 2);
+  const text = cards[0].textContent.replace(/\s+/g, ' ');
+  assert.match(text, /Windows 2022 v2 Windows Server Domain servers Proxmox VMID ?147 Language ?FR Clone ?Linked clone Windows pool ?Enabled · 3\/4 ready .* Edit/);
+  assert.doesNotMatch(cards[1].textContent, /Windows pool/, 'no pool row for a Linux template');
+  // Filters.
+  document.getElementById('templateOsFilter').value = 'ubuntu';
+  document.getElementById('templateOsFilter').dispatchEvent(new w.Event('change'));
+  assert.equal(document.querySelectorAll('#modelList .template-card').length, 1);
+  document.getElementById('templateOsFilter').value = '';
+  document.getElementById('templateSearch').value = '147';
+  document.getElementById('templateSearch').dispatchEvent(new w.Event('input'));
+  assert.deepEqual([...document.querySelectorAll('#modelList .template-card strong')].map(e => e.textContent.trim()), ['Windows 2022 v2']);
+  // Modal editor: Edit opens it filled, pool section shown for Windows; Cancel closes it.
+  document.querySelector('#modelList .edit-model-button').click();
+  const dialog = document.getElementById('templateDialog');
+  assert.equal(dialog.open, true);
+  assert.equal(document.getElementById('templateDialogTitle').textContent, 'Edit template');
+  assert.equal(document.getElementById('templateForm').elements.proxmoxTemplateVmid.value, '147');
+  assert.equal(document.getElementById('templatePoolFieldset').hidden, false);
+  assert.equal(document.getElementById('templateForm').elements.poolReadyTarget.value, '4');
+  document.getElementById('cancelTemplateEditButton').click();
+  assert.equal(dialog.open, false);
+  // Add: empty form, Linux by default, no pool section.
+  document.getElementById('newTemplateButton').click();
+  assert.equal(dialog.open, true);
+  assert.equal(document.getElementById('templateDialogTitle').textContent, 'Add template');
+  assert.equal(document.getElementById('templatePoolFieldset').hidden, true);
+  dialog.close();
+  assert.equal(api.state.isTemplateEditorVisible, false, 'Escape/close = Cancel');
 });

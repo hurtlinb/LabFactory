@@ -185,6 +185,18 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .module-card-footer .icon-btn { width: 28px; height: 28px; flex-basis: 28px; color: var(--danger); }
 .module-card .ui-icon { width: 14px; height: 14px; flex-basis: 14px; }
 .module-dialog { width: min(480px, calc(100vw - 28px)); }
+/* VM Templates: same cards as the Modules page, details instead of the linked blueprints. */
+.template-card.active { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
+.template-details { min-height: 0; margin: 0; padding: 6px 14px; display: grid; align-content: start; background: var(--surface-soft); font-size: 12px; overflow: hidden; }
+.template-details > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.template-details > div:last-child { border-bottom: 0; }
+.template-details dt { color: var(--text-secondary); }
+.template-details dd { margin: 0; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-details dd.muted { font-weight: 400; }
+.template-details dd.template-pool-on { color: var(--accent); }
+.template-dialog { width: min(560px, calc(100vw - 28px)); }
+.template-dialog .modal-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+.dialog-actions { justify-content: flex-end; }
 .deploy-lab-dialog { width: min(520px, calc(100vw - 28px)); }
 .deploy-lab-dialog .split { grid-template-columns: 1fr; }
 .blueprint-deploy-button { min-height: 30px; padding: 5px 8px; gap: 4px; font-size: 11px; }

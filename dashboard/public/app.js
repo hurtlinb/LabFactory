@@ -84,7 +84,7 @@ const newTemplateButton = document.getElementById('newTemplateButton');
 const templateForm = document.getElementById('templateForm');
 const templateSubmitButton = document.getElementById('templateSubmitButton');
 const cancelTemplateEditButton = document.getElementById('cancelTemplateEditButton');
-const templateEditorPanel = document.getElementById('templateEditorPanel');
+const templateEditorPanel = document.getElementById('templateDialog'); // modal editor (Modules page layout)
 const newClassroomButton = document.getElementById('newClassroomButton');
 const classroomForm = document.getElementById('classroomForm');
 const classroomEditorPanel = document.getElementById('classroomEditorPanel');
@@ -180,7 +180,7 @@ const PAGE_TITLES = {
   'lifecycle':      { title: 'Labs',        breadcrumb: 'Labs' },
   'admin-users':    { title: 'Users',       breadcrumb: 'Administration' },
   'admin-courses':  { title: 'Modules',     breadcrumb: 'Labs' },
-  'models':         { title: 'VM Models',   breadcrumb: 'Administration' },
+  'models':         { title: 'VM Templates', breadcrumb: 'Administration' },
   'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
   'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
   'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
@@ -353,8 +353,13 @@ function renderBlueprintWorkspace() {
 }
 
 function renderTemplateEditor() {
-  if (templateEditorPanel) {
-    templateEditorPanel.hidden = !state.isTemplateEditorVisible;
+  if (!templateEditorPanel) return;
+  const title = document.getElementById('templateDialogTitle');
+  if (title) title.textContent = state.editingTemplateId ? 'Edit template' : 'Add template';
+  if (state.isTemplateEditorVisible && !templateEditorPanel.open) {
+    if (typeof templateEditorPanel.showModal === 'function') templateEditorPanel.showModal(); else templateEditorPanel.setAttribute('open', '');
+  } else if (!state.isTemplateEditorVisible && templateEditorPanel.open) {
+    if (typeof templateEditorPanel.close === 'function') templateEditorPanel.close(); else templateEditorPanel.removeAttribute('open');
   }
 }
 
@@ -720,7 +725,7 @@ function renderTemplates() {
 
   templatePalette.innerHTML = `
     <div id="paletteVmPanel" role="tabpanel" aria-labelledby="paletteVmTab" class="vm-lib-section" ${activePaletteTab === 'vm' ? '' : 'hidden'}>
-      ${groupsHtml || '<p class="vm-lib-group-label">VMs</p><p class="placeholder">No VM models yet.</p>'}
+      ${groupsHtml || '<p class="vm-lib-group-label">VMs</p><p class="placeholder">No VM templates yet.</p>'}
     </div>
     <div id="paletteCustomizationPanel" role="tabpanel" aria-labelledby="paletteCustomizationTab" class="vm-lib-section" ${activePaletteTab === 'customization' ? '' : 'hidden'}>
       ${custHtml}
@@ -764,42 +769,51 @@ function renderTemplates() {
 
 function renderModelList() {
   if (!state.templates.length) {
-    modelList.innerHTML = '<p class="placeholder">No VM models yet.</p>';
+    modelList.innerHTML = '<p class="placeholder">No VM templates yet. Add one for each Proxmox template the labs clone.</p>';
     return;
   }
-
+  const osFilter = filterValue('templateOsFilter');
+  // Cards in the Modules page style: header, description, details, footer (date, edit, delete).
   modelList.innerHTML = state.templates
-    .map(
-      template => `
-        <article class="blueprint-item${template.id === state.editingTemplateId ? ' active' : ''}" data-template-id="${template.id}">
-          <div class="panel-head">
-            <div>
-              <strong>${escapeHtml(template.name)}</strong>
-              <p class="muted">${escapeHtml(template.description || 'No description')}</p>
-            </div>
-            <div class="inline-actions">
-              <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
-              <span class="mini-pill">${escapeHtml(getLanguageLabel(template.language))}</span>
-              <span class="pill">VMID ${template.proxmoxTemplateVmid}</span>
-            </div>
+    .filter(template => (!osFilter || template.osType === osFilter) &&
+      matchesSearch(filterValue('templateSearch'), template.name, template.description, String(template.proxmoxTemplateVmid)))
+    .map(template => {
+      const pool = template.windowsPool;
+      const isWindows = ['windows11', 'windows-server'].includes(template.osType);
+      const poolText = !isWindows ? null : pool?.enabled ? `Enabled · ${pool.ready}/${pool.readyTarget} ready` : 'Disabled';
+      return `
+        <article class="module-card template-card${template.id === state.editingTemplateId ? ' active' : ''}" data-template-id="${escapeHtmlAttr(template.id)}">
+          <div class="module-card-header">
+            <strong title="${escapeHtmlAttr(template.name)}">${escapeHtml(template.name)}</strong>
+            <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
           </div>
-          <div class="panel-head">
-            <div class="template-meta">
-              <span class="mini-pill">${template.fullClone ? 'full clone' : 'linked clone'}</span>
-              ${template.windowsPool?.enabled ? `<span class="mini-pill pool-pill" title="Windows pool enabled">Pool · ${template.windowsPool.ready}/${template.windowsPool.readyTarget} ready</span>` : ''}
-            </div>
-            <button class="icon-btn delete-model-button" type="button" data-template-id="${template.id}" aria-label="Delete VM model">${uiIcon('delete')}</button>
+          <p class="module-description" title="${escapeHtmlAttr(template.description || '')}">${escapeHtml(template.description || 'No description')}</p>
+          <dl class="template-details">
+            <div><dt>Proxmox VMID</dt><dd>${escapeHtml(String(template.proxmoxTemplateVmid))}</dd></div>
+            <div><dt>Language</dt><dd>${escapeHtml(getLanguageLabel(template.language))}</dd></div>
+            <div><dt>Clone</dt><dd>${template.fullClone ? 'Full clone' : 'Linked clone'}</dd></div>
+            ${poolText ? `<div><dt>Windows pool</dt><dd class="${pool?.enabled ? 'template-pool-on' : 'muted'}">${escapeHtml(poolText)}</dd></div>` : ''}
+          </dl>
+          <div class="module-card-footer">
+            <span class="muted" title="${escapeHtmlAttr(new Date(template.updatedAt).toLocaleString())}">${new Date(template.updatedAt).toLocaleDateString()}</span>
+            <button class="btn btn-secondary edit-model-button" type="button" data-template-id="${escapeHtmlAttr(template.id)}" aria-label="Edit template ${escapeHtmlAttr(template.name)}">${uiIcon('edit')} Edit</button>
+            <button class="icon-btn delete-model-button" type="button" data-template-id="${escapeHtmlAttr(template.id)}" aria-label="Delete template ${escapeHtmlAttr(template.name)}">${uiIcon('delete')}</button>
           </div>
-        </article>
-      `
-    )
+        </article>`;
+    })
     .join('');
 
+  if (!modelList.children.length) modelList.innerHTML = '<p class="placeholder">No templates match your search.</p>';
+
+  modelList.querySelectorAll('.edit-model-button').forEach(button => button.addEventListener('click', () => {
+    const template = state.templates.find(item => item.id === button.dataset.templateId);
+    if (template) populateTemplateForm(template);
+  }));
   modelList.querySelectorAll('.delete-model-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       const resource = state.templates.find(item => item.id === button.dataset.templateId);
-      if (!await confirmAction('Delete VM model?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'VM model') + '? This cannot be undone.', 'Delete')) return;
+      if (!await confirmAction('Delete VM template?', 'Delete ' + (resource?.name || 'VM template') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/templates/${button.dataset.templateId}`, { method: 'DELETE' });
@@ -813,7 +827,7 @@ function renderModelList() {
           renderCanvas();
         }
         await loadTemplates();
-        showMessage(globalStatus, 'VM model deleted.', 'success');
+        showMessage(globalStatus, 'VM template deleted.', 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
       } finally {
@@ -822,13 +836,6 @@ function renderModelList() {
     });
   });
 
-  modelList.querySelectorAll('article[data-template-id]').forEach(card => {
-    card.addEventListener('click', () => {
-      const template = state.templates.find(item => item.id === card.dataset.templateId);
-      if (!template) return;
-      populateTemplateForm(template);
-    });
-  });
 }
 
 function renderClassrooms() {
@@ -2664,16 +2671,13 @@ function populateTemplateForm(template) {
   state.editingTemplateId = template.id;
   state.isTemplateEditorVisible = true;
   if (templateSubmitButton) {
-    templateSubmitButton.textContent = 'Save changes';
-  }
-  if (cancelTemplateEditButton) {
-    cancelTemplateEditButton.hidden = false;
+    templateSubmitButton.textContent = 'Save template';
   }
   renderTemplateEditor();
   renderModelList();
 }
 
-// Windows pool section of the VM model editor: Windows models only (user decision 2026-11-21).
+// Windows pool section of the VM template editor: Windows templates only (user decision 2026-11-21).
 function syncTemplatePoolFieldset() {
   const fieldset = document.getElementById('templatePoolFieldset');
   if (!fieldset) return;
@@ -2688,10 +2692,7 @@ function resetTemplateForm({ keepVisible = false } = {}) {
   templateForm.reset();
   syncTemplatePoolFieldset();
   if (templateSubmitButton) {
-    templateSubmitButton.textContent = 'Add model';
-  }
-  if (cancelTemplateEditButton) {
-    cancelTemplateEditButton.hidden = true;
+    templateSubmitButton.textContent = 'Add template';
   }
   renderTemplateEditor();
   renderModelList();
@@ -3502,7 +3503,7 @@ templateForm.addEventListener('submit', async event => {
     ? (pool.enabled !== Boolean(previousPool?.enabled) || (pool.enabled && pool.readyTarget !== (previousPool?.readyTarget ?? 0)))
     : false;
   if (poolChanged && previousPool?.enabled && !pool.enabled &&
-      !window.confirm('Disable the Windows pool for this model? Its prepared VMs will be destroyed (VMs already in labs are not affected).')) {
+      !window.confirm('Disable the Windows pool for this template? Its prepared VMs will be destroyed (VMs already in labs are not affected).')) {
     delete templateForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy');
     return;
   }
@@ -3526,7 +3527,7 @@ templateForm.addEventListener('submit', async event => {
     }
     resetTemplateForm();
     await loadTemplates();
-    showMessage(globalStatus, `${editingTemplateId ? 'VM model updated.' : 'VM model created.'}${poolMessage}`, poolMessage.includes('not changed') ? 'warning' : 'success');
+    showMessage(globalStatus, `${editingTemplateId ? 'VM template updated.' : 'VM template created.'}${poolMessage}`, poolMessage.includes('not changed') ? 'warning' : 'success');
   } catch (error) {
     showMessage(globalStatus, error.message, 'danger');
   } finally { delete templateForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy'); }
@@ -3538,7 +3539,17 @@ cancelTemplateEditButton?.addEventListener('click', () => {
 
 newTemplateButton?.addEventListener('click', () => {
   resetTemplateForm({ keepVisible: true });
+  templateForm.elements.name?.focus();
 });
+// Escape / closing the dialog: same as Cancel (the editor state follows the dialog).
+templateEditorPanel?.addEventListener('close', () => {
+  if (state.isTemplateEditorVisible) resetTemplateForm();
+});
+templateEditorPanel?.addEventListener('cancel', event => {
+  if (templateForm.dataset.busy) event.preventDefault();
+});
+document.getElementById('templateSearch')?.addEventListener('input', renderModelList);
+document.getElementById('templateOsFilter')?.addEventListener('change', renderModelList);
 
 newClassroomButton?.addEventListener('click', () => {
   resetClassroomForm({ keepVisible: true });
@@ -4154,7 +4165,7 @@ function initUx() {
     if (heading) { heading.id ||= `${dialog.id}Title`; dialog.setAttribute('aria-labelledby', heading.id); }
   });
   // Resource cards retain their existing click behavior and expose a named keyboard action.
-  const cards = () => document.querySelectorAll('#blueprintList article[data-blueprint-id], #modelList article[data-template-id], #classroomList article[data-classroom-id]').forEach(card => {
+  const cards = () => document.querySelectorAll('#blueprintList article[data-blueprint-id], #classroomList article[data-classroom-id]').forEach(card => {
     const title = card.querySelector('strong'); if (!title || title.querySelector('button')) return;
     const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = title.textContent;
     button.addEventListener('click', event => { event.stopPropagation(); card.click(); }); title.replaceChildren(button);

@@ -75,7 +75,7 @@
               <line x1="6" x2="6.01" y1="6" y2="6"/>
               <line x1="6" x2="6.01" y1="18" y2="18"/>
             </svg>
-            VM Models
+            VM Templates
           </button>
           <button data-view="classrooms" data-role-group="admin">
             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -185,99 +185,16 @@
 
         </section>
 
-        <!-- ── VM Models ──────────────────────────────────────── -->
+        <!-- ── VM Templates ───────────────────────────────────── -->
         <section class="page" data-view="models" data-role-group="admin" hidden>
-          <div class="builder-grid">
-            <article class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">inventory</p>
-                </div>
-                <button id="newTemplateButton" class="btn btn-ghost" type="button">New</button>
-              </div>
-              <div id="modelList" class="saved-list">
-                <p class="placeholder">Loading models…</p>
-              </div>
-            </article>
-
-            <article id="templateEditorPanel" class="panel" hidden>
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">VM Templates</p>
-                </div>
-              </div>
-              <p class="muted">Each model represents a Terraform clone operation for an existing Proxmox template.</p>
-              <form id="templateForm" class="stack">
-                <label class="field">
-                  <span>Name</span>
-                  <input type="text" name="name" placeholder="VM Ubuntu 24.04" required>
-                </label>
-                <fieldset class="field os-fieldset">
-                  <legend>OS</legend>
-                  <div class="os-choice-grid">
-                    <label class="os-choice-card">
-                      <input type="radio" name="osType" value="windows11" required>
-                      <img src="/assets/os-windows11.png" alt="" aria-hidden="true">
-                      <span>Windows 11</span>
-                    </label>
-                    <label class="os-choice-card">
-                      <input type="radio" name="osType" value="windows-server" required>
-                      <img src="/assets/os-windows-server.png" alt="" aria-hidden="true">
-                      <span>Windows Server</span>
-                    </label>
-                    <label class="os-choice-card">
-                      <input type="radio" name="osType" value="ubuntu" required checked>
-                      <img src="/assets/os-ubuntu.png" alt="" aria-hidden="true">
-                      <span>Ubuntu</span>
-                    </label>
-                    <label class="os-choice-card">
-                      <input type="radio" name="osType" value="other" required>
-                      <img src="/assets/os-other.svg" alt="" aria-hidden="true">
-                      <span>Other</span>
-                    </label>
-                  </div>
-                </fieldset>
-                <div class="split">
-                  <label class="field">
-                    <span>Proxmox VMID</span>
-                    <input type="number" name="proxmoxTemplateVmid" min="1" placeholder="9002" required>
-                  </label>
-                  <label class="field">
-                    <span>Language</span>
-                    <select name="language" required>
-                      <option value="en" selected>EN</option>
-                      <option value="fr">FR</option>
-                    </select>
-                  </label>
-                </div>
-                <label class="field">
-                  <span>Description</span>
-                  <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
-                </label>
-                <label class="checkbox">
-                  <input type="checkbox" name="fullClone">
-                  <span>Use full clone instead of linked clone</span>
-                </label>
-                <fieldset id="templatePoolFieldset" class="field pool-model-fieldset" hidden>
-                  <legend>Windows pool</legend>
-                  <label class="switch">
-                    <input type="checkbox" name="poolEnabled">
-                    <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                    <span class="switch-label">Enabled: labs take VMs prepared in advance instead of cloning them</span>
-                  </label>
-                  <label class="field">
-                    <span>VMs ready in the pool</span>
-                    <input type="number" name="poolReadyTarget" min="0" max="500" step="1" value="0">
-                  </label>
-                  <p class="muted" id="templatePoolInfo">Disabling destroys the VMs prepared for this model (VMs already in labs are not affected). Placement, storage and the pool ceiling are on the Windows pool page.</p>
-                </fieldset>
-                <div class="split">
-                  <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add model</button>
-                  <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
-                </div>
-              <p class="muted">Full clone: independent storage, longer creation. Linked clone: faster and smaller, dependent on the source template.</p></form>
-            </article>
-          </div>
+          <article class="panel">
+            <div class="panel-head"><div><h2>VM Templates</h2><p class="muted">Proxmox templates cloned by the labs. Windows templates can be served by the Windows pool.</p></div><button id="newTemplateButton" type="button" class="btn btn-primary">Add template</button></div>
+            <div class="filter-bar">
+              <label class="field"><span>Search templates</span><input id="templateSearch" type="search" placeholder="Name, description or VMID"></label>
+              <label class="field"><span>OS</span><select id="templateOsFilter"><option value="">All OS</option><option value="windows11">Windows 11</option><option value="windows-server">Windows Server</option><option value="ubuntu">Ubuntu</option><option value="other">Other</option></select></label>
+            </div>
+            <div id="modelList" class="module-grid template-grid" aria-live="polite"><p class="placeholder">Loading templates…</p></div>
+          </article>
         </section>
 
         <!-- ── Blueprints ─────────────────────────────────────── -->
@@ -347,11 +264,11 @@
                 <button id="paletteCustomizationTab" type="button" role="tab" aria-selected="false" aria-controls="paletteCustomizationPanel" tabindex="-1" data-palette-tab="customization"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9 3 1-2h4l1 2 3 2 2 1-1 4v4l1 4-2 1-3 2-1 2h-4l-1-2-3-2-2-1 1-4v-4L4 6l2-1Z"/><circle cx="12" cy="12" r="3"/></svg>Customization</button>
               </div>
               <div id="templatePalette" class="template-palette">
-                <p class="placeholder">No VM models yet.</p>
+                <p class="placeholder">No VM templates yet.</p>
               </div>
             </article>
 
-            <article class="panel blueprint-canvas"><p class="muted">Drag VM models below, then drag customizations onto each VM. All edits are saved with Save blueprint. File uploads also save the blueprint.</p><div id="dropzone" class="dropzone">
+            <article class="panel blueprint-canvas"><p class="muted">Drag VM templates below, then drag customizations onto each VM. All edits are saved with Save blueprint. File uploads also save the blueprint.</p><div id="dropzone" class="dropzone">
                 <div class="dropzone-copy">
                   <p>Drop VM templates here</p>
                   <span>Each drop creates a VM instance inside the lab blueprint.</span>
@@ -579,7 +496,7 @@
           <article class="panel" aria-labelledby="poolTemplatesTitle">
             <p class="eyebrow">Templates</p>
             <h3 id="poolTemplatesTitle">Windows templates</h3>
-            <p class="muted">Enable/disable a template and set its number of ready VMs on the <a href="#/models">VM Models</a> page. Lowering it destroys the surplus of ready VMs (beyond the demand of waiting labs); disabling destroys the prepared VMs. VMs already in labs are never affected. Changing the Proxmox VMID of a model replaces its prepared VMs (new revision).</p>
+            <p class="muted">Enable/disable a template and set its number of ready VMs on the <a href="#/models">VM Templates</a> page. Lowering it destroys the surplus of ready VMs (beyond the demand of waiting labs); disabling destroys the prepared VMs. VMs already in labs are never affected. Changing the Proxmox VMID of a template replaces its prepared VMs (new revision).</p>
             <div class="table-wrap">
               <table class="queue-table pool-templates-table">
                 <thead><tr><th scope="col">Template</th><th scope="col">State</th><th scope="col">Ready</th><th scope="col">Preparing</th><th scope="col">Reserved</th><th scope="col">In labs</th><th scope="col">Errors</th><th scope="col">Ready target</th><th scope="col">Actions</th></tr></thead>
@@ -942,6 +859,77 @@
                 <p id="deploymentDurationEstimate" class="muted" aria-live="polite" hidden></p>
                 <button class="btn btn-primary" type="submit">Deploy</button>
               <p id="deploymentDialogError" class="field-error" role="alert" hidden></p></form></div></dialog>
+<dialog id="templateDialog" class="modal-dialog template-dialog" aria-labelledby="templateDialogTitle"><div class="modal-card"><h2 id="templateDialogTitle">Add template</h2>
+              <form id="templateForm" class="stack">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="name" placeholder="VM Ubuntu 24.04" required>
+                </label>
+                <fieldset class="field os-fieldset">
+                  <legend>OS</legend>
+                  <div class="os-choice-grid">
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="windows11" required>
+                      <img src="/assets/os-windows11.png" alt="" aria-hidden="true">
+                      <span>Windows 11</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="windows-server" required>
+                      <img src="/assets/os-windows-server.png" alt="" aria-hidden="true">
+                      <span>Windows Server</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="ubuntu" required checked>
+                      <img src="/assets/os-ubuntu.png" alt="" aria-hidden="true">
+                      <span>Ubuntu</span>
+                    </label>
+                    <label class="os-choice-card">
+                      <input type="radio" name="osType" value="other" required>
+                      <img src="/assets/os-other.svg" alt="" aria-hidden="true">
+                      <span>Other</span>
+                    </label>
+                  </div>
+                </fieldset>
+                <div class="split">
+                  <label class="field">
+                    <span>Proxmox VMID</span>
+                    <input type="number" name="proxmoxTemplateVmid" min="1" placeholder="9002" required>
+                  </label>
+                  <label class="field">
+                    <span>Language</span>
+                    <select name="language" required>
+                      <option value="en" selected>EN</option>
+                      <option value="fr">FR</option>
+                    </select>
+                  </label>
+                </div>
+                <label class="field">
+                  <span>Description</span>
+                  <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
+                </label>
+                <label class="checkbox">
+                  <input type="checkbox" name="fullClone">
+                  <span>Use full clone instead of linked clone</span>
+                </label>
+                <fieldset id="templatePoolFieldset" class="field pool-model-fieldset" hidden>
+                  <legend>Windows pool</legend>
+                  <label class="switch">
+                    <input type="checkbox" name="poolEnabled">
+                    <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                    <span class="switch-label">Enabled: labs take VMs prepared in advance instead of cloning them</span>
+                  </label>
+                  <label class="field">
+                    <span>VMs ready in the pool</span>
+                    <input type="number" name="poolReadyTarget" min="0" max="500" step="1" value="0">
+                  </label>
+                  <p class="muted" id="templatePoolInfo">Disabling destroys the VMs prepared for this template (VMs already in labs are not affected). Placement, storage and the pool ceiling are on the Windows pool page.</p>
+                </fieldset>
+                <p class="muted">Full clone: independent storage, longer creation. Linked clone: faster and smaller, dependent on the source template.</p>
+                <div class="inline-actions dialog-actions">
+                  <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button">Cancel</button>
+                  <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add template</button>
+                </div>
+              </form></div></dialog>
 <dialog id="moduleDialog" class="modal-dialog module-dialog" aria-labelledby="moduleDialogTitle"><div class="modal-card"><h2 id="moduleDialogTitle">Add module</h2><form id="courseForm" class="stack">
                 <label class="field">
                   <span>Module number</span>
