@@ -1612,7 +1612,8 @@ const emptyReadinessProgress = ({ jobState = null, hasActiveJob = false } = {}) 
   readyVmids: new Set(),
   startedVmids: new Set(),
   failedVmids: new Set(),
-  targetVmids: null
+  targetVmids: null,
+  pool: null
 });
 
 const fetchDeploymentReadinessProgress = async deployment => {
@@ -1645,7 +1646,11 @@ const fetchDeploymentReadinessProgress = async deployment => {
       readyVmids,
       startedVmids,
       failedVmids,
-      targetVmids
+      targetVmids,
+      // Windows pool: { total, assigned, active } (VMs transferred from the pool).
+      pool: progress?.pool && Number(progress.pool.total) > 0
+        ? { total: Number(progress.pool.total), assigned: Number(progress.pool.assigned) || 0, active: Boolean(progress.pool.active) }
+        : null
     };
   } catch (error) {
     console.warn(`Unable to fetch Terraform readiness progress for deployment ${deployment.id}`, error);
@@ -2343,6 +2348,7 @@ app.get(
         customizationResults: customizationProgress?.results ?? null,
         canResumeCustomization: deployment.status === 'failed' && Boolean(customizationProgress?.canResume) && canManageDeployment(req, deployment),
         displayStatus: resolveDeploymentDisplayStatus(effectiveDeploymentStatus, readinessProgress),
+        poolProgress: ['queued', 'waiting_for_pool', 'deploying'].includes(effectiveDeploymentStatus) ? (readinessProgress?.pool ?? null) : null,
         ...(await deriveDeploymentProgress({
           deployment: runtimeDeployment,
           vmPlan,

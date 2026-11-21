@@ -24,7 +24,9 @@ test('runPoolAssignments: a failed VM is replaced, the slot keeps its place', as
   };
   const plan = [{ poolVmId: 'bad', vmid: 70001, payloadVm: { name: 'srv-01' }, slot: { network: { ipAddress: '10.0.0.1' } } }];
   const replace = async item => ({ ...item, poolVmId: 'spare', vmid: 70099 });
-  const { assigned, failed, replacements } = await runPoolAssignments({ assigner, plan, replace });
+  const onAssigned = [];
+  const { assigned, failed, replacements } = await runPoolAssignments({ assigner, plan, replace, onAssigned: (item, value) => onAssigned.push([item.payloadVm.name, value.vmid]) });
+  assert.deepEqual(onAssigned, [['srv-01', 70099]], 'lab page progress: one call per integrated slot, real VMID');
   assert.equal(failed.length, 0);
   assert.deepEqual([assigned[0].vmid, assigned[0].ipAddress], [70099, '10.0.0.1']);
   assert.deepEqual(replacements.map(r => [r.slot, r.vmid, r.code]), [['srv-01', 70001, 'WINRM_FAILED']]);

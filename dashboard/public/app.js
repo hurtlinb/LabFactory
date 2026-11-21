@@ -1,4 +1,4 @@
-import { labStatusLabel, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
+import { labStatusLabel, deploymentStatusLabel, deploymentProgressText, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
 
 const UI_ICONS = {
   "copy": '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
@@ -1318,13 +1318,13 @@ function renderLifecycleLabs() {
             <div class="inline-actions">
               ${renderTeacherBadge(deployment.teacher || { email: deployment.teacherEmail })}
               ${state.isAdmin ? `<button class="btn btn-ghost change-owner-button" type="button" data-deployment-id="${deployment.id}" ${actions.busy ? 'disabled' : ''}>Change owner</button>` : ''}
-              <span class="pill ${statusPillClass}">${escapeHtml(labStatusLabel(s))}</span>
+              <span class="pill ${statusPillClass}">${escapeHtml(deploymentStatusLabel(deployment, totalVmCount))}</span>
               ${['deployed', 'running', 'stopped', 'mixed', 'failed'].includes(s) ? `<button class="btn btn-ghost refresh-deployment-button" type="button" data-deployment-id="${deployment.id}" aria-label="Refresh lab state" title="Refresh lab state"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 7a7 7 0 0 1 11.6-1L20 9M4 15l2.3 3A7 7 0 0 0 17.9 17"/></svg></button>` : ''}
               <button class="btn btn-ghost view-details-btn" type="button" data-deployment-id="${deployment.id}">Details ${uiIcon('arrow')}</button>
             </div>
           </div>
           ${renderLifecycleSteps(deployment.status)}
-          ${actions.busy ? `<p class="deployment-progress" role="status">Created: ${Number(deployment.createdCount || 0)}/${totalVmCount} · Started: ${Number(deployment.startedCount || 0)}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}. ${escapeHtml(labStatusLabel(deployment.status))}.</p>` : ''}
+          ${actions.busy ? `<p class="deployment-progress" role="status">${escapeHtml(deploymentProgressText(deployment, totalVmCount, readyCount))}</p>` : ''}
           <div class="lc-actions">
             ${actionButtons}
             ${deployment.canResumeCustomization ? `<button class="btn lifecycle-action" type="button" data-action="resume-customization" data-deployment-id="${deployment.id}">Resume incomplete customizations</button>` : ''}

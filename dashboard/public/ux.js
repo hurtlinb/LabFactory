@@ -2,11 +2,37 @@ export const labStatusLabels = {
   idle: 'Not deployed', queued: 'Queued', deploying: 'Creating VMs',
   customizing: 'Configuring VMs', deployed: 'Ready', running: 'Running',
   mixed: 'Partially started', starting: 'Starting', stopping: 'Stopping',
-  stopped: 'Stopped', destroying: 'Deleting VMs', destroyed: 'VMs deleted', failed: 'Failed'
+  stopped: 'Stopped', destroying: 'Deleting VMs', destroyed: 'VMs deleted', failed: 'Failed',
+  waiting_for_pool: 'Waiting for the VM pool'
 };
 
 export function labStatusLabel(status) {
   return labStatusLabels[status] || status || 'Unknown';
+}
+
+// Lab using the Windows pool: during the transfers, "Transferring from pool" (the VMs are
+// taken already prepared, not created); "Creating VMs and transferring from pool" for a lab that
+// also has Terraform VMs. deployment.poolProgress = { total, assigned, active }.
+export function deploymentStatusLabel(deployment, totalVmCount = deployment?.totalVmCount) {
+  const pool = deployment?.poolProgress;
+  if (deployment?.status === 'deploying' && pool?.active && pool.total > 0) {
+    return pool.total >= Number(totalVmCount || 0) ? 'Transferring from pool' : 'Creating VMs and transferring from pool';
+  }
+  return labStatusLabel(deployment?.status);
+}
+
+// Progress line of a busy lab card. A pool VM integrated in the lab counts as ready.
+export function deploymentProgressText(deployment, totalVmCount, readyCount) {
+  const pool = deployment?.poolProgress;
+  const created = Number(deployment?.createdCount || 0);
+  const started = Number(deployment?.startedCount || 0);
+  const label = deploymentStatusLabel(deployment, totalVmCount);
+  if (pool?.total > 0) {
+    const transferred = `Transferred from pool: ${Math.min(pool.assigned, pool.total)}/${pool.total}`;
+    const terraform = pool.total < totalVmCount ? ` · Created: ${created}/${totalVmCount} · Started: ${started}/${totalVmCount}` : '';
+    return `${transferred}${terraform} · Ready: ${readyCount}/${totalVmCount}. ${label}.`;
+  }
+  return `Created: ${created}/${totalVmCount} · Started: ${started}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}. ${label}.`;
 }
 
 export function blueprintFingerprint(blueprint) {

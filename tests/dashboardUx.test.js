@@ -549,3 +549,16 @@ test('dashboard tiles expose power actions according to lab status', t => {
   dialog.close();
   assert.equal(document.querySelector('.ansible-logs-dialog'), null);
 });
+
+test('lab card of a deployment using the Windows pool: transfers instead of creations', () => {
+  const pool = { status: 'deploying', createdCount: 0, startedCount: 0, poolProgress: { total: 22, assigned: 5, active: true } };
+  assert.equal(helpers.deploymentStatusLabel(pool, 22), 'Transferring from pool');
+  assert.equal(helpers.deploymentProgressText(pool, 22, 5), 'Transferred from pool: 5/22 · Ready: 5/22. Transferring from pool.');
+  const mixed = { status: 'deploying', createdCount: 2, startedCount: 1, poolProgress: { total: 2, assigned: 1, active: true } };
+  assert.equal(helpers.deploymentStatusLabel(mixed, 6), 'Creating VMs and transferring from pool');
+  assert.equal(helpers.deploymentProgressText(mixed, 6, 1), 'Transferred from pool: 1/2 · Created: 2/6 · Started: 1/6 · Ready: 1/6. Creating VMs and transferring from pool.');
+  const legacy = { status: 'deploying', createdCount: 3, startedCount: 2 };
+  assert.equal(helpers.deploymentProgressText(legacy, 4, 1), 'Created: 3/4 · Started: 2/4 · Ready: 1/4. Creating VMs.');
+  assert.equal(helpers.deploymentStatusLabel({ status: 'deploying', poolProgress: { total: 22, assigned: 22, active: false } }, 22), 'Creating VMs', 'transfers done: usual label');
+  assert.equal(helpers.labStatusLabel('waiting_for_pool'), 'Waiting for the VM pool');
+});

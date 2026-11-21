@@ -1455,6 +1455,11 @@ const createDeploymentReadinessReporter = job => {
   const startedVmids = new Set();
   const readyVmids = new Set();
   const failedVmids = new Set();
+  // Windows pool: VMs taken from the pool (no creation) and those already integrated in the lab.
+  const pool = { total: 0, assigned: 0, active: false };
+  // Real VMIDs of the integrated pool VMs: the dashboard plan uses them once the slot is
+  // assigned (instead of the blueprint VMID), they must count in the targets and the ready ones.
+  const poolVmids = new Set();
 
   const publish = async () => {
     if (!job.data?.deploymentId) return;
@@ -1465,15 +1470,41 @@ const createDeploymentReadinessReporter = job => {
       totalVmCount,
       startedCount: startedVmids.size,
       readyCount: readyVmids.size,
-      targetVmids,
+      targetVmids: poolVmids.size ? [...new Set([...targetVmids, ...poolVmids])].sort((a, b) => a - b) : targetVmids,
       startedVmids: Array.from(startedVmids).sort((a, b) => a - b),
       readyVmids: Array.from(readyVmids).sort((a, b) => a - b),
-      failedVmids: Array.from(failedVmids).sort((a, b) => a - b)
+      failedVmids: Array.from(failedVmids).sort((a, b) => a - b),
+      ...(pool.total ? { pool: { ...pool } } : {})
     });
   };
 
   return {
     publish,
+    // Start of the transfers from the pool (count of the pool slots).
+    startPool: async total => {
+      Object.assign(pool, { total: Number(total) || 0, assigned: 0, active: Number(total) > 0 });
+      await publish();
+    },
+    // A pool VM integrated in the lab = ready for the lab page (its slot VMID in the job payload).
+    markPoolAssigned: async (slotVmid, poolVmid) => {
+      pool.assigned += 1;
+      const numericVmid = Number(slotVmid);
+      if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
+        startedVmids.add(numericVmid);
+        readyVmids.add(numericVmid);
+        const real = Number(poolVmid);
+        if (Number.isInteger(real) && real !== numericVmid) {
+          poolVmids.add(real);
+          startedVmids.add(real);
+          readyVmids.add(real);
+        }
+      }
+      await publish();
+    },
+    endPool: async () => {
+      pool.active = false;
+      await publish();
+    },
     markStarted: async vmid => {
       const numericVmid = Number(vmid);
       if (Number.isInteger(numericVmid) && targetVmidSet.has(numericVmid)) {
@@ -1594,7 +1625,7 @@ const preparePoolDeployment = async ({ job, token, replaceVmids }) => {
 // Starts the assignment chains (in parallel with Terraform). Returns { promise } (the promise
 // is NOT awaited here, otherwise Terraform would wait for the end of the assignments);
 // the promise never rejects.
-const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxPool, signal }) => {
+const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxPool, signal, readinessReporter = null }) => {
   if (!poolContext?.poolVms?.length) return null;
   const settings = (await dbPool.query('SELECT dns_servers FROM windows_pool_settings WHERE id')).rows[0];
   const storages = new Map((await dbPool.query('SELECT template_id, storage FROM windows_pool_templates')).rows.map(r => [r.template_id, r.storage]));
@@ -1622,7 +1653,13 @@ const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxP
   // A VM in error is quarantined and replaced by another one (up to 10% of the pool VMs of the
   // lab, at least 1) instead of failing the lab.
   const replace = createPoolReplacer({ db: dbPool, requestId: poolContext.request.id, total: plan.length, signal });
-  return { promise: runPoolAssignments({ assigner: limited, plan, signal, concurrency: POOL_ASSIGN_CONCURRENCY, replace }) };
+  // Lab page: "Transferring from pool", X/Y integrated (an integrated VM counts as ready).
+  await readinessReporter?.startPool(plan.length).catch(() => undefined);
+  const promise = runPoolAssignments({
+    assigner: limited, plan, signal, concurrency: POOL_ASSIGN_CONCURRENCY, replace,
+    onAssigned: (item, value) => readinessReporter?.markPoolAssigned(item.payloadVm?.vmid, value?.vmid)
+  }).finally(() => readinessReporter?.endPool().catch(() => undefined));
+  return { promise };
 };
 
 // Waits for the assignments, closes the run request and returns the VMIDs to add to the
@@ -1970,7 +2007,7 @@ export function startTerraformWorker(connection) {
         // in parallel with Terraform (independent steps).
         const poolVmIds = new Set((poolContext?.poolVms ?? []).map(vm => vm.id));
         const terraformScopedVms = scopedBlueprintVms.filter(vm => !poolVmIds.has(vm.id));
-        assignmentPromise = (await startPoolAssignments({ poolContext, job, ipConfigFor: poolIpConfigFor, labProxmoxPool: poolLabProxmoxPool, signal: abortController.signal }))?.promise ?? null;
+        assignmentPromise = (await startPoolAssignments({ poolContext, job, ipConfigFor: poolIpConfigFor, labProxmoxPool: poolLabProxmoxPool, signal: abortController.signal, readinessReporter }))?.promise ?? null;
 
         if (!skipTerraform) {
           await runCommand('terraform', ['init', '-input=false'], {
