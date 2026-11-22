@@ -87,7 +87,7 @@ const cancelTemplateEditButton = document.getElementById('cancelTemplateEditButt
 const templateEditorPanel = document.getElementById('templateDialog'); // modal editor (Modules page layout)
 const newClassroomButton = document.getElementById('newClassroomButton');
 const classroomForm = document.getElementById('classroomForm');
-const classroomEditorPanel = document.getElementById('classroomEditorPanel');
+const classroomEditorPanel = document.getElementById('classroomDialog'); // modal editor (Modules page layout)
 const classroomSubmitButton = document.getElementById('classroomSubmitButton');
 const cancelClassroomEditButton = document.getElementById('cancelClassroomEditButton');
 const classroomStartingSubnetInput = classroomForm?.elements?.startingSubnet ?? null;
@@ -365,8 +365,13 @@ function renderTemplateEditor() {
 
 function renderClassroomEditor() {
   updateClassroomPreview();
-  if (classroomEditorPanel) {
-    classroomEditorPanel.hidden = !state.isClassroomEditorVisible;
+  if (!classroomEditorPanel) return;
+  const title = document.getElementById('classroomDialogTitle');
+  if (title) title.textContent = state.editingClassroomId ? 'Edit classroom' : 'Add classroom';
+  if (state.isClassroomEditorVisible && !classroomEditorPanel.open) {
+    if (typeof classroomEditorPanel.showModal === 'function') classroomEditorPanel.showModal(); else classroomEditorPanel.setAttribute('open', '');
+  } else if (!state.isClassroomEditorVisible && classroomEditorPanel.open) {
+    if (typeof classroomEditorPanel.close === 'function') classroomEditorPanel.close(); else classroomEditorPanel.removeAttribute('open');
   }
 }
 
@@ -844,53 +849,61 @@ function renderModelList() {
 function renderClassrooms() {
   if (!classroomList) return;
   if (!state.classrooms.length) {
-    classroomList.innerHTML = '<p class="placeholder">No classrooms yet.</p>';
+    classroomList.innerHTML = '<p class="placeholder">No classrooms yet. Add the rooms where labs are deployed.</p>';
+    renderDeploymentSelectors();
     return;
   }
 
+  // Tiles in the Modules / VM Templates style: header, network summary, details, footer.
   classroomList.innerHTML = state.classrooms
-    .map(
-      classroom => `
-        <article class="blueprint-item${classroom.id === state.editingClassroomId ? ' active' : ''}" data-classroom-id="${classroom.id}">
-          <div class="panel-head">
-            <div>
-              <strong>${escapeHtml(classroom.name)}</strong>
-              <p class="muted">${classroom.workstationCount} workplace(s)</p>
-            </div>
-            <button class="icon-btn delete-classroom-button" type="button" data-classroom-id="${classroom.id}" aria-label="Delete classroom">${uiIcon('delete')}</button>
+    .filter(classroom => matchesSearch(filterValue('classroomSearch'), classroom.name, String(classroom.startingVlan),
+      classroom.startingSubnet, classroom.networkGateway, classroom.vlans.map(String)))
+    .map(classroom => {
+      const firstVlan = classroom.vlans[0];
+      const lastVlan = classroom.vlans[classroom.vlans.length - 1];
+      const firstSubnet = classroom.subnetOctets[0];
+      const lastSubnet = classroom.subnetOctets[classroom.subnetOctets.length - 1];
+      const summary = `VLAN ${firstVlan === lastVlan ? firstVlan : `${firstVlan}–${lastVlan}`} · ` +
+        `${firstSubnet === lastSubnet ? firstSubnet : `${firstSubnet} → ${lastSubnet}`} ${classroom.networkVlanMask}`;
+      const activeLabs = state.deployments.filter(d => d.classroom?.id === classroom.id && DEPLOY_ACTIVE_STATUSES.includes(d.status));
+      const labsText = activeLabs.length ? activeLabs.map(d => `#${d.deploymentNumber ?? '?'}${d.testMode ? ' (test)' : ''}`).join(', ') : 'None';
+      const labsTitle = activeLabs.map(d => `Lab #${d.deploymentNumber ?? '?'} — ${d.blueprint?.name || ''}`).join('\n');
+      return `
+        <article class="module-card classroom-card${classroom.id === state.editingClassroomId ? ' active' : ''}" data-classroom-id="${escapeHtmlAttr(classroom.id)}">
+          <div class="module-card-header">
+            <span class="template-title">
+              <span class="tile-icon" aria-hidden="true">${uiIcon('monitor')}</span>
+              <strong title="${escapeHtmlAttr(classroom.name)}">${escapeHtml(classroom.name)}</strong>
+            </span>
+            <span class="mini-pill">${classroom.workstationCount} workplace${classroom.workstationCount > 1 ? 's' : ''}</span>
           </div>
-          <div class="template-meta">
-            <span class="mini-pill">VLAN start: ${classroom.startingVlan}</span>
-            <span class="mini-pill">Subnet start: ${classroom.startingSubnet}</span>
-            <span class="mini-pill">Mask: ${classroom.networkVlanMask}</span>
-            <span class="mini-pill">Gateway: ${classroom.networkGateway}</span>
-            <span class="mini-pill">VLAN end: ${classroom.vlans[classroom.vlans.length - 1]}</span>
+          <p class="module-description" title="${escapeHtmlAttr(summary)}">${escapeHtml(summary)}</p>
+          <dl class="template-details">
+            <div><dt>Starting VLAN</dt><dd>${escapeHtml(String(classroom.startingVlan))}</dd></div>
+            <div><dt>Starting subnet</dt><dd>${escapeHtml(`${classroom.startingSubnet}${classroom.networkVlanMask}`)}</dd></div>
+            <div><dt>Gateway</dt><dd>${escapeHtml(classroom.networkGateway)}</dd></div>
+            <div><dt>Active labs</dt><dd class="${activeLabs.length ? 'template-pool-on' : 'muted'}" title="${escapeHtmlAttr(labsTitle)}">${escapeHtml(labsText)}</dd></div>
+          </dl>
+          <div class="module-card-footer">
+            <span class="muted" title="${escapeHtmlAttr(new Date(classroom.updatedAt).toLocaleString())}">${new Date(classroom.updatedAt).toLocaleDateString()}</span>
+            <button class="btn btn-secondary edit-classroom-button" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}" aria-label="Edit classroom ${escapeHtmlAttr(classroom.name)}">${uiIcon('edit')} Edit</button>
+            <button class="icon-btn delete-classroom-button" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}" aria-label="Delete classroom ${escapeHtmlAttr(classroom.name)}">${uiIcon('delete')}</button>
           </div>
-          <p class="muted">Assigned VLANs: ${classroom.vlans.join(', ')}</p>
-          <p class="muted">Assigned subnets: ${classroom.subnetOctets.join(', ')}</p>
-          ${(() => {
-            const activeLabs = state.deployments.filter(
-              d => d.classroom?.id === classroom.id && DEPLOY_ACTIVE_STATUSES.includes(d.status)
-            );
-            if (!activeLabs.length) return '';
-            const pills = activeLabs.map(d =>
-              `<span class="mini-pill" title="${escapeHtmlAttr(d.blueprint?.name || '')} — Lab #${escapeHtmlAttr(String(d.deploymentNumber ?? ''))}">` +
-              `Lab #${escapeHtml(String(d.deploymentNumber ?? '?'))} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} ` +
-              renderTeacherBadge(d.teacher || { email: d.teacherEmail }) +
-              `</span>`
-            ).join('');
-            return `<div class="template-meta">${pills}</div>`;
-          })()}
-        </article>
-      `
-    )
+        </article>`;
+    })
     .join('');
 
+  if (!classroomList.children.length) classroomList.innerHTML = '<p class="placeholder">No classrooms match your search.</p>';
+
+  classroomList.querySelectorAll('.edit-classroom-button').forEach(button => button.addEventListener('click', () => {
+    const classroom = state.classrooms.find(item => item.id === button.dataset.classroomId);
+    if (classroom) populateClassroomForm(classroom);
+  }));
   classroomList.querySelectorAll('.delete-classroom-button').forEach(button => {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       const resource = state.classrooms.find(item => item.id === button.dataset.classroomId);
-      if (!await confirmAction('Delete classroom?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'classroom') + '? This cannot be undone.', 'Delete')) return;
+      if (!await confirmAction('Delete classroom?', 'Delete ' + (resource?.name || 'classroom') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/classrooms/${button.dataset.classroomId}`, { method: 'DELETE' });
@@ -907,13 +920,6 @@ function renderClassrooms() {
     });
   });
 
-  classroomList.querySelectorAll('article[data-classroom-id]').forEach(card => {
-    card.addEventListener('click', () => {
-      const classroom = state.classrooms.find(item => item.id === card.dataset.classroomId);
-      if (!classroom) return;
-      populateClassroomForm(classroom);
-    });
-  });
 
   renderDeploymentSelectors();
 }
@@ -2715,10 +2721,7 @@ function populateClassroomForm(classroom) {
   state.editingClassroomId = classroom.id;
   state.isClassroomEditorVisible = true;
   if (classroomSubmitButton) {
-    classroomSubmitButton.textContent = 'Save changes';
-  }
-  if (cancelClassroomEditButton) {
-    cancelClassroomEditButton.hidden = false;
+    classroomSubmitButton.textContent = 'Save classroom';
   }
   renderClassroomEditor();
   renderClassrooms();
@@ -2736,9 +2739,6 @@ function resetClassroomForm({ keepVisible = false } = {}) {
   }
   if (classroomSubmitButton) {
     classroomSubmitButton.textContent = 'Add classroom';
-  }
-  if (cancelClassroomEditButton) {
-    cancelClassroomEditButton.hidden = true;
   }
   renderClassroomEditor();
   renderClassrooms();
@@ -3556,7 +3556,16 @@ document.getElementById('templateOsFilter')?.addEventListener('change', renderMo
 
 newClassroomButton?.addEventListener('click', () => {
   resetClassroomForm({ keepVisible: true });
+  classroomForm?.elements.name?.focus();
 });
+// Escape / closing the dialog: same as Cancel (the editor state follows the dialog).
+classroomEditorPanel?.addEventListener('close', () => {
+  if (state.isClassroomEditorVisible) resetClassroomForm();
+});
+classroomEditorPanel?.addEventListener('cancel', event => {
+  if (classroomForm?.dataset.busy) event.preventDefault();
+});
+document.getElementById('classroomSearch')?.addEventListener('input', renderClassrooms);
 
 classroomStartingSubnetInput?.addEventListener('input', () => {
   if (!classroomNetworkGatewayInput) return;
@@ -3571,7 +3580,7 @@ classroomNetworkGatewayInput?.addEventListener('input', () => {
 });
 
 cancelClassroomEditButton?.addEventListener('click', () => {
-  resetClassroomForm({ keepVisible: true });
+  resetClassroomForm();
 });
 
 classroomForm?.addEventListener('submit', async event => {
@@ -4168,7 +4177,7 @@ function initUx() {
     if (heading) { heading.id ||= `${dialog.id}Title`; dialog.setAttribute('aria-labelledby', heading.id); }
   });
   // Resource cards retain their existing click behavior and expose a named keyboard action.
-  const cards = () => document.querySelectorAll('#blueprintList article[data-blueprint-id], #classroomList article[data-classroom-id]').forEach(card => {
+  const cards = () => document.querySelectorAll('#blueprintList article[data-blueprint-id]').forEach(card => {
     const title = card.querySelector('strong'); if (!title || title.querySelector('button')) return;
     const button = document.createElement('button'); button.type = 'button'; button.className = 'text-button'; button.textContent = title.textContent;
     button.addEventListener('click', event => { event.stopPropagation(); card.click(); }); title.replaceChildren(button);

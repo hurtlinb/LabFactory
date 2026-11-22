@@ -50,7 +50,7 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails, renderModelList, setActiveView };');
+  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails, renderModelList, renderClassrooms, setActiveView };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
@@ -606,4 +606,37 @@ test('VM Templates page: Modules-style cards, filters, modal editor, pool sectio
   assert.equal(document.getElementById('templatePoolFieldset').hidden, true);
   dialog.close();
   assert.equal(api.state.isTemplateEditorVisible, false, 'Escape/close = Cancel');
+});
+
+test('Classrooms page: same tiles as VM Templates, search, modal editor with network preview', async t => {
+  const { api, document, w } = setup(t);
+  await api.bootstrap();
+  const room = (id, name, count, vlan, octet) => ({ id, name, workstationCount: count, startingVlan: vlan, startingSubnet: `10.10.${octet}.0`, networkGateway: `10.10.${octet}.1`,
+    networkVlanMask: '/25', vlans: Array.from({ length: count }, (_, i) => vlan + i), subnetOctets: Array.from({ length: count }, (_, i) => `10.10.${octet + i}.0`), updatedAt: new Date().toISOString() });
+  api.state.classrooms = [room('a43', 'A43', 22, 72, 72), room('b12', 'B12', 1, 300, 30)];
+  api.state.deployments = [{ id: 'lab', deploymentNumber: 194, status: 'running', classroom: { id: 'a43' }, blueprint: { name: 'Windows server' } }];
+  api.setActiveView('classrooms');
+  api.renderClassrooms();
+  assert.equal(document.querySelector('.page[data-view="classrooms"] h2').textContent, 'Classrooms');
+  const tiles = [...document.querySelectorAll('#classroomList .module-card.classroom-card')];
+  assert.equal(tiles.length, 2);
+  assert.ok(tiles[0].querySelector('.tile-icon svg'), 'icon framed like the OS logos');
+  const text = tiles[0].textContent.replace(/\s+/g, ' ');
+  for (const part of ['A43', '22 workplaces', 'VLAN 72–93', '10.10.72.0 → 10.10.93.0 /25', 'Starting VLAN', '10.10.72.0/25', '10.10.72.1', '#194', 'Edit']) assert.ok(text.includes(part), part);
+  assert.ok(tiles[1].textContent.includes('1 workplace') && tiles[1].textContent.includes('None'));
+  document.getElementById('classroomSearch').value = 'B12';
+  document.getElementById('classroomSearch').dispatchEvent(new w.Event('input'));
+  assert.equal(document.querySelectorAll('#classroomList .classroom-card').length, 1);
+  document.querySelector('#classroomList .edit-classroom-button').click();
+  const dialog = document.getElementById('classroomDialog');
+  assert.equal(dialog.open, true);
+  assert.equal(document.getElementById('classroomDialogTitle').textContent, 'Edit classroom');
+  assert.equal(document.getElementById('classroomForm').elements.startingVlan.value, '300');
+  assert.ok(document.getElementById('classroomPreview').textContent.length > 0, 'network preview in the dialog');
+  document.getElementById('cancelClassroomEditButton').click();
+  assert.equal(dialog.open, false);
+  document.getElementById('newClassroomButton').click();
+  assert.equal(document.getElementById('classroomDialogTitle').textContent, 'Add classroom');
+  dialog.close();
+  assert.equal(api.state.isClassroomEditorVisible, false, 'Escape/close = Cancel');
 });

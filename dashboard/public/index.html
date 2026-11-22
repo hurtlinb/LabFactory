@@ -284,70 +284,11 @@
 
         <!-- ── Classrooms ─────────────────────────────────────── -->
         <section class="page" data-view="classrooms" data-role-group="admin" hidden>
-          <div class="builder-grid">
-            <article class="panel">
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">inventory</p>
-                </div>
-                <button id="newClassroomButton" class="btn btn-ghost" type="button">New</button>
-              </div>
-              <div id="classroomList" class="saved-list">
-                <p class="placeholder">Loading classrooms…</p>
-              </div>
-            </article>
-
-            <article id="classroomEditorPanel" class="panel" hidden>
-              <div class="panel-head">
-                <div>
-                  <p class="eyebrow">classrooms</p>
-                </div>
-              </div>
-              <p class="muted">Each workplace gets a VLAN and a subnet third octet computed from the configured starting values, incremented by one for every seat.</p>
-              <form id="classroomForm" class="stack">
-                <label class="field">
-                  <span>Name</span>
-                  <input type="text" name="name" placeholder="Room A-203" required>
-                </label>
-                <div class="split-3">
-                  <label class="field">
-                    <span>Workplaces</span>
-                    <input type="number" name="workstationCount" min="1" placeholder="24" required>
-                  </label>
-                  <label class="field">
-                    <span>Starting VLAN</span>
-                    <input type="number" name="startingVlan" min="1" placeholder="200" required>
-                  </label>
-                  <label class="field">
-                    <span>Starting subnet</span>
-                    <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
-                  </label>
-                </div>
-                <div class="split">
-                  <label class="field">
-                    <span>Gateway</span>
-                    <input type="text" name="networkGateway" placeholder="10.0.200.1" required>
-                  </label>
-                  <label class="field">
-                    <span>VLAN mask</span>
-                    <select name="networkVlanMask" required>
-                      <option value="/24">/24</option>
-                      <option value="/25">/25</option>
-                      <option value="/26">/26</option>
-                      <option value="/27">/27</option>
-                      <option value="/28">/28</option>
-                      <option value="/29">/29</option>
-                      <option value="/30">/30</option>
-                    </select>
-                  </label>
-                </div>
-                <div class="split">
-                  <button id="classroomSubmitButton" class="btn btn-primary" type="submit">Add classroom</button>
-                  <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button" hidden>Cancel</button>
-                </div>
-              <p id="classroomPreview" class="preview-box"></p></form>
-            </article>
-          </div>
+          <article class="panel">
+            <div class="panel-head"><div><h2>Classrooms</h2><p class="muted">Rooms where the labs are deployed: each workplace gets its own VLAN and subnet.</p></div><button id="newClassroomButton" type="button" class="btn btn-primary">Add classroom</button></div>
+            <div class="filter-bar"><label class="field"><span>Search classrooms</span><input id="classroomSearch" type="search" placeholder="Name, VLAN or subnet"></label></div>
+            <div id="classroomList" class="module-grid classroom-grid" aria-live="polite"><p class="placeholder">Loading classrooms…</p></div>
+          </article>
         </section>
 
         <!-- ── Labs ──────────────────────────────────────────── -->
@@ -928,6 +869,51 @@
                 <div class="inline-actions dialog-actions">
                   <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button">Cancel</button>
                   <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add template</button>
+                </div>
+              </form></div></dialog>
+<dialog id="classroomDialog" class="modal-dialog classroom-dialog" aria-labelledby="classroomDialogTitle"><div class="modal-card"><h2 id="classroomDialogTitle">Add classroom</h2>
+              <p class="muted">Each workplace gets a VLAN and a subnet third octet computed from the starting values, incremented by one for every seat.</p>
+              <form id="classroomForm" class="stack">
+                <label class="field">
+                  <span>Name</span>
+                  <input type="text" name="name" placeholder="Room A-203" required>
+                </label>
+                <div class="split-3">
+                  <label class="field">
+                    <span>Workplaces</span>
+                    <input type="number" name="workstationCount" min="1" placeholder="24" required>
+                  </label>
+                  <label class="field">
+                    <span>Starting VLAN</span>
+                    <input type="number" name="startingVlan" min="1" placeholder="200" required>
+                  </label>
+                  <label class="field">
+                    <span>Starting subnet</span>
+                    <input type="text" name="startingSubnet" placeholder="10.0.200.0" required>
+                  </label>
+                </div>
+                <div class="split">
+                  <label class="field">
+                    <span>Gateway</span>
+                    <input type="text" name="networkGateway" placeholder="10.0.200.1" required>
+                  </label>
+                  <label class="field">
+                    <span>VLAN mask</span>
+                    <select name="networkVlanMask" required>
+                      <option value="/24">/24</option>
+                      <option value="/25">/25</option>
+                      <option value="/26">/26</option>
+                      <option value="/27">/27</option>
+                      <option value="/28">/28</option>
+                      <option value="/29">/29</option>
+                      <option value="/30">/30</option>
+                    </select>
+                  </label>
+                </div>
+                <p id="classroomPreview" class="preview-box"></p>
+                <div class="inline-actions dialog-actions">
+                  <button id="cancelClassroomEditButton" class="btn btn-ghost" type="button">Cancel</button>
+                  <button id="classroomSubmitButton" class="btn btn-primary" type="submit">Add classroom</button>
                 </div>
               </form></div></dialog>
 <dialog id="moduleDialog" class="modal-dialog module-dialog" aria-labelledby="moduleDialogTitle"><div class="modal-card"><h2 id="moduleDialogTitle">Add module</h2><form id="courseForm" class="stack">
