@@ -846,26 +846,35 @@
                 </div>
                 <label class="field">
                   <span>Description</span>
-                  <textarea name="description" rows="3" placeholder="Base image for Linux labs"></textarea>
+                  <textarea name="description" rows="2" placeholder="What this template contains (shown in the blueprint editor)"></textarea>
                 </label>
-                <label class="checkbox">
-                  <input type="checkbox" name="fullClone">
-                  <span>Use full clone instead of linked clone</span>
-                </label>
-                <fieldset id="templatePoolFieldset" class="field pool-model-fieldset" hidden>
-                  <legend>Windows pool</legend>
-                  <label class="switch">
+                <div class="form-option">
+                  <label class="switch form-option-head">
+                    <input type="checkbox" name="fullClone">
+                    <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                    <span class="form-option-text">
+                      <strong>Full clone</strong>
+                      <span>Independent storage, longer creation. Off: linked clone, faster and smaller, dependent on the source template.</span>
+                    </span>
+                  </label>
+                </div>
+                <div id="templatePoolFieldset" class="form-option" role="group" aria-labelledby="templatePoolTitle" hidden>
+                  <label class="switch form-option-head">
                     <input type="checkbox" name="poolEnabled">
                     <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
-                    <span class="switch-label">Enabled: labs take VMs prepared in advance instead of cloning them</span>
+                    <span class="form-option-text">
+                      <strong id="templatePoolTitle">Windows pool</strong>
+                      <span>Labs take VMs prepared in advance instead of cloning them.</span>
+                    </span>
                   </label>
-                  <label class="field">
-                    <span>VMs ready in the pool</span>
-                    <input type="number" name="poolReadyTarget" min="0" max="500" step="1" value="0">
-                  </label>
-                  <p class="muted" id="templatePoolInfo">Disabling destroys the VMs prepared for this template (VMs already in labs are not affected). Placement, storage and the pool ceiling are on the Windows pool page.</p>
-                </fieldset>
-                <p class="muted">Full clone: independent storage, longer creation. Linked clone: faster and smaller, dependent on the source template.</p>
+                  <div class="form-option-body">
+                    <label class="inline-number">
+                      <span>VMs kept ready</span>
+                      <input type="number" name="poolReadyTarget" min="0" max="500" step="1" value="0">
+                    </label>
+                    <p class="form-option-note" id="templatePoolInfo">Disabling destroys the prepared VMs (VMs already in labs are not affected). Placement, storage and the pool ceiling: <a href="#/admin-windows-pool">Pool</a> page.</p>
+                  </div>
+                </div>
                 <div class="inline-actions dialog-actions">
                   <button id="cancelTemplateEditButton" class="btn btn-ghost" type="button">Cancel</button>
                   <button id="templateSubmitButton" class="btn btn-primary" type="submit">Add template</button>

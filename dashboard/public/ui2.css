@@ -203,8 +203,21 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .template-details dd { margin: 0; font-weight: 600; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .template-details dd.muted { font-weight: 400; }
 .template-details dd.template-pool-on { color: var(--accent); }
-.template-dialog { width: min(560px, calc(100vw - 28px)); }
-.template-dialog .modal-card { max-height: calc(100vh - 48px); overflow-y: auto; }
+.template-dialog { width: min(560px, calc(100vw - 28px)); overflow: hidden; }
+.template-dialog .modal-card { max-height: calc(100vh - 48px); overflow-y: auto; overflow-x: hidden; }
+.template-dialog .modal-card h2 { margin: 0; }
+/* Option cards of the template dialog (full clone, Windows pool): switch, title, explanation. */
+.form-option { min-width: 0; display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-soft); }
+.form-option-head { width: auto; align-items: flex-start; gap: 12px; }
+.form-option-head .switch-track { flex: 0 0 38px; margin-top: 1px; }
+.form-option-text { display: grid; gap: 2px; min-width: 0; font-size: 12px; line-height: 1.4; color: var(--text-secondary); }
+.form-option-text strong { font-size: 13px; color: var(--text); }
+.form-option-body { display: grid; gap: 8px; padding: 10px 0 0 50px; border-top: 1px solid var(--line); }
+.form-option.is-off .form-option-body { opacity: .55; }
+.inline-number { display: flex; align-items: center; gap: 10px; font-size: 12px; font-weight: 600; color: var(--text); }
+.inline-number input { width: 96px; }
+.form-option-note { margin: 0; font-size: 11px; line-height: 1.45; color: var(--muted); }
+.form-option-note a { color: var(--brand); font-weight: 600; }
 .dialog-actions { justify-content: flex-end; }
 .deploy-lab-dialog { width: min(520px, calc(100vw - 28px)); }
 .deploy-lab-dialog .split { grid-template-columns: 1fr; }

@@ -2693,6 +2693,7 @@ function syncTemplatePoolFieldset() {
   const osType = templateForm.querySelector('input[name="osType"]:checked')?.value;
   fieldset.hidden = !['windows11', 'windows-server'].includes(osType);
   templateForm.elements.poolReadyTarget.disabled = !templateForm.elements.poolEnabled.checked;
+  fieldset.classList.toggle('is-off', !templateForm.elements.poolEnabled.checked);
 }
 
 function resetTemplateForm({ keepVisible = false } = {}) {
