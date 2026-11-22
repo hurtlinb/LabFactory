@@ -115,6 +115,8 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
       px.stats.cloneCalls.length = 0;
       await db.query(`UPDATE windows_pool_templates SET enabled = true, node = 'pve-a', ready_target = 1`);
       await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state = 'ready'`)).rows[0].n === 1);
+      // Exactly one clone for a reserve of 1 (race fixed 2026-11-22: two consecutive ticks could
+      // each start a creation, rows counted before the INSERT of the other).
       assert.deepEqual(px.stats.cloneCalls.map(call => call.target), ['pve-a']);
       await db.query(`UPDATE windows_pool_templates SET enabled = false`);
       await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state <> 'deleted'`)).rows[0].n === 0);
