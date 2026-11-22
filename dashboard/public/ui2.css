@@ -187,6 +187,9 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .module-dialog { width: min(480px, calc(100vw - 28px)); }
 /* VM Templates: same cards as the Modules page, details instead of the linked blueprints. */
 .template-card.active { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
+.template-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.template-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.template-os-logo { width: 30px; height: 30px; flex: 0 0 30px; object-fit: contain; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
 .template-details { min-height: 0; margin: 0; padding: 6px 14px; display: grid; align-content: start; background: var(--surface-soft); font-size: 12px; overflow: hidden; }
 .template-details > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .template-details > div:last-child { border-bottom: 0; }

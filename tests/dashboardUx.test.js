@@ -580,6 +580,7 @@ test('VM Templates page: Modules-style cards, filters, modal editor, pool sectio
   const text = cards[0].textContent.replace(/\s+/g, ' ');
   assert.match(text, /Windows 2022 v2 Windows Server Domain servers Proxmox VMID ?147 Language ?FR Clone ?Linked clone Windows pool ?Enabled · 3\/4 ready .* Edit/);
   assert.doesNotMatch(cards[1].textContent, /Windows pool/, 'no pool row for a Linux template');
+  assert.deepEqual(cards.map(card => card.querySelector('.template-os-logo').getAttribute('src')), ['/assets/os-windows-server.png', '/assets/os-ubuntu.png'], 'OS logo on each tile');
   // Filters.
   document.getElementById('templateOsFilter').value = 'ubuntu';
   document.getElementById('templateOsFilter').dispatchEvent(new w.Event('change'));

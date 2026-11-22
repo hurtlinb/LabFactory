@@ -784,7 +784,10 @@ function renderModelList() {
       return `
         <article class="module-card template-card${template.id === state.editingTemplateId ? ' active' : ''}" data-template-id="${escapeHtmlAttr(template.id)}">
           <div class="module-card-header">
-            <strong title="${escapeHtmlAttr(template.name)}">${escapeHtml(template.name)}</strong>
+            <span class="template-title">
+              <img class="template-os-logo" src="${escapeHtmlAttr(getOsLogo(template.osType))}" alt="" aria-hidden="true">
+              <strong title="${escapeHtmlAttr(template.name)}">${escapeHtml(template.name)}</strong>
+            </span>
             <span class="mini-pill">${escapeHtml(getOsLabel(template.osType))}</span>
           </div>
           <p class="module-description" title="${escapeHtmlAttr(template.description || '')}">${escapeHtml(template.description || 'No description')}</p>
