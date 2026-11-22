@@ -184,7 +184,7 @@ const PAGE_TITLES = {
   'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
   'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
   'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
-  'admin-windows-pool': { title: 'Windows pool', breadcrumb: 'Administration' },
+  'admin-windows-pool': { title: 'Pool', breadcrumb: 'Administration' },
 };
 
 function getDragItemType(dataTransfer) {
