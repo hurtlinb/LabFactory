@@ -21,13 +21,14 @@ test('Windows pool: stock surplus destroyed', { skip: !url }, async t => {
   const db = new Pool({ connectionString: url, options: '-c search_path=' + schema, max: 20 });
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT); CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/037-windows-pool-global-placement.sql', import.meta.url), 'utf8'));
     await db.query(`UPDATE windows_pool_settings SET paused = false`);
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 4 WHERE category = 'clone'`);
     const tpl = randomUUID();
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'en')`, [tpl]);
     await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
                     VALUES ($1, true, 5, 8, 5, 'pve-b', 'ceph-pool', 147)`, [tpl]);
+    await db.query(`UPDATE windows_pool_settings SET node = 'pve-b', storage = 'ceph-pool', max_parallel_preparations = 5`); // global placement (migration 037)
     const px = fakeProxmox({ cloneMs: 20 });
     const manager = createPoolManager({ db, proxmox: createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'trim', log: quiet,
       options: { firstProbeDelayMs: 0, probeIntervalMs: 15, retryBackoffMs: [20, 40], cloneTimeoutMs: 5_000, powerTimeoutMs: 5_000 } });
@@ -83,7 +84,8 @@ test('Windows pool: stock surplus destroyed', { skip: !url }, async t => {
       const m2 = createPoolManager({ db, proxmox: createPoolProxmox(slow.request, { taskPollMs: 5, guestPollMs: 5 }), holder: 'trim-2', log: quiet,
         options: { firstProbeDelayMs: 0, probeIntervalMs: 15, retryBackoffMs: [20, 40], cloneTimeoutMs: 5_000, powerTimeoutMs: 5_000 } });
       await db.query(`UPDATE windows_pool_settings SET paused = false`);
-      await db.query('UPDATE windows_pool_templates SET enabled = true, ready_target = 4, max_parallel_preparations = 4');
+      await db.query('UPDATE windows_pool_templates SET enabled = true, ready_target = 4');
+      await db.query('UPDATE windows_pool_settings SET max_parallel_preparations = 4'); // global (migration 037)
       const inFlight = async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state IN ('creating','preparing')`)).rows[0].n;
       for (let i = 0; i < 200 && (await inFlight()) < 4; i++) { await m2.tick(); await sleep(10); }
       assert.ok(await inFlight() >= 1, 'preparations in progress');

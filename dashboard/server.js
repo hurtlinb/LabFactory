@@ -28,7 +28,7 @@ import {
 } from '../lib/terraformSettings.js';
 import { fetchActiveAssignments, overlayAssignments, purgeDeploymentPoolRecords } from '../lib/windowsPool/deployment.js';
 import {
-  PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, configureTemplate, setTemplatePool,
+  PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, setTemplatePool,
   syncTemplateModel, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
 } from '../lib/windowsPool/admin.js';
 import { createHttpRequest, createPoolProxmox, templateDiskStorage } from '../lib/windowsPool/proxmox.js';
@@ -4121,12 +4121,6 @@ app.put('/api/windows-pool/settings', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ON
   res.json(await getPoolOverview(dbPool));
 }));
 
-app.put('/api/windows-pool/templates/:templateId', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
-  let result;
-  try { result = await configureTemplate(dbPool, req.params.templateId, req.body ?? {}); } catch (error) { return sendPoolAdminError(res, error); }
-  res.json({ ...result, overview: await getPoolOverview(dbPool) });
-}));
-
 // Storage of the disk of a Proxmox template ("ceph-pool:base-147-disk-0,..." -> "ceph-pool"): the
 // linked clones of the pool live on it. null if unknown (template absent, Proxmox unreachable).
 const detectTemplateStorage = async vmid => {
@@ -4147,8 +4141,9 @@ const detectTemplateStorage = async vmid => {
 app.put('/api/templates/:id/windows-pool', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
   const body = { enabled: req.body?.enabled === true, readyTarget: Number(req.body?.readyTarget ?? 0) };
   if (body.enabled) {
-    const configured = (await dbPool.query('SELECT 1 FROM windows_pool_templates WHERE template_id = $1', [req.params.id])).rowCount > 0;
-    if (!configured) {
+    // No pool storage yet (global setting, migration 037): the one of this Proxmox template.
+    const poolStorage = (await dbPool.query('SELECT storage FROM windows_pool_settings WHERE id')).rows[0]?.storage ?? null;
+    if (!poolStorage) {
       const template = (await dbPool.query('SELECT proxmox_template_vmid FROM vm_templates WHERE id = $1', [req.params.id])).rows[0];
       const storage = template ? await detectTemplateStorage(template.proxmox_template_vmid) : null;
       if (storage) body.storage = storage;

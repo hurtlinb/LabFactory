@@ -1628,7 +1628,8 @@ const preparePoolDeployment = async ({ job, token, replaceVmids }) => {
 const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxPool, signal, readinessReporter = null }) => {
   if (!poolContext?.poolVms?.length) return null;
   const settings = (await dbPool.query('SELECT dns_servers FROM windows_pool_settings WHERE id')).rows[0];
-  const storages = new Map((await dbPool.query('SELECT template_id, storage FROM windows_pool_templates')).rows.map(r => [r.template_id, r.storage]));
+  // Storage of the pool (global setting since migration 037) for the additional disks.
+  const poolStorage = (await dbPool.query('SELECT storage FROM windows_pool_settings WHERE id')).rows[0]?.storage ?? null;
   const plan = buildAssignmentSlots({
     poolVms: poolContext.poolVms,
     reservedVms: poolContext.reservedVms,
@@ -1636,7 +1637,7 @@ const startPoolAssignments = async ({ poolContext, job, ipConfigFor, labProxmoxP
     deploymentId: job.data.deploymentId,
     deploymentNumber: job.data.deploymentNumber ?? null,
     dnsServers: settings?.dns_servers ?? [],
-    templateStorage: templateId => storages.get(templateId),
+    templateStorage: () => poolStorage,
     ipConfigFor,
     defaultPassword: String(job.data?.windowsAdminPassword ?? job.data?.blueprint?.windowsAdminPassword ?? '').trim(),
     adminUserFor: getWindowsAdminUsername,

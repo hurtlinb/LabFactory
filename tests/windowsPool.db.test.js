@@ -24,7 +24,7 @@ test('Windows pool: schema, reservation, limits and allocation under concurrency
     const migration = await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8');
     await db.query(migration);
     await db.query(migration); // idempotence (the TS runner replays every file)
-    for (const file of ['034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql']) {
+    for (const file of ['034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql', '037-windows-pool-global-placement.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8'));
     }
     await db.query('UPDATE windows_pool_settings SET max_capacity = 10'); // global ceiling (migration 036)
@@ -42,9 +42,11 @@ test('Windows pool: schema, reservation, limits and allocation under concurrency
       return transitionPoolVm(db, { id: vm.id, from: 'preparing', to: 'ready', version: preparing.version });
     };
 
-    await t.test('constraints: linked clone only, storage required to enable, reserve not bounded per template', async () => {
+    await t.test('constraints: linked clone only, placement global, reserve not bounded per template', async () => {
       await assert.rejects(db.query(`UPDATE windows_pool_templates SET clone_mode = 'full'`), /check/i);
-      await assert.rejects(db.query('UPDATE windows_pool_templates SET storage = NULL'), /check/i);
+      // 037: node/storage/parallelism are global settings, no longer required per template.
+      await db.query('UPDATE windows_pool_templates SET storage = NULL, node = NULL');
+      await assert.rejects(db.query('UPDATE windows_pool_settings SET max_parallel_preparations = 0'), /check/i);
       // 036: the ceiling is global, the reserve of a template may exceed its legacy ceiling.
       await db.query('UPDATE windows_pool_templates SET ready_target = 11');
       await db.query('UPDATE windows_pool_templates SET ready_target = 2');

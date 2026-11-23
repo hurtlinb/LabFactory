@@ -8,7 +8,7 @@ const html = readFileSync('dashboard/public/index.html', 'utf8');
 const tWin = '11111111-1111-1111-1111-111111111111';
 const tW11 = '22222222-2222-2222-2222-222222222222';
 const overview = {
-  settings: { cluster: 'default', paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'], vmidMin: 70000, vmidMax: 79999, maxCapacity: 40 },
+  settings: { cluster: 'default', paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'], vmidMin: 70000, vmidMax: 79999, maxCapacity: 40, node: null, storage: 'ceph-pool', maxParallelPreparations: 6 },
   templates: [
     { templateId: tWin, name: 'Windows 2022 v2', osType: 'windows-server', proxmoxTemplateVmid: 147, configured: true,
       config: { enabled: true, readyTarget: 2, maxParallelPreparations: 2, node: 'peda-pve2', storage: 'ceph-pool', revision: 1, sourceTemplateVmid: 147 },
@@ -82,23 +82,20 @@ test('pool page: actions call the right API', async t => {
   assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/limits').body, { category: 'clone', scope: 'cluster', maxActive: 3 });
   await click(window, page.querySelector('[data-pool-action="destroy-vm"]'));
   assert.equal(calls.find(c => c.url.endsWith('/destroy')).url, '/api/windows-pool/vms/q1/destroy');
-  // Template configuration form.
-  await click(window, page.querySelector(`[data-pool-action="configure"][data-template="${tWin}"]`));
-  assert.equal(document.getElementById('poolTemplateForm').hidden, false);
-  document.getElementById('poolMaxParallel').value = '3';
-  document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
-  await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(calls.find(c => c.url === `/api/windows-pool/templates/${tWin}` && c.method === 'PUT').body,
-    { node: 'peda-pve2', storage: 'ceph-pool', maxParallelPreparations: 3 });
+  // No configuration per template any more (migration 037): placement is in the global settings.
+  assert.equal(page.querySelector('[data-pool-action="configure"], #poolTemplateForm'), null);
+  assert.deepEqual(['poolNode', 'poolStorage', 'poolMaxParallel'].map(id => document.getElementById(id).value), ['', 'ceph-pool', '6']);
   // Global settings.
   document.getElementById('poolPaused').checked = true;
+  document.getElementById('poolNode').value = 'peda-pve2';
+  document.getElementById('poolMaxParallel').value = '3';
   document.getElementById('poolDnsServers').value = '10.0.0.1; 10.0.0.2';
   document.getElementById('poolSettingsForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
-  assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'], vmidMin: 70000, vmidMax: 79999, maxCapacity: 40 });
+  assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/settings').body, { paused: true, proxmoxPool: 'labs-dev', dnsServers: ['10.0.0.1', '10.0.0.2'], vmidMin: 70000, vmidMax: 79999, maxCapacity: 40, node: 'peda-pve2', storage: 'ceph-pool', maxParallelPreparations: 3 });
 });
 
-test('pool page: visible errors next to the form, warnings, unconfigured template configurable', async t => {
+test('pool page: visible errors next to the settings form, warnings', async t => {
   const { window, document, calls, page } = await setup(t);
   // Warnings: suspended pool / enabled template with reserve 0.
   overview.settings.paused = true;
@@ -110,25 +107,24 @@ test('pool page: visible errors next to the form, warnings, unconfigured templat
   assert.match(warnings.textContent, /Windows 2022 v2 is enabled with a ready reserve of 0/);
   overview.settings.paused = false;
   overview.templates[0].config.readyTarget = 2;
-  // Inconsistent configuration: refused BEFORE sending, message next to the form.
-  await click(window, page.querySelector(`[data-pool-action="configure"][data-template="${tW11}"]`));
+  // Inconsistent settings: refused BEFORE sending, message next to the form.
   document.getElementById('poolStorage').value = '';
   const before = calls.length;
-  document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  document.getElementById('poolSettingsForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
   assert.equal(calls.length, before, 'no request sent');
-  const templateStatus = document.getElementById('poolTemplateStatus');
+  const templateStatus = document.getElementById('poolSettingsStatus');
   assert.equal(templateStatus.hidden, false);
-  assert.match(templateStatus.textContent, /Not saved: storage is required/);
+  assert.match(templateStatus.textContent, /Not saved: the storage of the pool VMs is required/);
   // Server error: displayed next to the form (no longer only at the top of the page).
   const failingFetch = globalThis.fetch;
   globalThis.fetch = async (url, options = {}) => (options.method === 'PUT'
     ? { ok: false, json: async () => ({ error: 'node: Invalid' }) } : failingFetch(url, options));
   document.getElementById('poolStorage').value = 'ceph-pool';
-  document.getElementById('poolTemplateForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
+  document.getElementById('poolSettingsForm').dispatchEvent(new window.Event('submit', { bubbles: true, cancelable: true }));
   await new Promise(r => setTimeout(r, 20));
   assert.match(templateStatus.textContent, /Not saved: node: Invalid/);
-  assert.equal(document.getElementById('poolTemplateForm').hidden, false, 'form kept for correction');
+  assert.equal(document.getElementById('poolStorage').value, 'ceph-pool', 'input kept for correction');
   globalThis.fetch = failingFetch;
   // "Suspended" toggle visible: same structure as the other dashboard switches (the .switch CSS hides the native input).
   const toggle = document.getElementById('poolPaused').closest('.switch');

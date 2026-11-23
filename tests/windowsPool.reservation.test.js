@@ -37,7 +37,7 @@ test('Windows pool reservation and waiting (P3)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/037-windows-pool-global-placement.sql', import.meta.url), 'utf8'));
     await db.query(`UPDATE windows_pool_settings SET paused = false, max_capacity = 8`); // global ceiling (migration 036)
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 4 WHERE category = 'clone'`);
     const tA = randomUUID(), tB = randomUUID();
@@ -46,6 +46,7 @@ test('Windows pool reservation and waiting (P3)', { skip: !url }, async t => {
       await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
                       VALUES ($1, true, 0, 4, 4, 'pve-b', 'ceph-pool', $2)`, [id, vmid]);
     }
+    await db.query(`UPDATE windows_pool_settings SET node = 'pve-b', storage = 'ceph-pool', max_parallel_preparations = 8`); // global placement (migration 037)
     const deployment = async (jobId = null) => { const id = randomUUID(); await db.query('INSERT INTO lab_deployments VALUES ($1, $2)', [id, jobId]); return id; };
     const request = async (demand, jobId) => createPoolRequest(db, { deploymentId: await deployment(jobId), kind: 'deploy', demand });
     const status = async id => (await db.query('SELECT status, blocked_reason FROM windows_pool_requests WHERE id = $1', [id])).rows[0];

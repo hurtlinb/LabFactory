@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import {
-  getPoolOverview, updatePoolSettings, configureTemplate, setTemplatePool, syncTemplateModel,
+  getPoolOverview, updatePoolSettings, setTemplatePool, syncTemplateModel,
   updateOperationLimit, destroyQuarantinedVm, getVmTimeline, cancelDeploymentPoolRequests, PoolAdminError
 } from '../lib/windowsPool/admin.js';
 import { createPoolRequest, reservePoolRequest } from '../lib/windowsPool/reservation.js';
@@ -22,12 +22,11 @@ test('Windows pool administration (P6)', { skip: !url }, async t => {
       CREATE TABLE lab_blueprints (id UUID PRIMARY KEY, name TEXT);
       CREATE TABLE classrooms (id UUID PRIMARY KEY, name TEXT);
       CREATE TABLE lab_deployments (id UUID PRIMARY KEY, status TEXT, deployment_number BIGINT, blueprint_id UUID, classroom_id UUID, last_job_id TEXT);`);
-    for (const file of ['032-windows-pool.sql', '033-windows-pool-qualification.sql', '033-windows-pool-qualification.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql']) {
+    for (const file of ['032-windows-pool.sql', '033-windows-pool-qualification.sql', '033-windows-pool-qualification.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql', '037-windows-pool-global-placement.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8')); // 033 replayed: idempotent
     }
     const tWin = randomUUID(), tLinux = randomUUID();
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'Windows 2022 v2', 'windows-server', 'en', 147), ($2, 'Ubuntu', 'ubuntu', 'en', 111)`, [tWin, tLinux]);
-    const config = { maxParallelPreparations: 2, node: 'peda-pve2', storage: 'ceph-pool' };
 
     await t.test('unconfigured Windows template: identifier present in the overview (dev bug: templateId null)', async () => {
       const tpl = (await getPoolOverview(db)).templates.find(x => x.name === 'Windows 2022 v2');
@@ -35,45 +34,49 @@ test('Windows pool administration (P6)', { skip: !url }, async t => {
       assert.equal(tpl.templateId, tWin, 'the LEFT JOIN must not overwrite the template id with NULL');
     });
 
-    await t.test('configuration (pool page): Windows only, strict validation, created disabled', async () => {
-      await assert.rejects(configureTemplate(db, tLinux, config), error => error.code === 'NOT_WINDOWS');
-      await assert.rejects(configureTemplate(db, tWin, { ...config, node: 'pve;x' }), error => error.code === 'VALIDATION');
-      await assert.rejects(configureTemplate(db, tWin, { ...config, enabled: true }), error => error.code === 'VALIDATION', 'enabled is set from the VM Models page');
-      await assert.rejects(configureTemplate(db, tWin, { ...config, readyTarget: 3 }), error => error instanceof PoolAdminError && error.code === 'VALIDATION', 'ready target set from the VM Models page');
-      assert.deepEqual(await configureTemplate(db, tWin, config), { created: true });
-      const tpl = (await getPoolOverview(db)).templates.find(x => x.templateId === tWin);
-      assert.deepEqual([tpl.configured, tpl.config.enabled, tpl.config.sourceTemplateVmid], [true, false, 147], 'source = VMID of the VM model');
-      assert.equal((await getPoolOverview(db)).templates.some(x => x.templateId === tLinux), false, 'Linux templates absent from the page');
-      assert.deepEqual(await configureTemplate(db, tWin, { ...config, maxParallelPreparations: 3 }), { created: false });
+    await t.test('activation from VM Templates: first activation sets the pool storage, Windows only', async () => {
+      // No pool storage yet and none deduced from the Proxmox template: refused with a clear message.
+      await assert.rejects(setTemplatePool(db, tWin, { enabled: true, readyTarget: 3 }), error => error.code === 'NO_PLACEMENT' && error.status === 409);
+      await assert.rejects(setTemplatePool(db, tLinux, { enabled: true, readyTarget: 1, storage: 'ceph-pool' }), error => error.code === 'NOT_WINDOWS');
+      // Storage of the Proxmox template (given by the dashboard) -> becomes the pool storage.
+      assert.deepEqual(await setTemplatePool(db, tWin, { enabled: true, readyTarget: 3, storage: 'ceph-pool' }), { created: true });
+      const o = await getPoolOverview(db);
+      assert.equal(o.settings.storage, 'ceph-pool');
+      const tpl = o.templates.find(x => x.templateId === tWin);
+      assert.deepEqual([tpl.configured, tpl.config.enabled, tpl.config.readyTarget, tpl.config.sourceTemplateVmid], [true, true, 3, 147], 'source = VMID of the template');
+      assert.equal('node' in tpl.config || 'storage' in tpl.config || 'maxParallelPreparations' in tpl.config, false, 'no placement per template any more');
+      assert.equal(o.templates.some(x => x.templateId === tLinux), false, 'Linux templates absent from the page');
+      // Another storage given later does not replace the pool storage.
+      await setTemplatePool(db, tWin, { enabled: true, readyTarget: 4, storage: 'other-store' });
+      assert.equal((await getPoolOverview(db)).settings.storage, 'ceph-pool');
     });
 
-    await t.test('activation from VM Models: no qualification, new VMID = new revision kept enabled', async () => {
-      await setTemplatePool(db, tWin, { enabled: true, readyTarget: 3 });
-      let tpl = (await getPoolOverview(db)).templates.find(x => x.templateId === tWin);
-      assert.deepEqual([tpl.config.enabled, tpl.config.readyTarget, tpl.config.maxParallelPreparations], [true, 3, 3], 'technical settings kept');
-      // The VM model gets another Proxmox VMID: new revision, still enabled.
+    await t.test('VMID of the template: new revision kept enabled; no longer Windows: disabled', async () => {
       await db.query('UPDATE vm_templates SET proxmox_template_vmid = 160 WHERE id = $1', [tWin]);
       assert.deepEqual(await syncTemplateModel(db, tWin, { osType: 'windows-server', proxmoxTemplateVmid: 160 }), { newRevision: 2 });
       assert.deepEqual(await syncTemplateModel(db, tWin, { osType: 'windows-server', proxmoxTemplateVmid: 160 }), { newRevision: null }, 'same VMID: no change');
-      tpl = (await getPoolOverview(db)).templates.find(x => x.templateId === tWin);
+      let tpl = (await getPoolOverview(db)).templates.find(x => x.templateId === tWin);
       assert.deepEqual([tpl.config.revision, tpl.config.sourceTemplateVmid, tpl.config.enabled], [2, 160, true]);
-      // First activation of a model never configured: created with the given storage, automatic placement.
       const tNew = randomUUID();
       await db.query(`INSERT INTO vm_templates VALUES ($1, 'Windows 11', 'windows11', 'fr', 148)`, [tNew]);
-      await assert.rejects(setTemplatePool(db, tNew, { enabled: true, readyTarget: 2 }), error => error.code === 'NO_PLACEMENT' && error.status === 409);
-      assert.deepEqual(await setTemplatePool(db, tNew, { enabled: false, readyTarget: 0 }), { created: false }, 'disabling an unconfigured model: nothing');
-      assert.deepEqual(await setTemplatePool(db, tNew, { enabled: true, readyTarget: 2, storage: 'ceph-pool' }), { created: true });
+      assert.deepEqual(await setTemplatePool(db, tNew, { enabled: false, readyTarget: 0 }), { created: false }, 'disabling an unconfigured template: nothing');
+      assert.deepEqual(await setTemplatePool(db, tNew, { enabled: true, readyTarget: 2 }), { created: true }, 'pool storage already set: nothing needed');
       tpl = (await getPoolOverview(db)).templates.find(x => x.templateId === tNew);
-      assert.deepEqual([tpl.config.enabled, tpl.config.readyTarget, tpl.config.node, tpl.config.storage, tpl.config.sourceTemplateVmid], [true, 2, null, 'ceph-pool', 148]);
-      // The model is no longer a Windows one: pool disabled.
+      assert.deepEqual([tpl.config.enabled, tpl.config.readyTarget, tpl.config.sourceTemplateVmid], [true, 2, 148]);
       await syncTemplateModel(db, tNew, { osType: 'ubuntu', proxmoxTemplateVmid: 148 });
       assert.equal((await db.query('SELECT enabled FROM windows_pool_templates WHERE template_id = $1', [tNew])).rows[0].enabled, false);
       await assert.rejects(setTemplatePool(db, tWin, { enabled: true, readyTarget: -1 }), error => error.code === 'VALIDATION');
     });
 
     await t.test('settings and limits: validation, controlled suspension', async () => {
-      await updatePoolSettings(db, { paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'], maxCapacity: 30 });
-      assert.equal((await getPoolOverview(db)).settings.maxCapacity, 30, 'global ceiling (migration 036)');
+      await updatePoolSettings(db, { paused: false, proxmoxPool: 'labs-dev', dnsServers: ['195.186.4.162', '195.186.4.163'], maxCapacity: 30, node: 'peda-pve2', storage: 'ceph-pool', maxParallelPreparations: 6 });
+      let settings = (await getPoolOverview(db)).settings;
+      assert.deepEqual([settings.maxCapacity, settings.node, settings.storage, settings.maxParallelPreparations], [30, 'peda-pve2', 'ceph-pool', 6], 'global ceiling (036) and placement (037)');
+      await updatePoolSettings(db, { node: '' });
+      settings = (await getPoolOverview(db)).settings;
+      assert.equal(settings.node, null, 'empty node = automatic placement');
+      await assert.rejects(updatePoolSettings(db, { node: 'pve;x' }), error => error.code === 'VALIDATION');
+      await assert.rejects(updatePoolSettings(db, { maxParallelPreparations: 0 }), error => error.code === 'VALIDATION');
       await assert.rejects(updatePoolSettings(db, { maxCapacity: 0 }), error => error.code === 'VALIDATION');
       await assert.rejects(updatePoolSettings(db, { dnsServers: ['not-an-ip'] }), error => error.code === 'VALIDATION');
       await assert.rejects(updatePoolSettings(db, { vmidMin: 1 }), error => error.code === 'VALIDATION', 'min and max go together, min >= 100');

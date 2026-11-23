@@ -82,6 +82,9 @@ function renderSettings() {
   $('poolProxmoxPool').value = s.proxmoxPool ?? '';
   $('poolDnsServers').value = (s.dnsServers ?? []).join(', ');
   $('poolMaxCapacity').value = s.maxCapacity ?? '';
+  $('poolNode').value = s.node ?? '';
+  $('poolStorage').value = s.storage ?? '';
+  $('poolMaxParallel').value = s.maxParallelPreparations ?? '';
   $('poolVmidMin').value = s.vmidMin ?? '';
   $('poolVmidMax').value = s.vmidMax ?? '';
 }
@@ -96,19 +99,15 @@ function renderTemplates() {
   const rows = overview.templates.map(t => {
     const c = t.config;
     const counts = t.counts;
-    const actions = [
-      `<button type="button" class="btn btn-ghost" data-pool-action="configure" data-template="${escapeHtml(t.templateId)}">${t.configured ? 'Edit' : 'Configure'}</button>`
-    ];
     return `<tr>
-      <th scope="row">${escapeHtml(t.name)}<br><span class="muted">Proxmox ${escapeHtml(c?.sourceTemplateVmid ?? t.proxmoxTemplateVmid)}${c ? ` · ${escapeHtml(c.node || 'auto')}/${escapeHtml(c.storage)}` : ''}</span></th>
+      <th scope="row">${escapeHtml(t.name)}<br><span class="muted">Proxmox ${escapeHtml(c?.sourceTemplateVmid ?? t.proxmoxTemplateVmid)}</span></th>
       <td>${templateState(t)}</td>
       <td>${counts.ready}</td><td>${counts.preparing}</td><td>${counts.reserved}</td><td>${counts.assigned}</td>
       <td>${counts.quarantined ? `<strong>${counts.quarantined}</strong>` : 0}</td>
       <td>${c ? c.readyTarget : '—'}</td>
-      <td class="inline-actions">${actions.join('')}</td>
     </tr>`;
   });
-  $('poolTemplatesBody').innerHTML = rows.join('') || '<tr><td colspan="9" class="muted">No Windows template.</td></tr>';
+  $('poolTemplatesBody').innerHTML = rows.join('') || '<tr><td colspan="8" class="muted">No Windows template.</td></tr>';
 }
 
 function renderRequests() {
@@ -182,18 +181,6 @@ async function load({ quiet = false } = {}) {
   }
 }
 
-function openTemplateForm(templateId) {
-  const t = overview.templates.find(item => item.templateId === templateId);
-  const c = t?.config;
-  $('poolTemplateId').value = templateId;
-  $('poolTemplateFormTitle').textContent = `Pool configuration — ${t?.name ?? ''}`;
-  $('poolNode').value = c?.node ?? '';
-  $('poolStorage').value = c?.storage ?? '';
-  $('poolMaxParallel').value = c?.maxParallelPreparations ?? 2;
-  $('poolTemplateForm').hidden = false;
-  $('poolNode').focus();
-}
-
 async function act(fn, success, target = 'poolStatus') {
   try {
     const result = await fn();
@@ -222,34 +209,21 @@ function bind() {
     }
     const maxCapacity = Number($('poolMaxCapacity').value);
     if (!Number.isInteger(maxCapacity) || maxCapacity < 1) return status('Not saved: the maximum number of VMs in the pool must be at least 1.', 'danger', 'poolSettingsStatus');
+    // Placement, common to every template (node empty = automatic).
+    const node = $('poolNode').value.trim() || null;
+    const storage = $('poolStorage').value.trim();
+    const maxParallelPreparations = Number($('poolMaxParallel').value);
+    if (!storage) return status('Not saved: the storage of the pool VMs is required.', 'danger', 'poolSettingsStatus');
+    if (!Number.isInteger(maxParallelPreparations) || maxParallelPreparations < 1) return status('Not saved: at least 1 parallel preparation.', 'danger', 'poolSettingsStatus');
     void act(() => api('/api/windows-pool/settings', { method: 'PUT', body: JSON.stringify({
-      paused: $('poolPaused').checked, proxmoxPool: proxmoxPool || null, dnsServers, vmidMin, vmidMax, maxCapacity
+      paused: $('poolPaused').checked, proxmoxPool: proxmoxPool || null, dnsServers, vmidMin, vmidMax, maxCapacity, node, storage, maxParallelPreparations
     }) }), () => ($('poolPaused').checked ? 'Settings saved. The pool is suspended.' : 'Settings saved. The pool is active.'), 'poolSettingsStatus');
   });
-  $('poolTemplateForm')?.addEventListener('submit', event => {
-    event.preventDefault();
-    const templateId = $('poolTemplateId').value;
-    const number = id => Number($(id).value);
-    const body = {
-      node: $('poolNode').value.trim(), storage: $('poolStorage').value.trim(), maxParallelPreparations: number('poolMaxParallel')
-    };
-    // Immediate checks, with a visible message next to the form (instead of a silent refusal).
-    const problems = [];
-    if (!body.storage) problems.push('storage is required');
-    if (!body.node) body.node = null; // automatic placement
-    if (problems.length) return status(`Not saved: ${problems.join('; ')}.`, 'danger', 'poolTemplateStatus');
-    void act(() => api(`/api/windows-pool/templates/${encodeURIComponent(templateId)}`, { method: 'PUT', body: JSON.stringify(body) }), result => {
-      $('poolTemplateForm').hidden = true;
-      return result.created ? 'Template configured. Enable it on the VM Templates page.' : 'Template configuration saved.';
-    }, 'poolTemplateStatus');
-  });
-  $('poolTemplateCancel')?.addEventListener('click', () => { $('poolTemplateForm').hidden = true; });
 
   document.querySelector(`.page[data-view="${VIEW}"]`)?.addEventListener('click', event => {
     const button = event.target.closest('[data-pool-action]');
     if (!button) return;
     const { poolAction: action, template, deployment, vm, vmid, category, scope, max } = button.dataset;
-    if (action === 'configure') return openTemplateForm(template);
     if (action === 'cancel-lab') {
       if (!window.confirm('Cancel this lab? It will stop waiting for the Windows pool.')) return;
       return void act(() => api(`/api/lifecycle/deployments/${encodeURIComponent(deployment)}/cancel-pool-wait`, { method: 'POST' }), 'Lab cancelled.', 'poolRequestsStatus');

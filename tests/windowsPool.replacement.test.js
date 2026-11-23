@@ -41,7 +41,7 @@ test('Windows pool: replacement of the VMs in error during the assignment', { sk
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, status TEXT, updated_at TIMESTAMPTZ DEFAULT NOW());`);
-    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql']) {
+    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql', '037-windows-pool-global-placement.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8')); // 035 replayed: idempotent
     }
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-test'`);
@@ -50,6 +50,7 @@ test('Windows pool: replacement of the VMs in error during the assignment', { sk
     // Reserve 1 (on hold while the lab is deploying), ceiling 10.
     await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
                     VALUES ($1, true, 1, 10, 6, 'pve-a', 'ceph-pool', 147)`, [templateId]);
+    await db.query(`UPDATE windows_pool_settings SET node = 'pve-a', storage = 'ceph-pool', max_parallel_preparations = 6`); // global placement (migration 037)
     const px = fakeProxmox({ cloneMs: 30 });
     const proxmox = createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 });
     const manager = createPoolManager({ db, proxmox, holder: 'repl', log: quiet,

@@ -34,13 +34,14 @@ test('Windows pool manager (P2)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/037-windows-pool-global-placement.sql', import.meta.url), 'utf8'));
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'labs-test', max_capacity = 6`); // global ceiling (migration 036)
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 2 WHERE category = 'clone'`);
     const templateId = randomUUID();
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'fr')`, [templateId]);
     await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
                     VALUES ($1, true, 4, 6, 4, 'pve-b', 'ceph-pool', 147)`, [templateId]);
+    await db.query(`UPDATE windows_pool_settings SET node = 'pve-b', storage = 'ceph-pool', max_parallel_preparations = 4`); // global placement (migration 037)
     const states = async () => Object.fromEntries((await db.query(`SELECT state, COUNT(*)::int AS n FROM windows_pool_vms GROUP BY 1`)).rows.map(r => [r.state, r.n]));
 
     const px = fakeProxmox();

@@ -25,7 +25,7 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/037-windows-pool-global-placement.sql', import.meta.url), 'utf8'));
     // Stock in the pool's Proxmox pool ("pool-dev" in dev, "pool" in prod), labs in "labs-dev"/"labs".
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-dev'`);
     await db.query(`UPDATE windows_pool_operation_limits SET max_active = 2 WHERE category = 'assign'`);
@@ -33,6 +33,7 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'en')`, [templateId]);
     await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
                     VALUES ($1, true, 0, 12, 6, 'pve-b', 'ceph-pool', 147)`, [templateId]);
+    await db.query(`UPDATE windows_pool_settings SET node = 'pve-b', storage = 'ceph-pool', max_parallel_preparations = 6`); // global placement (migration 037)
     const px = fakeProxmox({ cloneMs: 30 });
     const proxmox = createPoolProxmox(px.request, { taskPollMs: 5, guestPollMs: 5 });
     const manager = createPoolManager({ db, proxmox, holder: 'asg', log: quiet, options: fast });

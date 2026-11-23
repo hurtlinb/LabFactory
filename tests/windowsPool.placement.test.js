@@ -41,20 +41,19 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT);
                     CREATE TABLE lab_deployments (id UUID PRIMARY KEY);`);
-    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql']) {
+    for (const file of ['032-windows-pool.sql', '034-windows-pool-auto-placement.sql', '034-windows-pool-auto-placement.sql', '035-windows-pool-replacements.sql', '036-windows-pool-simplified-activation.sql', '037-windows-pool-global-placement.sql']) {
       await db.query(await fs.readFile(new URL(`../db/migrations/${file}`, import.meta.url), 'utf8')); // 034 replayed: idempotent
     }
     await db.query(`UPDATE windows_pool_settings SET paused = false, proxmox_pool = 'pool-test'`);
     const templateId = randomUUID();
     await db.query(`INSERT INTO vm_templates VALUES ($1, 'en')`, [templateId]);
 
-    await t.test('034: an enabled template without a node is accepted, without a storage refused', async () => {
-      await assert.rejects(db.query(
-        `INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
-         VALUES ($1, true, 2, 4, 2, 'pve-a', NULL, 147)`, [templateId]), /enabled_placement/);
+    await t.test('037: placement is global, nothing required per template; settings validated', async () => {
+      await assert.rejects(db.query(`UPDATE windows_pool_settings SET node = 'pve;x'`), /check/i);
       await db.query(
         `INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
          VALUES ($1, true, 2, 4, 2, NULL, 'ceph-pool', 147)`, [templateId]);
+      await db.query(`UPDATE windows_pool_settings SET node = NULL, storage = 'ceph-pool', max_parallel_preparations = 2`); // global placement (migration 037)
     });
 
     // pve-b: 60 GiB free, pve-a: 40 GiB, pve-e: 4 GiB (below the 10% margin), pve-c: offline,
@@ -113,7 +112,8 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
 
     await t.test('fixed node: forced even when another node has more free memory', async () => {
       px.stats.cloneCalls.length = 0;
-      await db.query(`UPDATE windows_pool_templates SET enabled = true, node = 'pve-a', ready_target = 1`);
+      await db.query(`UPDATE windows_pool_templates SET enabled = true, ready_target = 1`);
+      await db.query(`UPDATE windows_pool_settings SET node = 'pve-a'`); // global node (migration 037)
       await until(manager, async () => (await db.query(`SELECT COUNT(*)::int AS n FROM windows_pool_vms WHERE state = 'ready'`)).rows[0].n === 1);
       // Exactly one clone for a reserve of 1 (race fixed 2026-11-22: two consecutive ticks could
       // each start a creation, rows counted before the INSERT of the other).
@@ -128,7 +128,8 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
       const stale = randomUUID();
       await db.query(`INSERT INTO lab_deployments (id, status, updated_at) VALUES ($1, 'customizing', NOW()), ($2, 'deploying', NOW() - interval '5 hours')`, [busy, stale]);
       px.stats.cloneCalls.length = 0;
-      await db.query(`UPDATE windows_pool_templates SET enabled = true, node = NULL, storage = 'ceph-pool', ready_target = 1`);
+      await db.query(`UPDATE windows_pool_templates SET enabled = true, ready_target = 1`);
+      await db.query(`UPDATE windows_pool_settings SET node = NULL, storage = 'ceph-pool'`);
       let result;
       for (let i = 0; i < 5; i += 1) { result = await manager.tick(); await sleep(10); }
       await manager.drain();
@@ -145,7 +146,8 @@ test('Windows pool: automatic placement and HA', { skip: !url }, async t => {
 
     await t.test('no node seeing the storage: nothing allocated', async () => {
       px.stats.cloneCalls.length = 0;
-      await db.query(`UPDATE windows_pool_templates SET enabled = true, node = NULL, storage = 'missing-store'`);
+      await db.query(`UPDATE windows_pool_templates SET enabled = true`);
+      await db.query(`UPDATE windows_pool_settings SET node = NULL, storage = 'missing-store'`);
       for (let i = 0; i < 5; i += 1) { await manager.tick(); await sleep(10); }
       await manager.drain();
       assert.equal(px.stats.cloneCalls.length, 0);

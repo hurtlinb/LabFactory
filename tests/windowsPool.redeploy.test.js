@@ -26,12 +26,13 @@ test('workstation redeploy with the pool (P5)', { skip: !url }, async t => {
   const db = new Pool({ connectionString: url, options: '-c search_path=' + schema, max: 30 });
   try {
     await db.query(`CREATE TABLE vm_templates (id UUID PRIMARY KEY, language TEXT); CREATE TABLE lab_deployments (id UUID PRIMARY KEY, last_job_id TEXT);`);
-    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8'));
+    await db.query(await fs.readFile(new URL('../db/migrations/032-windows-pool.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/035-windows-pool-replacements.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/036-windows-pool-simplified-activation.sql', import.meta.url), 'utf8')); await db.query(await fs.readFile(new URL('../db/migrations/037-windows-pool-global-placement.sql', import.meta.url), 'utf8'));
     await db.query(`UPDATE windows_pool_settings SET paused = false`);
     const tPool = randomUUID(), tLegacy = randomUUID(), tLinux = randomUUID();
     for (const id of [tPool, tLegacy, tLinux]) await db.query(`INSERT INTO vm_templates VALUES ($1, 'en')`, [id]);
     await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, max_parallel_preparations, node, storage, source_template_vmid)
                     VALUES ($1, true, 0, 8, 4, 'pve-b', 'ceph-pool', 147), ($2, false, 0, 8, 4, 'pve-b', 'ceph-pool', 148)`, [tPool, tLegacy]);
+    await db.query(`UPDATE windows_pool_settings SET node = 'pve-b', storage = 'ceph-pool', max_parallel_preparations = 8`); // global placement (migration 037)
     const deploymentId = randomUUID();
     await db.query('INSERT INTO lab_deployments VALUES ($1, NULL)', [deploymentId]);
     const bpWin = randomUUID(), bpLegacy = randomUUID(), bpLinux = randomUUID();
