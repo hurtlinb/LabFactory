@@ -376,3 +376,7 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
   box-shadow: var(--shadow); pointer-events: none;
 }
 .ui-tooltip[hidden] { display: none; }
+/* VM cards of the blueprint: small badge over the OS logo corner */
+.vm-badge-wrap { position: relative; flex: 0 0 auto; }
+.vm-badge-wrap .pool-badge-compact { top: auto; right: -6px; bottom: -6px; width: 17px; height: 17px; padding: 0; box-shadow: 0 0 0 2px var(--surface); }
+.vm-badge-wrap .pool-badge-compact svg { width: 10px; height: 10px; flex-basis: 10px; }

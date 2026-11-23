@@ -1070,11 +1070,14 @@ function renderCanvas() {
         <article class="vm-card" data-vm-id="${vm.id}">
           <div class="vm-top">
             <div style="display:flex; gap:12px; align-items:center;">
-              <div class="vm-badge template-badge-image">
-                <img src="${escapeHtmlAttr(getOsLogo(template?.osType))}" alt="" aria-hidden="true">
+              <div class="vm-badge-wrap">
+                <div class="vm-badge template-badge-image">
+                  <img src="${escapeHtmlAttr(getOsLogo(template?.osType))}" alt="" aria-hidden="true">
+                </div>
+                ${poolBadge(template, { compact: true })}
               </div>
               <div>
-                <strong>${escapeHtml(template?.name || 'Unknown template')}</strong>${poolBadge(template)}
+                <strong>${escapeHtml(template?.name || 'Unknown template')}</strong>
               </div>
             </div>
           </div>

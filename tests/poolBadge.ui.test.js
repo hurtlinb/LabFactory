@@ -60,5 +60,7 @@ test('blueprint palette marks templates with the Windows pool enabled, with an e
   await api.loadBlueprint('bp');
   const cardBadge = document.querySelector('.vm-card[data-vm-id="vm"] .pool-badge');
   assert(cardBadge, 'pool badge on the VM card of the blueprint');
-  assert.equal(cardBadge.textContent.trim(), 'Pool');
+  assert(cardBadge.classList.contains('pool-badge-compact'));
+  assert(cardBadge.closest('.vm-badge-wrap'), 'badge over the OS logo');
+  assert.equal(cardBadge.textContent.trim(), '');
 });
