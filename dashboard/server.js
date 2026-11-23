@@ -33,6 +33,7 @@ import {
 } from '../lib/windowsPool/admin.js';
 import { createHttpRequest, createPoolProxmox, templateDiskStorage } from '../lib/windowsPool/proxmox.js';
 import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
+import { activeAnnouncement, readAnnouncement, validateAnnouncement, writeAnnouncement } from '../lib/siteAnnouncement.js';
 
 const require = createRequire(import.meta.url);
 const { Queue, QueueEvents } = require('bullmq');
@@ -2020,6 +2021,24 @@ app.get('/api/app-info', (req, res) => {
     auth: auth.describeSession(req)
   });
 });
+
+// Site-wide banner: every authenticated user reads the active one, admins configure it.
+app.get('/api/announcement', wrapAsync(async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({ announcement: activeAnnouncement(await readAnnouncement(dbPool)) });
+}));
+
+app.get('/api/settings/announcement', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await readAnnouncement(dbPool));
+}));
+
+app.put('/api/settings/announcement', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  const { value, errors } = validateAnnouncement(req.body);
+  if (errors) return res.status(400).json({ error: Object.values(errors).flat()[0], errors });
+  const user = getRequestUser(req);
+  res.json(await writeAnnouncement(dbPool, value, user?.email ?? user?.name ?? null));
+}));
 
 const changelogPath = path.resolve(__dirname, '../CHANGELOG.md');
 app.get('/api/changelog', async (_req, res) => {

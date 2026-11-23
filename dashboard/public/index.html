@@ -158,6 +158,12 @@
     <!-- ── Main content ───────────────────────────────────────── -->
     <main class="main">
 
+      <!-- Site-wide announcement (configured in Maintenance) -->
+      <div id="siteAnnouncement" class="site-announcement" data-level="info" role="status" aria-live="polite" hidden>
+        <svg class="site-announcement-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 10 18H2ZM12 9v4M12 17h.01"/></svg>
+        <p id="siteAnnouncementText" class="site-announcement-text"></p>
+      </div>
+
       <!-- Topbar -->
       <div class="app-topbar"><button id="menuToggle" class="btn btn-ghost menu-toggle" type="button" aria-expanded="false" aria-controls="mainNavigation">Menu</button>
         <div class="page-header">
@@ -346,6 +352,46 @@
               <button type="button" id="refreshLabsStateButton" class="btn btn-secondary">Refresh labs state</button>
               <div id="settingsStatus" class="status-message" hidden></div>
             </div>
+          </article>
+
+          <article class="panel" id="announcementPanel" aria-labelledby="announcementTitle">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Announcement</p>
+                <h3 id="announcementTitle">Banner shown on every page</h3>
+                <p class="muted">Announce a maintenance or an outage to every user of LabFactory.</p>
+              </div>
+            </div>
+            <form id="announcementForm" class="announcement-form" novalidate>
+              <label class="switch">
+                <input id="announcementEnabled" type="checkbox" name="enabled">
+                <span class="switch-track" aria-hidden="true"><span class="switch-thumb"></span></span>
+                <span class="switch-label">Show the banner</span>
+              </label>
+              <div class="announcement-fields">
+                <label class="field">
+                  <span>Level</span>
+                  <select id="announcementLevel" name="level">
+                    <option value="info">Information</option>
+                    <option value="warning">Warning (maintenance)</option>
+                    <option value="danger">Critical (outage)</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Hide automatically after (optional)</span>
+                  <input id="announcementEndsAt" type="datetime-local" name="endsAt">
+                </label>
+              </div>
+              <label class="field">
+                <span>Message</span>
+                <textarea id="announcementMessage" name="message" rows="3" maxlength="500" placeholder="Maintenance on Tuesday 24.11 from 8:15 to 10:15: deployments are unavailable."></textarea>
+              </label>
+              <div class="inline-actions">
+                <button type="submit" id="announcementSaveButton" class="btn btn-primary">Save banner</button>
+                <span id="announcementMeta" class="muted"></span>
+                <div id="announcementStatus" class="status-message" hidden></div>
+              </div>
+            </form>
           </article>
 
           <article class="panel" id="uploadedFilesPanel" aria-labelledby="uploadedFilesTitle">

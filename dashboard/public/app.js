@@ -276,7 +276,7 @@ async function setActiveView(view, { fromRoute = false } = {}) {
   document.body.classList.remove('nav-open');
   document.getElementById('menuToggle')?.setAttribute('aria-expanded', 'false');
   document.getElementById('pageTitle')?.focus({ preventScroll: true });
-  if (view === 'admin-settings') void loadUploadedFiles();
+  if (view === 'admin-settings') { void loadUploadedFiles(); void loadAnnouncementSettings(); }
   // Independent pages (separate modules, e.g. windowsPool.js) listen to the view changes.
   window.dispatchEvent(new CustomEvent('labfactory:view', { detail: { view } }));
   if (view !== 'blueprint') {
@@ -3842,6 +3842,86 @@ refreshLabsStateButton?.addEventListener('click', async () => {
   }
 });
 
+// ── Site-wide announcement banner ──────────────────────────────
+function renderSiteAnnouncement(announcement) {
+  const banner = document.getElementById('siteAnnouncement');
+  const text = document.getElementById('siteAnnouncementText');
+  if (!banner || !text) return;
+  if (!announcement?.message) { banner.hidden = true; text.textContent = ''; return; }
+  banner.dataset.level = announcement.level || 'info';
+  banner.setAttribute('role', announcement.level === 'danger' ? 'alert' : 'status');
+  text.textContent = announcement.message;
+  banner.hidden = false;
+}
+
+async function loadSiteAnnouncement() {
+  try {
+    const payload = await fetchJson('/api/announcement');
+    renderSiteAnnouncement(payload?.announcement ?? null);
+  } catch {
+    // Keep the current banner: a transient error must not hide an announced outage.
+  }
+}
+
+function toDatetimeLocal(iso) {
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = value => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function fillAnnouncementForm(announcement) {
+  document.getElementById('announcementEnabled').checked = Boolean(announcement?.enabled);
+  document.getElementById('announcementLevel').value = announcement?.level || 'info';
+  document.getElementById('announcementMessage').value = announcement?.message || '';
+  document.getElementById('announcementEndsAt').value = toDatetimeLocal(announcement?.endsAt);
+  const meta = document.getElementById('announcementMeta');
+  const expired = announcement?.enabled && announcement.endsAt && new Date(announcement.endsAt) <= new Date();
+  meta.textContent = announcement?.updatedAt
+    ? `Last change ${new Date(announcement.updatedAt).toLocaleString()}${announcement.updatedBy ? ` by ${announcement.updatedBy}` : ''}${expired ? ' · end time passed, banner hidden' : ''}`
+    : '';
+}
+
+async function loadAnnouncementSettings() {
+  if (!state.isAdmin || !document.getElementById('announcementForm')) return;
+  try {
+    fillAnnouncementForm(await fetchJson('/api/settings/announcement'));
+  } catch (error) {
+    showMessage(document.getElementById('announcementStatus'), error.message, 'danger');
+  }
+}
+
+document.getElementById('announcementForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = document.getElementById('announcementSaveButton');
+  const status = document.getElementById('announcementStatus');
+  const endsAtValue = document.getElementById('announcementEndsAt').value;
+  const endsAt = endsAtValue ? new Date(endsAtValue) : null;
+  if (endsAt && Number.isNaN(endsAt.getTime())) { showMessage(status, 'End time is not a valid date.', 'danger'); return; }
+  const body = {
+    enabled: document.getElementById('announcementEnabled').checked,
+    level: document.getElementById('announcementLevel').value,
+    message: document.getElementById('announcementMessage').value,
+    endsAt: endsAt ? endsAt.toISOString() : null
+  };
+  button.disabled = true;
+  try {
+    const saved = await fetchJson('/api/settings/announcement', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    fillAnnouncementForm(saved);
+    await loadSiteAnnouncement();
+    showMessage(status, saved.enabled ? 'Banner saved and shown to every user.' : 'Banner saved (hidden).', 'success');
+  } catch (error) {
+    showMessage(status, error.message, 'danger');
+  } finally {
+    button.disabled = false;
+  }
+});
+
 clearJobHistoryButton?.addEventListener('click', async () => {
   if (!await confirmAction('Clear finished job history?', 'Completed and failed jobs will be deleted. Their customization checkpoints will no longer be available for resume. Active and queued jobs are preserved.', 'Clear history')) return;
   clearJobHistoryButton.disabled = true;
@@ -4214,6 +4294,7 @@ async function bootstrap() {
 
   const loaders = [
     loadConnectionStatuses(),
+    loadSiteAnnouncement(),
     loadCourses(),
     loadClassrooms(),
     loadTemplates(),
@@ -4241,6 +4322,7 @@ async function bootstrap() {
   }, 5000);
   setInterval(() => {
     loadConnectionStatuses();
+    loadSiteAnnouncement();
   }, 30000);
 }
 

@@ -336,3 +336,24 @@ dialog::backdrop { background: rgb(22 30 50 / 30%); backdrop-filter: blur(3px); 
 .blueprint-deployment-estimate { margin: 0; padding: 8px 12px; font-size: 12px; overflow-wrap: anywhere; border-top: 1px solid var(--line); }
 .blueprint-deployment-estimate .muted { display: block; font-size: 11px; }
 #deploymentDurationEstimate { font-size: 12px; line-height: 1.5; }
+
+/* Site-wide announcement banner (configured in Maintenance) */
+.site-announcement {
+  display: flex; align-items: flex-start; gap: 10px;
+  width: min(1180px, calc(100% - 48px)); margin: 16px auto 0; padding: 12px 16px;
+  border: 1px solid var(--brand); border-radius: var(--r); background: var(--brand-soft); color: var(--text);
+  font-size: 14px; font-weight: 500;
+}
+.site-announcement[hidden] { display: none; }
+.site-announcement-icon { flex: 0 0 18px; width: 18px; height: 18px; margin-top: 1px; color: var(--brand); }
+.site-announcement-text { margin: 0; white-space: pre-line; overflow-wrap: anywhere; }
+.site-announcement[data-level="warning"] { background: var(--warning-soft); border-color: var(--warning-line); color: var(--warning); }
+.site-announcement[data-level="warning"] .site-announcement-icon { color: var(--warning); }
+.site-announcement[data-level="danger"] { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+.site-announcement[data-level="danger"] .site-announcement-icon { color: var(--danger); }
+.announcement-form { display: grid; gap: 14px; }
+.announcement-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; }
+.announcement-form textarea { resize: vertical; min-height: 64px; }
+@media (max-width: 760px) {
+  .site-announcement { width: calc(100% - 32px); margin-top: 12px; }
+}
