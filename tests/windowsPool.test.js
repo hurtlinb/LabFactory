@@ -51,7 +51,8 @@ const baseConfig = {
 test('template configuration: linked clone required, consistent target and placement', () => {
   assert.equal(parseTemplatePoolConfig(baseConfig).cloneMode, 'linked');
   assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, cloneMode: 'full' }));
-  assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, readyTarget: 7 }), /maximum capacity/);
+  // Global ceiling (migration 036): the reserve of a template is no longer bounded by its own ceiling.
+  assert.equal(parseTemplatePoolConfig({ ...baseConfig, readyTarget: 7, maxCapacity: undefined }).readyTarget, 7);
   // Node optional (automatic placement, 2026-11-20); storage still required to enable.
   assert.equal(parseTemplatePoolConfig({ ...baseConfig, node: null }).node, null);
   assert.throws(() => parseTemplatePoolConfig({ ...baseConfig, storage: null }), /requires a storage/);
@@ -81,6 +82,15 @@ test('replenishment: reserve, demand above the reserve, ceiling, parallelism, su
   assert.equal(plan({ preparing: 2 }, 0).toStart, 0, 'preparations in progress count');
   assert.deepEqual(planReplenishment({ config: baseConfig, counts: {}, waitingDemand: 1, paused: true }), { toStart: 0, blocked: 'POOL_PAUSED' });
   assert.deepEqual(planReplenishment({ config: { ...baseConfig, enabled: false }, counts: {}, waitingDemand: 1 }), { toStart: 0, blocked: 'TEMPLATE_DISABLED' });
+});
+
+// Migration 036: the ceiling is global, shared by every template (stock of the others counted).
+test('replenishment: global ceiling shared by the templates', () => {
+  const config = { ...baseConfig, readyTarget: 5, maxParallelPreparations: 10, maxCapacity: undefined };
+  assert.equal(planReplenishment({ config, counts: {}, maxCapacity: 8, otherStock: 6 }).toStart, 2, '8 - 6 VMs of the other templates');
+  assert.equal(planReplenishment({ config, counts: { ready: 1 }, maxCapacity: 8, otherStock: 7 }).toStart, 0, 'pool full');
+  assert.equal(planReplenishment({ config, counts: {}, maxCapacity: 50 }).toStart, 5);
+  assert.equal(planReplenishment({ config, counts: {}, waitingDemand: 9, maxCapacity: 8 }).blocked, 'DEMAND_EXCEEDS_CAPACITY');
 });
 
 // --- QGA contract ----------------------------------------------------------------
@@ -296,4 +306,21 @@ test('replenishment: reserve on hold while labs are busy, waiting demand always 
   assert.deepEqual(planReplenishment({ config, counts: { ready: 1 }, waitingDemand: 3, holdReserve: true }), { toStart: 2, blocked: null, onHold: 'LABS_BUSY' });
   assert.deepEqual(planReplenishment({ config, counts: { ready: 4 }, holdReserve: true }), { toStart: 0, blocked: null }, 'reserve full: nothing on hold');
   assert.deepEqual(planReplenishment({ config, counts: { ready: 1 } }), { toStart: 3, blocked: null });
+});
+
+// Storage deduced from the Proxmox template on the first activation from the VM Templates page
+// (bug 2026-11-23: regex without its backslash, never any disk found -> "storage unknown").
+test('template disk storage: system disk of the real templates 152 and 147', async () => {
+  const { templateDiskStorage } = await import('../lib/windowsPool/proxmox.js');
+  assert.equal(templateDiskStorage({
+    tpmstate0: 'ceph-pool:base-152-disk-2,size=4M,version=v2.0',
+    efidisk0: 'ceph-pool:base-152-disk-0,efitype=4m,ms-cert=2023k,pre-enrolled-keys=1,size=1M',
+    scsi0: 'ceph-pool:base-152-disk-1,iothread=1,size=60G',
+    ide2: 'ceph-pool:vm-152-cloudinit,media=cdrom',
+    ide0: 'none,media=cdrom'
+  }), 'ceph-pool');
+  assert.equal(templateDiskStorage({ ide2: 'local:iso/x.iso,media=cdrom', scsi10: 'fast:base-1-disk-2', scsi2: 'ssd:base-1-disk-1' }), 'ssd', 'numeric order');
+  assert.equal(templateDiskStorage({ virtio0: 'local-lvm:base-9-disk-0,size=32G' }), 'local-lvm');
+  assert.equal(templateDiskStorage({ ide2: 'none,media=cdrom', efidisk0: 'ceph-pool:x' }), null);
+  assert.equal(templateDiskStorage(null), null);
 });

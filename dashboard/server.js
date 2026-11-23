@@ -31,7 +31,7 @@ import {
   PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, configureTemplate, setTemplatePool,
   syncTemplateModel, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
 } from '../lib/windowsPool/admin.js';
-import { createHttpRequest, createPoolProxmox } from '../lib/windowsPool/proxmox.js';
+import { createHttpRequest, createPoolProxmox, templateDiskStorage } from '../lib/windowsPool/proxmox.js';
 import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
 
 const require = createRequire(import.meta.url);
@@ -4134,11 +4134,9 @@ const detectTemplateStorage = async vmid => {
     const proxmox = getDashboardPoolProxmox();
     const guest = await proxmox.findGuest(vmid);
     if (!guest) return null;
-    const config = await proxmox.getConfig(guest.node, vmid);
-    const disk = Object.keys(config).filter(key => /^(scsi|virtio|sata|ide)d+$/.test(key))
-      .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
-      .map(key => String(config[key])).find(value => !/media=cdrom/.test(value) && /^[A-Za-z0-9._-]+:/.test(value));
-    return disk ? disk.split(':')[0] : null;
+    const storage = templateDiskStorage(await proxmox.getConfig(guest.node, vmid));
+    if (!storage) console.warn(`Proxmox template ${vmid}: no system disk found to deduce its storage`);
+    return storage;
   } catch (error) {
     console.warn(`Unable to detect the storage of Proxmox template ${vmid}: ${error.message}`);
     return null;
