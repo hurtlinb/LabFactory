@@ -23,6 +23,48 @@ const UI_ICONS = {
   "terminal": "<rect x=\"3\" y=\"4\" width=\"18\" height=\"16\" rx=\"2\"/><path d=\"m7 8 4 4-4 4M14 16h3\"/>"
 };
 
+// Pastille "Pool" (blueprint page): the template is served by the Windows VM pool.
+function poolBadge(template, { compact = false } = {}) {
+  const pool = template?.windowsPool;
+  if (!pool?.enabled) return '';
+  const target = Number(pool.readyTarget) || 0;
+  const tooltip = `Windows pool enabled: ${target} VM${target === 1 ? ' is' : 's are'} kept ready in advance for this template. `
+    + 'Labs using it start from pre-installed VMs and deploy much faster.';
+  return `<span class="pool-badge${compact ? ' pool-badge-compact' : ''}" role="img" tabindex="0" aria-label="${escapeHtmlAttr(tooltip)}" data-tooltip="${escapeHtmlAttr(tooltip)}">`
+    + `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2 4 14h7l-1 8 9-12h-7Z"/></svg>`
+    + `${compact ? '' : '<span>Pool</span>'}</span>`;
+}
+
+// Lightweight tooltip for [data-tooltip], positioned in the viewport (escapes scrolling containers).
+function setupTooltips() {
+  if (document.getElementById('uiTooltip')) return;
+  const tip = document.createElement('div');
+  tip.id = 'uiTooltip'; tip.className = 'ui-tooltip'; tip.setAttribute('role', 'tooltip'); tip.hidden = true;
+  document.body.append(tip);
+  let anchor = null;
+  const hide = () => { anchor?.removeAttribute('aria-describedby'); anchor = null; tip.hidden = true; };
+  const show = target => {
+    anchor = target;
+    tip.textContent = target.dataset.tooltip;
+    tip.hidden = false;
+    target.setAttribute('aria-describedby', 'uiTooltip');
+    const box = target.getBoundingClientRect();
+    const width = tip.offsetWidth; const height = tip.offsetHeight;
+    const left = Math.min(Math.max(8, box.left + box.width / 2 - width / 2), window.innerWidth - width - 8);
+    const above = box.top - height - 8;
+    tip.style.left = `${left}px`;
+    tip.style.top = `${above >= 8 ? above : box.bottom + 8}px`;
+  };
+  const enter = event => { const target = event.target.closest?.('[data-tooltip]'); if (target && target !== anchor) show(target); };
+  const leave = event => { if (anchor && !anchor.contains(event.relatedTarget)) hide(); };
+  document.addEventListener('pointerover', enter);
+  document.addEventListener('pointerout', leave);
+  document.addEventListener('focusin', enter);
+  document.addEventListener('focusout', leave);
+  document.addEventListener('keydown', event => { if (event.key === 'Escape') hide(); });
+  window.addEventListener('scroll', hide, true);
+}
+
 function uiIcon(name) {
   return `<svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${UI_ICONS[name] || UI_ICONS.warning}</svg>`;
 }
@@ -680,6 +722,7 @@ function renderTemplates() {
       <p class="vm-lib-group-label">VMs</p>
       ${paletteTemplates.map(t => `
         <article class="vm-lib-item" draggable="true" data-template-id="${t.id}">
+          ${poolBadge(t, { compact: true })}
           <img class="palette-os-icon" src="${escapeHtmlAttr(getOsLogo(t.osType))}" alt="" draggable="false">
           <span class="vm-lib-name">${escapeHtml(t.name)}</span>
           <span class="vm-lib-vmid">${escapeHtml(getOsLabel(t.osType))}</span>
@@ -1031,7 +1074,7 @@ function renderCanvas() {
                 <img src="${escapeHtmlAttr(getOsLogo(template?.osType))}" alt="" aria-hidden="true">
               </div>
               <div>
-                <strong>${escapeHtml(template?.name || 'Unknown template')}</strong>
+                <strong>${escapeHtml(template?.name || 'Unknown template')}</strong>${poolBadge(template)}
               </div>
             </div>
           </div>
@@ -4280,6 +4323,7 @@ function initUx() {
 
 
 async function bootstrap() {
+  setupTooltips();
   setActiveView('dashboard');
   syncBlueprintFields();
   renderBlueprintWorkspace();
