@@ -29,7 +29,7 @@ import {
 import { fetchActiveAssignments, overlayAssignments, purgeDeploymentPoolRecords } from '../lib/windowsPool/deployment.js';
 import {
   PoolAdminError, getPoolOverview, getVmTimeline, updatePoolSettings, setTemplatePool,
-  syncTemplateModel, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
+  syncTemplateModel, purgeTemplatePoolHistory, updateOperationLimit, destroyQuarantinedVm, cancelDeploymentPoolRequests
 } from '../lib/windowsPool/admin.js';
 import { createHttpRequest, createPoolProxmox, templateDiskStorage } from '../lib/windowsPool/proxmox.js';
 import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
@@ -3530,19 +3530,41 @@ app.delete(
       return;
     }
 
+    const blueprints = (await dbPool.query(
+      `SELECT DISTINCT b.name FROM lab_blueprint_vms v JOIN lab_blueprints b ON b.id = v.blueprint_id WHERE v.template_id = $1 ORDER BY b.name`,
+      [req.params.id])).rows.map(row => row.name);
+    if (blueprints.length) {
+      res.status(409).json({ error: `vm template is used by blueprint(s): ${blueprints.join(', ')}` });
+      return;
+    }
+
+    // Windows pool history (destroyed VMs, configuration) removed in the same transaction:
+    // it would otherwise block the deletion with a misleading "used by a blueprint" (dev 2026-11-23).
+    const client = await dbPool.connect();
     try {
-      const result = await dbPool.query('DELETE FROM vm_templates WHERE id = $1 RETURNING id', [req.params.id]);
+      await client.query('BEGIN');
+      await purgeTemplatePoolHistory(client, req.params.id);
+      const result = await client.query('DELETE FROM vm_templates WHERE id = $1 RETURNING id', [req.params.id]);
       if (!result.rowCount) {
+        await client.query('ROLLBACK');
         res.status(404).json({ error: 'vm model not found' });
         return;
       }
+      await client.query('COMMIT');
       res.json({ ok: true, id: result.rows[0].id });
     } catch (error) {
+      await client.query('ROLLBACK').catch(() => undefined);
+      if (error instanceof PoolAdminError) {
+        res.status(error.status).json({ error: error.message, code: error.code });
+        return;
+      }
       if (error?.code === '23503') {
-        res.status(409).json({ error: 'vm model is used by an existing blueprint' });
+        res.status(409).json({ error: `vm template is still referenced (${error.table ?? error.constraint ?? 'unknown table'})` });
         return;
       }
       throw error;
+    } finally {
+      client.release();
     }
   })
 );

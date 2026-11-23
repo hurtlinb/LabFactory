@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import {
-  getPoolOverview, updatePoolSettings, setTemplatePool, syncTemplateModel,
+  getPoolOverview, updatePoolSettings, setTemplatePool, syncTemplateModel, purgeTemplatePoolHistory,
   updateOperationLimit, destroyQuarantinedVm, getVmTimeline, cancelDeploymentPoolRequests, PoolAdminError
 } from '../lib/windowsPool/admin.js';
 import { createPoolRequest, reservePoolRequest } from '../lib/windowsPool/reservation.js';
@@ -66,6 +66,42 @@ test('Windows pool administration (P6)', { skip: !url }, async t => {
       await syncTemplateModel(db, tNew, { osType: 'ubuntu', proxmoxTemplateVmid: 148 });
       assert.equal((await db.query('SELECT enabled FROM windows_pool_templates WHERE template_id = $1', [tNew])).rows[0].enabled, false);
       await assert.rejects(setTemplatePool(db, tWin, { enabled: true, readyTarget: -1 }), error => error.code === 'VALIDATION');
+    });
+
+    await t.test('template deletion: pool history purged, refused while pool VMs live or are in labs', async () => {
+      const tOld = randomUUID();
+      await db.query(`INSERT INTO vm_templates VALUES ($1, 'Windows 2022 old', 'windows-server', 'en', 140)`, [tOld]);
+      await db.query(`INSERT INTO windows_pool_templates (template_id, enabled, ready_target, max_capacity, source_template_vmid) VALUES ($1, false, 0, 1, 140)`, [tOld]);
+      const vm = async (state, vmid) => {
+        const id = randomUUID();
+        await db.query(`INSERT INTO windows_pool_vms (id, template_id, revision, source_template_vmid, cluster, node, vmid, state)
+                        VALUES ($1, $2, 1, 140, 'default', 'pve-a', $3, $4)`, [id, tOld, vmid, state]);
+        await db.query(`INSERT INTO windows_pool_vm_events (pool_vm_id, from_state, to_state) VALUES ($1, NULL, 'creating')`, [id]);
+        return id;
+      };
+      const purge = async () => {
+        const client = await db.connect();
+        try { await client.query('BEGIN'); const result = await purgeTemplatePoolHistory(client, tOld); await client.query('COMMIT'); return result; }
+        catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+      };
+      await vm('deleted', 79001);
+      await vm('deleted', 79002);
+      const live = await vm('ready', 79003);
+      await assert.rejects(purge(), error => error.code === 'POOL_IN_USE' && /1 pool VM/.test(error.message));
+      // VM in a lab (assigned, then its row marked deleted after the lab): still refused.
+      await db.query(`UPDATE windows_pool_vms SET state = 'deleted' WHERE id = $1`, [live]);
+      const lab = randomUUID();
+      await db.query(`INSERT INTO lab_deployments (id, status) VALUES ($1, 'running')`, [lab]);
+      const assignment = randomUUID();
+      await db.query(`INSERT INTO lab_vm_assignments (id, deployment_id, workstation_number, blueprint_vm_id, manager, cluster, vmid, pool_vm_id)
+                      VALUES ($1, $2, 1, $3, 'windows-pool', 'default', 79003, $4)`, [assignment, lab, randomUUID(), live]);
+      await assert.rejects(purge(), error => error.code === 'POOL_IN_USE' && /labs/.test(error.message));
+      await db.query('DELETE FROM lab_vm_assignments WHERE id = $1', [assignment]);
+      // History only: removed (VMs, journal, configuration), the template can then be deleted.
+      assert.deepEqual(await purge(), { vms: 3, configuration: true });
+      assert.equal((await db.query('SELECT COUNT(*)::int AS n FROM windows_pool_vm_events e JOIN windows_pool_vms v ON v.id = e.pool_vm_id WHERE v.template_id = $1', [tOld])).rows[0].n, 0);
+      await db.query('DELETE FROM vm_templates WHERE id = $1', [tOld]);
+      assert.deepEqual(await purge(), { vms: 0, configuration: false }, 'template without pool history: nothing to do');
     });
 
     await t.test('settings and limits: validation, controlled suspension', async () => {
