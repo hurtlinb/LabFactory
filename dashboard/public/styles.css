@@ -246,6 +246,10 @@ button, input, textarea, select { font: inherit; }
 .sidebar-health[data-state='warning'] .sidebar-health-icon { color: #e6a817; }
 .sidebar-health[data-state='warning'] .sidebar-health-icon::before { content: '!'; }
 
+/* Windows pool being refilled: hourglass. */
+.sidebar-health[data-state='filling'] .sidebar-health-icon { color: var(--brand); }
+.sidebar-health[data-state='filling'] .sidebar-health-icon::before { content: '⏳'; font-size: 10px; }
+
 /* ── User session ─────────────────────────────────────────────── */
 .user-session {
   display: flex;

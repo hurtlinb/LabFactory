@@ -141,6 +141,8 @@ const terraformWorkerStatusIndicator = document.getElementById('terraformWorkerS
 const terraformWorkerStatusLabel = document.getElementById('terraformWorkerStatusLabel');
 const ansibleWorkerStatusIndicator = document.getElementById('ansibleWorkerStatusIndicator');
 const ansibleWorkerStatusLabel = document.getElementById('ansibleWorkerStatusLabel');
+const poolStatusIndicator = document.getElementById('poolStatusIndicator');
+const poolStatusLabel = document.getElementById('poolStatusLabel');
 const appVersion = document.getElementById('appVersion');
 const changelogBtn = document.getElementById('changelogBtn');
 const changelogDialog = document.getElementById('changelogDialog');
@@ -2924,6 +2926,11 @@ async function loadConnectionStatuses() {
       ansibleWorkerStatus === 'running' ? 'ok' : ansibleWorkerStatus === 'paused' ? 'warning' : 'error',
       `Ansible worker: ${ansibleWorkerStatus}`
     );
+    // Windows pool: OK when every enabled template has its ready VMs, hourglass while refilling.
+    const pool = payload?.pool ?? { status: 'none', detail: [] };
+    if (poolStatusIndicator) poolStatusIndicator.hidden = pool.status === 'none';
+    applyHealthIndicator(poolStatusIndicator, poolStatusLabel, 'Pool', POOL_HEALTH_STATES[pool.status] ?? 'unknown',
+      [`Windows pool: ${POOL_HEALTH_LABELS[pool.status] ?? pool.status}`, ...(pool.detail ?? [])].join('\n'));
   } catch (error) {
     const message = error.message || 'Unable to load connection statuses';
     applyHealthIndicator(postgresStatusIndicator, postgresStatusLabel, 'Postgres', 'error', message);
@@ -2931,8 +2938,12 @@ async function loadConnectionStatuses() {
     applyHealthIndicator(proxmoxStatusIndicator, proxmoxStatusLabel, 'Proxmox', 'error', message);
     applyHealthIndicator(terraformWorkerStatusIndicator, terraformWorkerStatusLabel, 'Terraform Worker', 'error', message);
     applyHealthIndicator(ansibleWorkerStatusIndicator, ansibleWorkerStatusLabel, 'Ansible Worker', 'error', message);
+    applyHealthIndicator(poolStatusIndicator, poolStatusLabel, 'Pool', 'error', message);
   }
 }
+
+const POOL_HEALTH_STATES = { ok: 'ok', filling: 'filling', paused: 'warning', error: 'error' };
+const POOL_HEALTH_LABELS = { ok: 'all templates ready', filling: 'VMs being prepared', paused: 'suspended', error: 'error' };
 
 async function loadClassrooms() {
   state.classrooms = await fetchJson('/api/classrooms');

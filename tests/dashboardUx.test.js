@@ -50,7 +50,7 @@ function setup(t) {
     return { ok: true, json: async () => data };
   };
   w.setInterval = () => 1;
-  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails, renderModelList, renderClassrooms, setActiveView };');
+  w.eval(source + '\nwindow.uxTest = { state, renderDashboard, refreshLifecycleLabs, bootstrap, loadBlueprint, isBlueprintDirty, saveBlueprint, showMessage, renderLifecycleLabs, renderDeploymentVmDetails, preserveDetailView, renderBlueprintList, setActiveView, readRoute, markBlueprintSaved, promptDeploymentConflict, openDeploymentDetails, renderModelList, renderClassrooms, setActiveView, loadConnectionStatuses };');
   return { w, api: w.uxTest, requests, document: w.document };
 }
 
@@ -639,4 +639,26 @@ test('Classrooms page: same tiles as VM Templates, search, modal editor with net
   assert.equal(document.getElementById('classroomDialogTitle').textContent, 'Add classroom');
   dialog.close();
   assert.equal(api.state.isClassroomEditorVisible, false, 'Escape/close = Cancel');
+});
+
+test('sidebar Pool indicator: OK when every pool is full, hourglass while refilling, hidden without pool', async t => {
+  const { api, document, w } = setup(t);
+  await api.bootstrap();
+  const health = pool => async url => ({ ok: true, json: async () => (url === '/api/health'
+    ? { postgres: { ok: true }, redis: { ok: true }, proxmox: { ok: true }, workers: { terraform: 'running', ansible: 'running' }, pool } : []) });
+  const indicator = document.getElementById('poolStatusIndicator');
+  w.fetch = health({ status: 'filling', detail: ['Windows 2022 v3: 3/5 ready'] });
+  await api.loadConnectionStatuses();
+  assert.equal(indicator.dataset.state, 'filling');
+  assert.equal(indicator.hidden, false);
+  assert.match(indicator.title, /VMs being prepared[\s\S]*Windows 2022 v3: 3\/5 ready/);
+  w.fetch = health({ status: 'ok', detail: ['Windows 2022 v3: 5/5 ready'] });
+  await api.loadConnectionStatuses();
+  assert.equal(indicator.dataset.state, 'ok');
+  w.fetch = health({ status: 'paused', detail: [] });
+  await api.loadConnectionStatuses();
+  assert.equal(indicator.dataset.state, 'warning');
+  w.fetch = health({ status: 'none', detail: [] });
+  await api.loadConnectionStatuses();
+  assert.equal(indicator.hidden, true, 'no template uses the pool: indicator hidden');
 });

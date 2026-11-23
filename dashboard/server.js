@@ -2078,9 +2078,34 @@ app.get(
       )
     );
 
-    res.json({ postgres, proxmox, redis, workers });
+    // Windows pool worker: same Redis heartbeat as the queue workers, not a BullMQ queue.
+    const poolWorker = await redisClient.hGetAll('worker:windows-pool').then(state => state.status || 'unknown').catch(() => 'unknown');
+    res.json({ postgres, proxmox, redis, workers, pool: await readPoolHealth(poolWorker) });
   })
 );
+
+// Sidebar "Pool" indicator: ok = every enabled template has its ready VMs (current revision),
+// filling = some are still being prepared, paused = pool suspended, error = worker not running,
+// none = no enabled template. detail: one line per enabled template.
+const readPoolHealth = async workerStatus => {
+  try {
+    const settings = (await dbPool.query('SELECT paused FROM windows_pool_settings WHERE id')).rows[0];
+    const templates = (await dbPool.query(
+      `SELECT t.name, p.ready_target,
+              (SELECT COUNT(*)::int FROM windows_pool_vms v
+                WHERE v.template_id = p.template_id AND v.revision = p.revision AND v.state = 'ready') AS ready
+         FROM windows_pool_templates p JOIN vm_templates t ON t.id = p.template_id
+        WHERE p.enabled ORDER BY t.name`)).rows;
+    const detail = templates.map(t => `${t.name}: ${t.ready}/${t.ready_target} ready`);
+    if (!templates.length) return { status: 'none', detail: ['No template uses the pool'] };
+    if (settings?.paused) return { status: 'paused', detail: ['Pool suspended', ...detail] };
+    if (workerStatus && workerStatus !== 'running') return { status: 'error', detail: [`Pool worker: ${workerStatus}`, ...detail] };
+    return { status: templates.every(t => t.ready >= t.ready_target) ? 'ok' : 'filling', detail };
+  } catch (error) {
+    if (error?.code === '42P01') return { status: 'none', detail: ['Windows pool not installed'] };
+    return { status: 'error', detail: [error?.message ?? 'Unable to read the pool state'] };
+  }
+};
 
 app.get(
   '/api/timezones',
