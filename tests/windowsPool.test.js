@@ -324,3 +324,27 @@ test('template disk storage: system disk of the real templates 152 and 147', asy
   assert.equal(templateDiskStorage({ ide2: 'none,media=cdrom', efidisk0: 'ceph-pool:x' }), null);
   assert.equal(templateDiskStorage(null), null);
 });
+
+// Migration 037: the parallel preparations are global (all the templates together).
+test('replenishment: parallel preparations shared by the templates', () => {
+  const config = { ...baseConfig, readyTarget: 10, maxParallelPreparations: 4, maxCapacity: undefined };
+  assert.equal(planReplenishment({ config, counts: {}, maxCapacity: 50, otherInFlight: 3 }).toStart, 1, '4 - 3 preparations of the other templates');
+  assert.equal(planReplenishment({ config, counts: { preparing: 1 }, maxCapacity: 50, otherInFlight: 3 }).toStart, 0);
+  assert.equal(planReplenishment({ config, counts: {}, maxCapacity: 50 }).toStart, 4);
+});
+
+// Language components on demand (dev lab 200, 2026-11-23): disabled with the Windows Update pause.
+test('Windows Update pause: language component tasks disabled and verified', async () => {
+  const { buildWindowsUpdatePauseScript, evaluateWindowsUpdatePause } = await import('../lib/windowsPool/qga.js');
+  const script = buildWindowsUpdatePauseScript('windows-server');
+  assert.ok(script.includes("Get-ScheduledTask -TaskPath '\\Microsoft\\Windows\\LanguageComponentsInstaller\\'"), 'language component tasks targeted');
+  assert.match(script, /Disable-ScheduledTask/);
+  const today = '2026-11-23';
+  const ok = { start: today, PauseQualityUpdatesStartTime: today };
+  assert.equal(evaluateWindowsUpdatePause({ ...ok, languageTasks: [{ name: 'Installation', state: 'Disabled' }, { name: 'ReconcileLanguageResources', state: 'Disabled' }] }, 'windows-server').ready, true);
+  assert.equal(evaluateWindowsUpdatePause({ ...ok, languageTasks: { name: 'Installation', state: 'Disabled' } }, 'windows-server').ready, true, 'single task serialized as an object');
+  assert.equal(evaluateWindowsUpdatePause(ok, 'windows-server').ready, true, 'no such task on this image: nothing to disable');
+  const refused = evaluateWindowsUpdatePause({ ...ok, languageTasks: [{ name: 'Installation', state: 'Ready' }] }, 'windows-server');
+  assert.deepEqual([refused.ready, refused.code], [false, 'WU_PAUSE_FAILED']);
+  assert.match(refused.detail, /Installation=Ready/);
+});

@@ -86,6 +86,7 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       assert.deepEqual(events, ['pool-move', 'guest-network:down', 'wu-pause:down', 'connect', 'post-connect:up'], 'leaves the stock pool before any network; Windows Update paused before connecting');
       const today = new Date().toISOString().slice(0, 10);
       assert.deepEqual(g.wuPause, { PauseQualityUpdatesStartTime: today }, 'Windows Server: quality updates paused (35 days)');
+      assert.deepEqual(g.languageTasks.map(task => task.state), ['Disabled', 'Disabled', 'Disabled'], 'language components on demand disabled before connecting');
       assert.deepEqual(px.stats.events.filter(e => e.vmid === vm.vmid && e.at === 'pool-move').map(e => [e.from, e.to]), [['pool-dev', 'labs-dev']]);
       assert.equal(g.pool, 'labs-dev', 'assigned VM in the labs Proxmox pool');
       // The password never travels on the command line.
@@ -151,6 +152,15 @@ test('Windows pool assignment (P4a)', { skip: !url }, async t => {
       const vm = lab.vms[1];
       px.guests.get(vm.vmid).wuPauseDefect = true;
       await assert.rejects(assigner.assign(vm.id, slotFor(lab, 1)), error => error.code === 'WU_PAUSE_FAILED');
+      assert.ok(!px.stats.events.some(e => e.vmid === vm.vmid && e.at === 'connect'), 'never connected');
+      assert.equal((await state(vm.id)).state, 'quarantined');
+    });
+
+    await t.test('language components on demand: a task left enabled = never connected', async () => {
+      const lab = await reserveLab(1);
+      const vm = lab.vms[0];
+      px.guests.get(vm.vmid).languageTaskDefect = true;
+      await assert.rejects(assigner.assign(vm.id, slotFor(lab, 0)), error => error.code === 'WU_PAUSE_FAILED' && /Installation=Ready/.test(error.message));
       assert.ok(!px.stats.events.some(e => e.vmid === vm.vmid && e.at === 'connect'), 'never connected');
       assert.equal((await state(vm.id)).state, 'quarantined');
     });

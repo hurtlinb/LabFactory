@@ -134,8 +134,13 @@ export function fakeProxmox({ cloneMs = 400, prepMs = 150, agentDelayMs = 30, te
         const start = new Date().toISOString().slice(0, 10);
         const names = [...script.matchAll(/-Name '(Pause\w+StartTime)' -Value/g)].map(x => x[1]);
         g.wuPause = Object.fromEntries(names.map(name => [name, start]));
+        // Language component tasks (Windows Server 2022: 3 tasks); languageTaskDefect = one stays enabled.
+        if (script.includes('LanguageComponentsInstaller')) {
+          g.languageTasks = ['Installation', 'ReconcileLanguageResources', 'Uninstallation']
+            .map(name => ({ name, state: g.languageTaskDefect && name === 'Installation' ? 'Ready' : 'Disabled' }));
+        }
         stats.events.push({ vmid: Number(m[2]), at: 'wu-pause', linkDown: !connected, names, t: now() });
-        out = JSON.stringify({ start, ...(g.wuPauseDefect ? {} : g.wuPause) });
+        out = JSON.stringify({ start, ...(g.wuPauseDefect ? {} : g.wuPause), ...(g.languageTasks ? { languageTasks: g.languageTasks } : {}) });
       } else if (script.includes('EnableDHCP -Value 0')) {
         stats.events.push({ vmid: Number(m[2]), at: 'guest-network', linkDown: !connected, t: now() });
         if (connected) { exitcode = 1; out = ''; } else {
