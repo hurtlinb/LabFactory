@@ -1651,7 +1651,7 @@ function renderDashboard() {
             <div class="dash-classroom-header">
               <strong>${escapeHtml(classroom.name)}</strong>
               <span class="dash-classroom-seats">${classroom.workstationCount} workplace${classroom.workstationCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
-              <button class="btn ${labs.length ? 'btn-secondary' : 'btn-primary'} dash-classroom-deploy" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}">${uiIcon('start')} Deploy a lab</button>
+              <button class="btn btn-primary dash-classroom-deploy" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}">${uiIcon('start')} Deploy a lab</button>
             </div>
             <div class="dash-classroom-labs">${labsHtml}</div>
           </div>`;
