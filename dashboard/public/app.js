@@ -1377,7 +1377,7 @@ function renderLifecycleLabs() {
       const actionButtons = actions.busy
         ? `<span class="loading-spinner" aria-hidden="true"></span>`
         : visibleActions
-            .map(a => `<button class="btn lifecycle-action ${a.action === 'destroy' ? 'btn-danger' : ''}" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${uiIcon(({deploy: 'upload', start: 'start', stop: 'stop', destroy: 'delete'})[a.action])} ${a.label}</button>`)
+            .map(a => `<button class="btn lifecycle-action ${a.action === 'destroy' ? 'btn-danger' : ''}" type="button" data-action="${a.action}" data-deployment-id="${deployment.id}">${uiIcon(({deploy: 'start', start: 'start', stop: 'stop', destroy: 'delete'})[a.action])} ${a.label}</button>`)
             .join('');
 
       const s = deployment.status || 'idle';
@@ -1621,7 +1621,7 @@ function renderDashboard() {
             <div class="dash-classroom-header">
               <strong>${escapeHtml(classroom.name)}</strong>
               <span class="dash-classroom-seats">${classroom.workstationCount} workplace${classroom.workstationCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
-              <button class="btn ${labs.length ? 'btn-secondary' : 'btn-primary'} dash-classroom-deploy" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}">${uiIcon('plus')} Deploy a lab</button>
+              <button class="btn ${labs.length ? 'btn-secondary' : 'btn-primary'} dash-classroom-deploy" type="button" data-classroom-id="${escapeHtmlAttr(classroom.id)}">${uiIcon('start')} Deploy a lab</button>
             </div>
             <div class="dash-classroom-labs">${labsHtml}</div>
           </div>`;
