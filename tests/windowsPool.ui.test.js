@@ -40,8 +40,18 @@ async function setup(t) {
     calls.push({ url, method: options.method ?? 'GET', body: options.body ? JSON.parse(options.body) : null });
     return { ok: true, json: async () => (url.includes('cancel-pool-wait') ? { ok: true } : overview) };
   };
-  window.confirm = () => true;
-  window.prompt = (_message, value) => (calls.promptAnswer ?? value);
+  // Confirmations use the app-style dialog (never the browser's confirm/prompt): it is answered
+  // automatically here, with calls.promptAnswer typed in its number field when there is one.
+  calls.dialogs = [];
+  window.confirm = window.prompt = () => { throw new Error('native browser dialog used'); };
+  window.HTMLDialogElement.prototype.showModal = function () {
+    this.open = true;
+    calls.dialogs.push(this.querySelector('h2')?.textContent);
+    const input = this.querySelector('input');
+    if (input && calls.promptAnswer != null) input.value = calls.promptAnswer;
+    queueMicrotask(() => this.close('confirm'));
+  };
+  window.HTMLDialogElement.prototype.close = function (value = '') { this.returnValue = value; this.open = false; this.dispatchEvent(new window.Event('close')); };
   await import(`../dashboard/public/windowsPool.js?${Math.random()}`);
   window.dispatchEvent(new window.CustomEvent('labfactory:view', { detail: { view: 'admin-windows-pool' } }));
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -82,6 +92,8 @@ test('pool page: actions call the right API', async t => {
   assert.deepEqual(calls.find(c => c.url === '/api/windows-pool/limits').body, { category: 'clone', scope: 'cluster', maxActive: 3 });
   await click(window, page.querySelector('[data-pool-action="destroy-vm"]'));
   assert.equal(calls.find(c => c.url.endsWith('/destroy')).url, '/api/windows-pool/vms/q1/destroy');
+  assert.deepEqual(calls.dialogs, ['Cancel deployment?', 'Change operation limit', 'Destroy VM 70007?']);
+  assert.equal(document.querySelector('.confirmation-dialog'), null, 'dialogs are removed once answered');
   // No configuration per template any more (migration 037): placement is in the global settings.
   assert.equal(page.querySelector('[data-pool-action="configure"], #poolTemplateForm'), null);
   assert.deepEqual(['poolNode', 'poolStorage', 'poolMaxParallel'].map(id => document.getElementById(id).value), ['', 'ceph-pool', '6']);

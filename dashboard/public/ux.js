@@ -3,7 +3,7 @@ export const labStatusLabels = {
   customizing: 'Configuring VMs', deployed: 'Ready', running: 'Running',
   mixed: 'Partially started', starting: 'Starting', stopping: 'Stopping',
   stopped: 'Stopped', destroying: 'Deleting VMs', destroyed: 'VMs deleted', failed: 'Failed',
-  waiting_for_pool: 'Waiting for the VM pool'
+  waiting_for_pool: 'Waiting for the Windows pool'
 };
 
 export function labStatusLabel(status) {
@@ -22,17 +22,17 @@ export function deploymentStatusLabel(deployment, totalVmCount = deployment?.tot
 }
 
 // Progress line of a busy lab card. A pool VM integrated in the lab counts as ready.
+// The status itself is already shown by the card's status pill: it is not repeated here.
 export function deploymentProgressText(deployment, totalVmCount, readyCount) {
   const pool = deployment?.poolProgress;
   const created = Number(deployment?.createdCount || 0);
   const started = Number(deployment?.startedCount || 0);
-  const label = deploymentStatusLabel(deployment, totalVmCount);
   if (pool?.total > 0) {
     const transferred = `Transferred from pool: ${Math.min(pool.assigned, pool.total)}/${pool.total}`;
     const terraform = pool.total < totalVmCount ? ` · Created: ${created}/${totalVmCount} · Started: ${started}/${totalVmCount}` : '';
-    return `${transferred}${terraform} · Ready: ${readyCount}/${totalVmCount}. ${label}.`;
+    return `${transferred}${terraform} · Ready: ${readyCount}/${totalVmCount}`;
   }
-  return `Created: ${created}/${totalVmCount} · Started: ${started}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}. ${label}.`;
+  return `Created: ${created}/${totalVmCount} · Started: ${started}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}`;
 }
 
 export function blueprintFingerprint(blueprint) {

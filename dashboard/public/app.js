@@ -219,16 +219,16 @@ const FALLBACK_LINUX_TIMEZONE_OPTIONS = [
 ];
 
 const PAGE_TITLES = {
-  'dashboard':      { title: 'Dashboard',   breadcrumb: 'LabFactory' },
-  'blueprint':      { title: 'Blueprints',  breadcrumb: 'Labs' },
-  'lifecycle':      { title: 'Labs',        breadcrumb: 'Labs' },
-  'admin-users':    { title: 'Users',       breadcrumb: 'Administration' },
-  'admin-courses':  { title: 'Modules',     breadcrumb: 'Labs' },
-  'models':         { title: 'VM Templates', breadcrumb: 'Administration' },
-  'classrooms':     { title: 'Classrooms',  breadcrumb: 'Administration' },
-  'admin-settings': { title: 'Maintenance', breadcrumb: 'Administration' },
-  'admin-queues':   { title: 'Jobs',        breadcrumb: 'Administration' },
-  'admin-windows-pool': { title: 'Pool', breadcrumb: 'Administration' },
+  'dashboard':      { title: 'Dashboard' },
+  'blueprint':      { title: 'Blueprints' },
+  'lifecycle':      { title: 'Labs' },
+  'admin-users':    { title: 'Users' },
+  'admin-courses':  { title: 'Modules' },
+  'models':         { title: 'VM Templates' },
+  'classrooms':     { title: 'Classrooms' },
+  'admin-settings': { title: 'Maintenance' },
+  'admin-queues':   { title: 'Jobs' },
+  'admin-windows-pool': { title: 'Pool' },
 };
 
 function getDragItemType(dataTransfer) {
@@ -289,6 +289,30 @@ function showMessage(target, message, status = 'success', timeout = 3200) {
   if (status !== 'danger' && timeout > 0) statusTimers.set(target, setTimeout(() => { target.hidden = true; }, timeout));
 }
 
+// Top bar: the page title alone (the sidebar already shows the section). On a detail view
+// (blueprint editor) a breadcrumb leads back to the list: "Blueprints › <blueprint name>".
+function updatePageHeader() {
+  const titleEl = document.getElementById('pageTitle');
+  const breadcrumbEl = document.getElementById('pageBreadcrumb');
+  const linkEl = document.getElementById('pageBreadcrumbLink');
+  const inBlueprintEditor = activeView === 'blueprint' && state.isBlueprintWorkspaceVisible;
+  if (titleEl) {
+    titleEl.textContent = inBlueprintEditor
+      ? (state.currentBlueprint.name || 'New blueprint')
+      : (PAGE_TITLES[activeView]?.title ?? '');
+  }
+  if (breadcrumbEl) breadcrumbEl.hidden = !inBlueprintEditor;
+  if (linkEl) {
+    linkEl.textContent = inBlueprintEditor ? PAGE_TITLES.blueprint.title : '';
+    linkEl.setAttribute('aria-label', 'Back to the blueprint list');
+  }
+}
+
+async function closeBlueprintWorkspace() {
+  if (!await guardBlueprintChanges()) return;
+  state.isBlueprintWorkspaceVisible = false; renderBlueprintWorkspace(); writeRoute('blueprint');
+}
+
 async function setActiveView(view, { fromRoute = false } = {}) {
   if (!PAGE_TITLES[view]) view = 'dashboard';
   if (activeView === 'blueprint' && view !== 'blueprint' && !await guardBlueprintChanges()) return false;
@@ -307,13 +331,7 @@ async function setActiveView(view, { fromRoute = false } = {}) {
   pages.forEach(page => {
     page.hidden = page.dataset.view !== view;
   });
-  const info = PAGE_TITLES[view];
-  if (info) {
-    const titleEl = document.getElementById('pageTitle');
-    const breadcrumbEl = document.getElementById('pageBreadcrumb');
-    if (titleEl) titleEl.textContent = info.title;
-    if (breadcrumbEl) breadcrumbEl.textContent = info.breadcrumb;
-  }
+  updatePageHeader();
   if (!fromRoute) writeRoute(view);
   document.body.classList.remove('nav-open');
   document.getElementById('menuToggle')?.setAttribute('aria-expanded', 'false');
@@ -394,6 +412,7 @@ function renderBlueprintWorkspace() {
   if (templatePalette) {
     templatePalette.classList.toggle('is-disabled', isCurrentBlueprintLocked());
   }
+  updatePageHeader();
 }
 
 function renderTemplateEditor() {
@@ -433,7 +452,7 @@ function blueprintDeploymentEstimate(blueprint) {
   const milliseconds = Number(blueprint?.averageDeploymentMs);
   const count = Number(blueprint?.deploymentDurationSamples || 0);
   if (!count || !Number.isFinite(milliseconds) || milliseconds < 0 || blueprint?.averageDeploymentMs == null) {
-    return { label: 'Average deploy: no history yet', detail: 'No completed full deployments available yet.' };
+    return { label: 'Average deploy: no history yet', detail: 'An estimate appears after the first successful full deployment.' };
   }
   const minutes = Math.max(1, Math.round(milliseconds / 60000));
   const duration = milliseconds < 60000 ? '< 1 min' : minutes < 60 ? minutes + ' min' : Math.floor(minutes / 60) + ' h' + (minutes % 60 ? ' ' + minutes % 60 + ' min' : '');
@@ -451,7 +470,8 @@ function updateDeploymentEstimate() {
   target.hidden = !blueprint;
   if (!blueprint) { target.textContent = ''; return; }
   const estimate = blueprintDeploymentEstimate(blueprint);
-  target.textContent = estimate.label + ' (including customization). ' + estimate.detail;
+  // The detail already says that customization is included: it is not repeated after the label.
+  target.textContent = estimate.label + '. ' + estimate.detail;
 }
 
 function renderBlueprintList() {
@@ -470,7 +490,7 @@ function renderBlueprintList() {
         <article class="blueprint-item ${blueprint.id === state.currentBlueprint.id ? 'active' : ''}" data-blueprint-id="${escapeHtmlAttr(blueprint.id)}">
           <div class="blueprint-card-header">
             <div class="blueprint-summary">
-              <strong title="${escapeHtmlAttr(blueprint.name)}">${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</strong>
+              <strong title="${escapeHtmlAttr(blueprint.name)}">${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} · ` : ''}${escapeHtml(blueprint.name)}</strong>
             </div>
             <span class="blueprint-machine-count">${blueprint.vmCount} VM${blueprint.vmCount !== 1 ? 's' : ''} ${uiIcon('monitor')}</span>
             <button class="btn btn-secondary blueprint-open-button" type="button" aria-label="Open blueprint ${escapeHtmlAttr(blueprint.name)}">${uiIcon(locked ? 'eye' : 'edit')} Open</button>
@@ -481,7 +501,7 @@ function renderBlueprintList() {
           <p class="blueprint-deployment-estimate" title="${escapeHtmlAttr(blueprintDeploymentEstimate(blueprint).detail)}">${escapeHtml(blueprintDeploymentEstimate(blueprint).label)}</p>
           <div class="blueprint-card-footer">
             <div class="blueprint-card-owner">${renderTeacherBadge(blueprint.teacher || { email: blueprint.teacherEmail })}</div>
-            <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${blueprint.vmCount} VM · ${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
+            <span class="blueprint-card-date" title="${escapeHtmlAttr(new Date(blueprint.updatedAt).toLocaleString())}">${new Date(blueprint.updatedAt).toLocaleDateString()}</span>
             <div class="blueprint-card-lock">${locked ? `<span class="mini-pill lock-pill" title="${escapeHtmlAttr(lockTitle)}">Locked</span>` : ''}</div>
             <button class="icon-btn delete-blueprint-button" type="button" data-blueprint-id="${escapeHtmlAttr(blueprint.id)}" aria-label="Delete blueprint" title="${escapeHtmlAttr(lockTitle || 'Delete blueprint')}" ${locked ? 'disabled' : ''}>${uiIcon('delete')}</button>
           </div>
@@ -502,7 +522,7 @@ function renderBlueprintList() {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       const resource = state.blueprints.find(item => item.id === button.dataset.blueprintId);
-      if (!await confirmAction('Delete blueprint?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'blueprint') + '? This cannot be undone. Its uploaded files will also be deleted.', 'Delete')) return;
+      if (!await confirmAction('Delete blueprint?', 'Delete ' + (resource?.name || 'this blueprint') + '? This cannot be undone. Its uploaded files will also be deleted.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/blueprints/${button.dataset.blueprintId}`, { method: 'DELETE' });
@@ -556,7 +576,7 @@ function renderDeploymentSelectors() {
       state.blueprints
         .map(
           blueprint =>
-            `<option value="${blueprint.id}">${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} - ` : ''}${escapeHtml(blueprint.name)}</option>`
+            `<option value="${blueprint.id}">${blueprint.course ? `${escapeHtml(String(blueprint.course.courseNumber))} · ` : ''}${escapeHtml(blueprint.name)}</option>`
         )
         .join('');
     deploymentBlueprintSelect.value = selected;
@@ -635,11 +655,13 @@ function renderCourses() {
   courseList.innerHTML = state.courses
     .filter(course => matchesSearch(filterValue('moduleSearch'), course.courseNumber, course.description))
     .map(
-      course => `
+      course => {
+        const blueprintCount = state.blueprints.filter(b => b.course?.id === course.id).length;
+        return `
         <article class="module-card">
           <div class="module-card-header">
             <strong>Module ${escapeHtml(String(course.courseNumber))}</strong>
-            <span class="mini-pill">${state.blueprints.filter(b => b.course?.id === course.id).length} blueprints</span>
+            <span class="mini-pill">${blueprintCount} blueprint${blueprintCount !== 1 ? 's' : ''}</span>
           </div>
           <p class="module-description" title="${escapeHtmlAttr(course.description || '')}">${escapeHtml(course.description || 'No description')}</p>
           <div class="module-blueprints">${state.blueprints.filter(b => b.course?.id === course.id).map(b => `<a href="#/blueprint/${encodeURIComponent(b.id)}" title="${escapeHtmlAttr(b.name)}">${uiIcon('lab')}<span>${escapeHtml(b.name)}</span>${uiIcon('arrow')}</a>`).join('') || '<p class="muted">No linked blueprints</p>'}</div>
@@ -649,7 +671,8 @@ function renderCourses() {
             <button class="icon-btn delete-course-button" type="button" data-course-id="${escapeHtmlAttr(course.id)}" aria-label="Delete module ${escapeHtmlAttr(String(course.courseNumber))}">${uiIcon('delete')}</button>
           </div>
         </article>
-      `
+      `;
+      }
     )
     .join('');
 
@@ -663,7 +686,7 @@ function renderCourses() {
     button.addEventListener('click', async event => {
       event.stopPropagation();
       const resource = state.courses.find(item => item.id === button.dataset.courseId);
-      if (!await confirmAction('Delete module?', 'Delete ' + (resource?.name || resource?.courseNumber || resource?.blueprint?.name || 'module') + '? This cannot be undone.', 'Delete')) return;
+      if (!await confirmAction('Delete module?', 'Delete ' + (resource?.courseNumber != null ? `module ${resource.courseNumber}` : 'this module') + '? This cannot be undone.', 'Delete')) return;
       button.disabled = true;
       try {
         await fetchJson(`/api/courses/${button.dataset.courseId}`, { method: 'DELETE' });
@@ -1244,23 +1267,24 @@ function renderCanvas() {
 function renderLifecycleSteps(status) {
   const s = String(status || 'idle');
 
+  // Labels come from labStatusLabel(): the same wording as the status pill and the filters.
   const opMap = {
-    idle:        { label: 'Not started',       cls: 'op-idle',    icon: '↺' },
-    queued:      { label: 'Queued',            cls: 'op-busy',    icon: '↻' },
-    waiting_for_pool: { label: 'Waiting for Windows pool…', cls: 'op-busy', icon: '↻' },
-    deploying:   { label: 'Deploying…',        cls: 'op-busy',    icon: '↻' },
-    customizing: { label: 'Configuring…',      cls: 'op-busy',    icon: '↻' },
-    deployed:    { label: 'Ready',    cls: 'op-stopped', icon: '▶' },
-    starting:    { label: 'Starting…',         cls: 'op-busy',    icon: '↻' },
-    running:     { label: 'Running',           cls: 'op-running', icon: '▶' },
-    mixed:       { label: 'Partially started', cls: 'op-warning', icon: '▶' },
-    stopping:    { label: 'Stopping…',         cls: 'op-busy',    icon: '↻' },
-    stopped:     { label: 'Stopped',           cls: 'op-stopped', icon: '■' },
-    destroying:  { label: 'Destroying…',       cls: 'op-busy',    icon: '↻' },
-    destroyed:   { label: 'Destroyed',         cls: 'op-idle',    icon: '✕' },
-    failed:      { label: 'Failed',            cls: 'op-warning', icon: '!' },
+    idle:        { cls: 'op-idle',    icon: '↺' },
+    queued:      { cls: 'op-busy',    icon: '↻' },
+    waiting_for_pool: { cls: 'op-busy', icon: '↻' },
+    deploying:   { cls: 'op-busy',    icon: '↻' },
+    customizing: { cls: 'op-busy',    icon: '↻' },
+    deployed:    { cls: 'op-stopped', icon: '▶' },
+    starting:    { cls: 'op-busy',    icon: '↻' },
+    running:     { cls: 'op-running', icon: '▶' },
+    mixed:       { cls: 'op-warning', icon: '▶' },
+    stopping:    { cls: 'op-busy',    icon: '↻' },
+    stopped:     { cls: 'op-stopped', icon: '■' },
+    destroying:  { cls: 'op-busy',    icon: '↻' },
+    destroyed:   { cls: 'op-idle',    icon: '✕' },
+    failed:      { cls: 'op-warning', icon: '!' },
   };
-  const op = opMap[s] || { label: s, cls: 'op-idle', icon: '?' };
+  const op = { label: labStatusLabel(s), ...(opMap[s] || { cls: 'op-idle', icon: '?' }) };
 
   const prepareState = ['queued', 'waiting_for_pool', 'deploying', 'customizing'].includes(s) ? 'active'
     : ['deployed', 'running', 'mixed', 'starting', 'stopping', 'stopped', 'destroying', 'destroyed'].includes(s) ? 'done'
@@ -1290,7 +1314,7 @@ function renderLifecycleSteps(status) {
     {
       state: destroyState,
       icon: destroyState === 'done' ? '✓' : '✕',
-      label: 'Destroy',
+      label: 'Delete',
       sub: 'Delete VMs',
       circleClass: '',
     },
@@ -1343,7 +1367,6 @@ function renderLifecycleLabs() {
       const visibleActions = actions.busy
         ? []
         : actions.items.filter(item => canManage || !['deploy', 'destroy'].includes(item.action));
-      const hasWarning = deployment.status === 'mixed';
       const readyCount = Number(deployment.readyCount ?? deployment.customizedCount ?? 0);
       const totalVmCount = Number(deployment.totalVmCount ?? 0);
       const customizationResults = deployment.customizationResults || [];
@@ -1375,9 +1398,8 @@ function renderLifecycleLabs() {
                 ${escapeHtml(deployment.classroom.name)}
                 <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
                 ${deployment.testMode ? '<span class="mini-pill test-pill">test</span>' : ''}
-                ${hasWarning ? '<span class="mini-pill warning-pill">Warning</span>' : ''}
               </p>
-              <p class="deploy-meta">${totalVmCount} VMs · ${readyCount} ready</p>
+              <p class="deploy-meta">${totalVmCount} VM${totalVmCount !== 1 ? 's' : ''}${actions.busy ? '' : ` · ${readyCount} ready`}</p>
               ${customizationSummary ? `<p class="deploy-meta">${escapeHtml(customizationSummary)}</p>` : ''}
             </div>
             <div class="inline-actions">
@@ -1495,6 +1517,15 @@ async function changeDeploymentOwner(deploymentId) {
   } catch (error) { showError(error); }
 }
 
+// Same wording whether the lab is deployed from the dialog or from its card.
+function labActionQueuedMessage(action, jobId) {
+  const subject = {
+    deploy: 'Lab deployment', start: 'Lab start', stop: 'Lab stop',
+    destroy: 'Deletion of the lab VMs', 'resume-customization': 'Customization resume'
+  }[action] || 'Lab operation';
+  return `${subject} queued${jobId ? ` (job ${jobId})` : ''}.`;
+}
+
 function bindLifecycleActions(container) {
   container.querySelectorAll('.lifecycle-action').forEach(button => {
     button.addEventListener('click', async event => {
@@ -1525,8 +1556,8 @@ function bindLifecycleActions(container) {
           await refreshQueues();
         }
         showMessage(globalStatus, action === 'cancel-pool-wait'
-          ? 'Lab cancelled: it no longer waits for the Windows pool.'
-          : `${button.dataset.action[0].toUpperCase()}${button.dataset.action.slice(1)} queued with job ${result.jobId}.`, 'success');
+          ? 'Deployment cancelled: the lab no longer waits for the Windows pool.'
+          : labActionQueuedMessage(action, result?.jobId), 'success');
       } catch (error) {
         showMessage(globalStatus, error.message, 'danger');
       } finally {
@@ -1569,18 +1600,13 @@ function renderDashboard() {
                 ['queued', 'waiting_for_pool', 'deploying', 'customizing', 'starting'].includes(d.status) ? 'dash-badge-preparing' :
                 d.status === 'stopped' ? 'dash-badge-stopped' :
                 d.status === 'failed' ? 'dash-badge-failed' : 'dash-badge-destroyed';
-              const badgeText =
-                d.status === 'mixed' ? 'Partially started' : ['running', 'deployed'].includes(d.status) ? labStatusLabel(d.status) :
-                d.status === 'starting' ? labStatusLabel(d.status) :
-                d.status === 'waiting_for_pool' ? 'Waiting for Windows pool' :
-                ['queued', 'deploying', 'customizing'].includes(d.status) ? 'Preparing' :
-                d.status === 'stopped' ? 'Stopped' :
-                d.status === 'failed' ? 'Failed' : escapeHtml(d.status || 'idle');
+              // Same wording as the status pill of the Labs page.
+              const badgeText = escapeHtml(deploymentStatusLabel(d));
               return `
                 <div class="dash-classroom-lab">
                   <span class="dash-classroom-lab-icon">${labIcon}</span>
                   <div class="dash-row-info">
-                    <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${d.blueprint.course ? `${escapeHtml(String(d.blueprint.course.courseNumber))} - ` : ''}${escapeHtml(d.blueprint.name)}</a>
+                    <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${d.blueprint.course ? `${escapeHtml(String(d.blueprint.course.courseNumber))} · ` : ''}${escapeHtml(d.blueprint.name)}</a>
                     <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
                   </div>
                   <div class="dash-classroom-owner">${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</div>
@@ -1626,7 +1652,7 @@ function getDeploymentWorkstationNumber(vm) {
 const deploymentVmSelections = new Map();
 const vmBulkActions = {
   'reset-ip': 'Reset IP',
-  'reset-password': 'Reset Password',
+  'reset-password': 'Reset password',
   'pause-updates': 'Pause updates',
   'snapshot-create': 'Create snapshot',
   'snapshot-restore': 'Restore snapshot',
@@ -1674,7 +1700,7 @@ function renderVmBulkResults(selection) {
   const completed = selection.results.filter(result => ['success', 'error', 'skipped'].includes(result.status)).length;
   return `<details class="vm-bulk-results" open>
     <summary aria-live="polite">${escapeHtml(vmBulkActions[selection.action])}: ${completed}/${selection.results.length} completed</summary>
-    <ul>${selection.results.map(result => `<li><strong>${escapeHtml(result.name)} (${escapeHtml(result.vmid)})</strong>: ${escapeHtml(result.status)}${result.message ? ' ? ' + escapeHtml(result.message) : ''}</li>`).join('')}</ul>
+    <ul>${selection.results.map(result => `<li><strong>${escapeHtml(result.name)} (${escapeHtml(result.vmid)})</strong>: ${escapeHtml(result.status)}${result.message ? ' — ' + escapeHtml(result.message) : ''}</li>`).join('')}</ul>
   </details>`;
 }
 
@@ -1713,7 +1739,14 @@ async function runVmBulkAction(deploymentId, action) {
   if (!eligible.length) return;
   const snapshotAction = action.startsWith('snapshot-') ? action.slice(9) : null;
   const warning = snapshotAction ? vmSnapshotDescriptions[snapshotAction] : 'The blueprint settings will be re-applied.';
-  if (action !== 'pause-updates' && !confirm(`${vmBulkActions[action]} for ${eligible.length} VM(s)?\n\n${warning} ${selected.length - eligible.length} incompatible VM(s) will be skipped.`)) return;
+  const skipped = selected.length - eligible.length;
+  if (action !== 'pause-updates' && !await confirmAction(
+    `${vmBulkActions[action]} for ${eligible.length} VM${eligible.length !== 1 ? 's' : ''}?`,
+    `${warning}${skipped ? ` ${skipped} incompatible VM${skipped !== 1 ? 's' : ''} will be skipped.` : ''}`,
+    vmBulkActions[action]
+  )) return;
+  // The dialog is asynchronous: another batch may have started meanwhile.
+  if (selection.running) return;
   selection.running = true;
   selection.action = action;
   selection.results = selected.map(vm => {
@@ -1821,7 +1854,7 @@ function renderDeploymentVmCards(vms, deploymentId, canResetIp = false, canReset
             </button>`
           : '';
         const resetPasswordButton = canResetPassword && vm.proxmoxStatus === 'running'
-          ? `<button class="icon-btn reset-password-button" type="button" title="Reset Password" aria-label="Reset Password" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
+          ? `<button class="icon-btn reset-password-button" type="button" title="Reset password" aria-label="Reset password" data-deployment-id="${escapeHtmlAttr(deploymentId || '')}" data-vmid="${escapeHtmlAttr(String(vm.vmid || ''))}">
               ${renderVmActionIcon('reset-password')}
             </button>`
           : '';
@@ -1903,7 +1936,7 @@ async function redeployDeploymentWorkstation(deploymentId, workstationNumber, bu
 }
 
 async function resetVmIp(deploymentId, vmid, button) {
-  if (!confirm(`Reset IP configuration for VMID ${vmid}?\n\nThis will re-apply the network settings from the blueprint via the Proxmox guest agent.`)) return;
+  if (!await confirmAction('Reset IP?', `Re-apply the blueprint network settings to VMID ${vmid} through the Proxmox guest agent.`, 'Reset IP')) return;
   button.disabled = true;
   const originalMarkup = button.innerHTML;
   button.textContent = 'Resetting…';
@@ -1928,7 +1961,7 @@ async function resetVmIp(deploymentId, vmid, button) {
 }
 
 async function resetVmPassword(deploymentId, vmid, button) {
-  if (!confirm(`Reset admin password for VMID ${vmid}?\n\nThis will re-apply the blueprint password via the Proxmox guest agent.`)) return;
+  if (!await confirmAction('Reset password?', `Re-apply the blueprint admin password to VMID ${vmid} through the Proxmox guest agent.`, 'Reset password')) return;
   button.disabled = true;
   try {
     await fetchJson(`/api/lifecycle/deployments/${deploymentId}/vms/${vmid}/reset-password`, {
@@ -2002,7 +2035,7 @@ function renderDeploymentVmDetails(payload) {
 
   deploymentVmDetailsList.innerHTML = `
     <div class="deployment-details-summary" aria-label="Deployment summary">
-      <span><strong>${orderedWorkstations.length}</strong> workplaces</span>
+      <span><strong>${orderedWorkstations.length}</strong> workplace${orderedWorkstations.length !== 1 ? 's' : ''}</span>
       <span><strong>${vms.filter(vm => vm.guestReady || vm.state === 'ready').length} / ${vms.length}</strong> VMs ready</span>
       <span><strong>${vms.filter(vm => vm.proxmoxStatus === 'running').length}</strong> running</span>
       <span><strong>${vms.filter(vm => vm.snapshot?.exists).length} / ${vms.length}</strong> snapshots${vms.some(vm => !vm.snapshot || vm.snapshot.error) ? ' (some unavailable)' : ''}</span>
@@ -2152,6 +2185,9 @@ async function openDeploymentDetails(deploymentId) {
     downloadDeploymentCsvButton.href = `/api/lifecycle/deployments/${encodeURIComponent(deploymentId)}/vms.csv`;
   }
   deploymentDetailsTitle.textContent = 'Deployment';
+  const labNumber = state.deployments.find(d => d.id === deploymentId)?.deploymentNumber;
+  const breadcrumbCurrent = document.getElementById('deploymentDetailsBreadcrumbCurrent');
+  if (breadcrumbCurrent) breadcrumbCurrent.textContent = labNumber != null ? `Lab #${labNumber}` : 'Lab';
   deploymentVmDetailsList.innerHTML = '<p class="placeholder">Loading deployment VMs…</p>';
   deploymentDetailsStatus.hidden = true;
   if (!deploymentDetailsDialog.open) deploymentDetailsDialog.showModal();
@@ -2177,6 +2213,9 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
       deploymentDetailsTitle.after(badge);
     }
     deploymentDetailsTitle.textContent = `${payload.deployment.blueprintName} @ ${payload.deployment.classroomName}`;
+    const labNumber = payload.deployment.deploymentNumber ?? state.deployments.find(d => d.id === deploymentId)?.deploymentNumber;
+    const breadcrumbCurrent = document.getElementById('deploymentDetailsBreadcrumbCurrent');
+    if (breadcrumbCurrent) breadcrumbCurrent.textContent = labNumber != null ? `Lab #${labNumber}` : 'Lab';
     if (!getDeploymentVmSelection(deploymentId).running) preserveDetailView(() => renderDeploymentVmDetails(payload));
     deploymentDetailsStatus.hidden = true;
   } catch (error) {
@@ -2190,7 +2229,7 @@ async function refreshOpenDeploymentDetails({ replaceOnError = false } = {}) {
 function resolveLifecycleActions(status, hasExistingVms = null) {
   // Windows pool: a waiting lab holds nothing; its owner can cancel it.
   if (status === 'waiting_for_pool') {
-    return { busy: false, items: [{ action: 'cancel-pool-wait', icon: '✕', label: 'Cancel (waiting for Windows pool)' }] };
+    return { busy: false, items: [{ action: 'cancel-pool-wait', icon: '✕', label: 'Cancel deployment' }] };
   }
   if (isDeploymentBusy(status)) {
     return { busy: true, items: [] };
@@ -2235,7 +2274,7 @@ function resolveLifecycleActions(status, hasExistingVms = null) {
     busy: false,
     items: [
       ...(hasExistingVms === false ? [{ action: 'deploy', label: 'Deploy lab' }] : []),
-      { action: 'destroy', icon: '✕', label: 'Destroy deployment' }
+      { action: 'destroy', icon: '✕', label: 'Delete lab VMs' }
     ]
   };
 }
@@ -2301,7 +2340,7 @@ async function promptVmName(vmId) {
   const vm = state.currentBlueprint.vms.find(item => item.id === vmId);
   if (!vm) return;
   const submitted = await promptVmCustomization({
-    title: 'Set Hostname',
+    title: 'Set hostname',
     initialValue: vm.name || '',
     onSubmit: value => {
       updateVm(vmId, nextVm => {
@@ -2489,7 +2528,7 @@ function promptDeploymentConflict(existingDeployment) {
   const ownerName = escapeHtml(teacher.displayName || teacher.email || 'Unknown owner');
   const blueprintName = escapeHtml(existingDeployment.blueprint?.name || '');
   const labNum = escapeHtml(String(existingDeployment.deploymentNumber ?? '?'));
-  const status = escapeHtml(existingDeployment.status || '');
+  const status = escapeHtml(deploymentStatusLabel(existingDeployment));
 
   messageEl.innerHTML =
     `Lab <strong>#${labNum} &ldquo;${blueprintName}&rdquo;</strong> owned by <strong>${ownerName}</strong>` +
@@ -3564,7 +3603,7 @@ templateForm.addEventListener('submit', async event => {
     ? (pool.enabled !== Boolean(previousPool?.enabled) || (pool.enabled && pool.readyTarget !== (previousPool?.readyTarget ?? 0)))
     : false;
   if (poolChanged && previousPool?.enabled && !pool.enabled &&
-      !window.confirm('Disable the Windows pool for this template? Its prepared VMs will be destroyed (VMs already in labs are not affected).')) {
+      !await confirmAction('Disable the Windows pool?', 'The prepared VMs of this template will be destroyed. VMs already in labs are not affected.', 'Disable pool')) {
     delete templateForm.dataset.busy; submitButton.disabled = false; submitButton.removeAttribute('aria-busy');
     return;
   }
@@ -3785,7 +3824,7 @@ deploymentForm?.addEventListener('submit', async event => {
       });
       pendingDeploymentId = result.deployment.id;
     }
-    await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(pendingDeploymentId)}/deploy`, { method: 'POST' });
+    const deployResult = await fetchJson(`/api/lifecycle/deployments/${encodeURIComponent(pendingDeploymentId)}/deploy`, { method: 'POST' });
     deployLabDialog.close();
     pendingDeploymentId = null;
     await setActiveView('lifecycle');
@@ -3794,7 +3833,7 @@ deploymentForm?.addEventListener('submit', async event => {
     }
     await refreshLifecycleLabs();
     await loadBlueprints();
-    showMessage(globalStatus, 'Lab deployment queued.', 'success');
+    showMessage(globalStatus, labActionQueuedMessage('deploy', deployResult?.jobId), 'success');
   } catch (error) {
     if (deployLabDialog.open) {
       deploymentDialogError.textContent = error.message;
@@ -4149,6 +4188,7 @@ function isBlueprintDirty() { return blueprintFingerprint(state.currentBlueprint
 function markBlueprintSaved() {
   savedBlueprintFingerprint = blueprintFingerprint(state.currentBlueprint);
   updateSaveStatus();
+  updatePageHeader(); // the editor title shows the saved name
 }
 function updateSaveStatus() {
   const el = document.getElementById('blueprintSaveStatus');
@@ -4192,10 +4232,10 @@ async function guardBlueprintChanges() {
 async function confirmLabAction(deployment, action) {
   if (!deployment) return false;
   const context = `${deployment.blueprint.name} — ${deployment.classroom.name}, lab #${deployment.deploymentNumber}, ${deployment.totalVmCount} VMs.`;
-  if (action === 'destroy') return confirmAction('Destroy lab?', `${context} All VM data will be permanently deleted. After successful destruction, the lab will also be removed from the list. The blueprint is preserved.`, 'Destroy lab');
+  if (action === 'destroy') return confirmAction('Delete lab VMs?', `${context} All VM data will be permanently deleted, then the lab is removed from the list. The blueprint is kept.`, 'Delete lab VMs');
   if (action === 'stop') return confirmAction('Stop lab?', `${context} Running sessions will be interrupted.`, 'Stop lab');
-  if (action === 'cancel-pool-wait') return confirmAction('Cancel this lab?', `${context} The lab is waiting for ready Windows VMs. Cancelling stops the deployment; it can be deployed again later.`, 'Cancel lab');
-  return await chooseAction('Deploy lab', `${context} ${deployment.testMode ? 'Only the first workplace will be deployed (test mode).' : 'The blueprint will be replicated for every workplace.'}`, [['cancel', 'Cancel'], ['confirm', 'Deploy VMs', 'btn-primary']]) === 'confirm';
+  if (action === 'cancel-pool-wait') return await chooseAction('Cancel deployment?', `${context} The lab is waiting for ready Windows VMs. Cancelling stops the deployment; the lab can be deployed again later.`, [['cancel', 'Keep waiting'], ['confirm', 'Cancel deployment', 'btn-danger']]) === 'confirm';
+  return await chooseAction('Deploy lab?', `${context} ${deployment.testMode ? 'Only the first workplace will be deployed (test mode).' : 'The blueprint will be deployed to every workplace.'}`, [['cancel', 'Cancel'], ['confirm', 'Deploy lab', 'btn-primary']]) === 'confirm';
 }
 
 function writeRoute(view, id = '') {
@@ -4251,7 +4291,7 @@ function syncFilterOptions() {
 function renderAttentionLabs() {
   const el = document.getElementById('attentionLabs'); if (!el) return;
   const labs = state.deployments.filter(d => ['failed', 'mixed'].includes(d.status) || d.canResumeCustomization);
-  el.innerHTML = labs.length ? labs.map(d => `<a class="attention-item" href="#/lifecycle/${encodeURIComponent(d.id)}">${uiIcon('warning')} <strong>${escapeHtml(d.blueprint.name)}</strong> · ${escapeHtml(d.classroom.name)} · ${escapeHtml(labStatusLabel(d.status))}</a>`).join('') : '<p class="muted">No labs need attention.</p>';
+  el.innerHTML = labs.length ? labs.map(d => `<a class="attention-item" href="#/lifecycle/${encodeURIComponent(d.id)}">${uiIcon('warning')} <strong>${escapeHtml(d.blueprint.name)}</strong> · ${escapeHtml(d.classroom.name)} · Lab #${escapeHtml(String(d.deploymentNumber))} · ${escapeHtml(d.canResumeCustomization ? 'Incomplete customizations' : labStatusLabel(d.status))}</a>`).join('') : '<p class="muted">No labs need attention.</p>';
 }
 
 function updateClassroomPreview() {
@@ -4283,10 +4323,12 @@ function initUx() {
   document.getElementById('menuToggle')?.addEventListener('click', event => {
     const open = document.body.classList.toggle('nav-open'); event.currentTarget.setAttribute('aria-expanded', String(open));
   });
-  document.getElementById('backToBlueprints')?.addEventListener('click', async () => {
-    if (!await guardBlueprintChanges()) return;
-    state.isBlueprintWorkspaceVisible = false; renderBlueprintWorkspace(); writeRoute('blueprint');
+  // Breadcrumb "Blueprints › <name>" of the editor: back to the list (replaces "Back to blueprints").
+  document.getElementById('pageBreadcrumbLink')?.addEventListener('click', () => {
+    if (activeView === 'blueprint' && state.isBlueprintWorkspaceVisible) void closeBlueprintWorkspace();
   });
+  // Breadcrumb "Labs › Lab #N" of the lab details: back to the lab list.
+  document.getElementById('deploymentDetailsBreadcrumbLink')?.addEventListener('click', () => deploymentDetailsDialog.close());
   document.getElementById('duplicateBlueprint')?.addEventListener('click', async event => {
     const button = event.currentTarget;
     const originalId = state.currentBlueprint.id;

@@ -227,7 +227,7 @@ test('blueprint averages appear on cards and update when choosing a blueprint in
   assert.match(card.querySelector('.blueprint-deployment-estimate').title, /3 successful full deployments/);
   card.querySelector('.blueprint-deploy-button').click();
   const estimate = document.getElementById('deploymentDurationEstimate');
-  assert.equal(estimate.hidden, false); assert.match(estimate.textContent, /13 min.*including customization/);
+  assert.equal(estimate.hidden, false); assert.match(estimate.textContent, /13 min.*customization/);
   const select = document.getElementById('deploymentBlueprintSelect');
   select.value = 'new'; select.dispatchEvent(new w.Event('change'));
   assert.match(estimate.textContent, /no history yet/);
@@ -315,6 +315,29 @@ test('saving clears the dirty state and a lab deep link opens a modal over the l
   document.getElementById('closeDeploymentDetailsButton').click(); await tick();
   assert.equal(w.location.hash, '#/lifecycle');
   assert.equal(document.getElementById('deploymentDetailsDialog').open, false);
+});
+
+test('top bar shows the page title alone, breadcrumbs only on detail views and lead back', async t => {
+  const { api, document, w } = setup(t); await api.bootstrap();
+  const title = () => document.getElementById('pageTitle').textContent;
+  const crumb = document.getElementById('pageBreadcrumb');
+  await api.setActiveView('lifecycle');
+  assert.equal(title(), 'Labs'); assert.equal(crumb.hidden, true);
+  await api.setActiveView('blueprint');
+  assert.equal(title(), 'Blueprints'); assert.equal(crumb.hidden, true);
+  await api.loadBlueprint('bp');
+  assert.equal(title(), 'Network lab'); assert.equal(crumb.hidden, false);
+  assert.equal(document.getElementById('pageBreadcrumbLink').textContent, 'Blueprints');
+  document.getElementById('pageBreadcrumbLink').click(); await tick();
+  assert.equal(api.state.isBlueprintWorkspaceVisible, false);
+  assert.equal(title(), 'Blueprints'); assert.equal(crumb.hidden, true);
+  assert.equal(w.location.hash, '#/blueprint');
+  api.state.deployments = [{ id: 'lab', deploymentNumber: 12, status: 'running', blueprint: { id: 'bp', name: 'Network lab' }, classroom: { id: 'room', name: 'A203' } }];
+  await api.openDeploymentDetails('lab');
+  assert.equal(document.getElementById('deploymentDetailsBreadcrumbCurrent').textContent, 'Lab #12');
+  document.getElementById('deploymentDetailsBreadcrumbLink').click(); await tick();
+  assert.equal(document.getElementById('deploymentDetailsDialog').open, false);
+  assert.equal(w.location.hash, '#/lifecycle');
 });
 
 test('lab modal closes on Escape and navigation without overwriting the destination URL', async t => {
@@ -553,14 +576,14 @@ test('dashboard tiles expose power actions according to lab status', t => {
 test('lab card of a deployment using the Windows pool: transfers instead of creations', () => {
   const pool = { status: 'deploying', createdCount: 0, startedCount: 0, poolProgress: { total: 22, assigned: 5, active: true } };
   assert.equal(helpers.deploymentStatusLabel(pool, 22), 'Transferring from pool');
-  assert.equal(helpers.deploymentProgressText(pool, 22, 5), 'Transferred from pool: 5/22 · Ready: 5/22. Transferring from pool.');
+  assert.equal(helpers.deploymentProgressText(pool, 22, 5), 'Transferred from pool: 5/22 · Ready: 5/22');
   const mixed = { status: 'deploying', createdCount: 2, startedCount: 1, poolProgress: { total: 2, assigned: 1, active: true } };
   assert.equal(helpers.deploymentStatusLabel(mixed, 6), 'Creating VMs and transferring from pool');
-  assert.equal(helpers.deploymentProgressText(mixed, 6, 1), 'Transferred from pool: 1/2 · Created: 2/6 · Started: 1/6 · Ready: 1/6. Creating VMs and transferring from pool.');
+  assert.equal(helpers.deploymentProgressText(mixed, 6, 1), 'Transferred from pool: 1/2 · Created: 2/6 · Started: 1/6 · Ready: 1/6');
   const legacy = { status: 'deploying', createdCount: 3, startedCount: 2 };
-  assert.equal(helpers.deploymentProgressText(legacy, 4, 1), 'Created: 3/4 · Started: 2/4 · Ready: 1/4. Creating VMs.');
+  assert.equal(helpers.deploymentProgressText(legacy, 4, 1), 'Created: 3/4 · Started: 2/4 · Ready: 1/4');
   assert.equal(helpers.deploymentStatusLabel({ status: 'deploying', poolProgress: { total: 22, assigned: 22, active: false } }, 22), 'Creating VMs', 'transfers done: usual label');
-  assert.equal(helpers.labStatusLabel('waiting_for_pool'), 'Waiting for the VM pool');
+  assert.equal(helpers.labStatusLabel('waiting_for_pool'), 'Waiting for the Windows pool');
 });
 
 test('VM Templates page: Modules-style cards, filters, modal editor, pool section for Windows only', async t => {
@@ -573,7 +596,7 @@ test('VM Templates page: Modules-style cards, filters, modal editor, pool sectio
   ];
   api.setActiveView('models');
   api.renderModelList();
-  assert.equal(document.querySelector('.page[data-view="models"] h2').textContent, 'VM Templates');
+  assert.equal(document.getElementById('pageTitle').textContent, 'VM Templates');
   assert.match(document.querySelector('nav [data-view="models"]').textContent, /VM Templates/);
   const cards = [...document.querySelectorAll('#modelList .module-card.template-card')];
   assert.equal(cards.length, 2);
@@ -617,7 +640,7 @@ test('Classrooms page: same tiles as VM Templates, search, modal editor with net
   api.state.deployments = [{ id: 'lab', deploymentNumber: 194, status: 'running', classroom: { id: 'a43' }, blueprint: { name: 'Windows server' } }];
   api.setActiveView('classrooms');
   api.renderClassrooms();
-  assert.equal(document.querySelector('.page[data-view="classrooms"] h2').textContent, 'Classrooms');
+  assert.equal(document.getElementById('pageTitle').textContent, 'Classrooms');
   const tiles = [...document.querySelectorAll('#classroomList .module-card.classroom-card')];
   assert.equal(tiles.length, 2);
   assert.ok(tiles[0].querySelector('.tile-icon svg'), 'icon framed like the OS logos');

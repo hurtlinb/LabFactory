@@ -404,11 +404,39 @@ button, input, textarea, select { font: inherit; }
   margin: 0;
 }
 
-.page-breadcrumb::after {
-  content: '/';
-  margin-left: 8px;
-  opacity: 0.4;
+/* Breadcrumb: only on detail views (blueprint editor, lab details); the parent is clickable. */
+.page-breadcrumb {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
+
+.page-breadcrumb[hidden] { display: none; }
+
+.page-breadcrumb-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.page-breadcrumb-link:hover,
+.page-breadcrumb-link:focus-visible {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.page-breadcrumb-link::after {
+  content: '›';
+  display: inline-block;
+  margin-left: 8px;
+  opacity: 0.6;
+  text-decoration: none;
+}
+
+.dialog-breadcrumb { margin-bottom: 4px; }
 
 .page-title {
   font-size: 14px;
@@ -1782,7 +1810,6 @@ a { color: var(--brand); }
   .main { height: 100dvh; }
   .app-topbar { padding: 0 12px; }
   .page-title { font-size: 18px; }
-  .page-breadcrumb { display: none; }
 }
 @media (max-width: 720px) {
   .panel-head, .deploy-head { flex-wrap: wrap; gap: 12px; }

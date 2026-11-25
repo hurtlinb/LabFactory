@@ -44,6 +44,49 @@ function status(message, kind = 'success', target = 'poolStatus') {
   if (message && kind === 'success') setTimeout(() => { if (element.textContent === message) element.hidden = true; }, 5000);
 }
 
+// Confirmation in the app style (same markup and classes as chooseAction() in app.js; this
+// module is independent of app.js). Resolves to null when cancelled, otherwise to the value of
+// the optional number field ('' without field).
+function askDialog({ title, message, confirmLabel, danger = false, field = null }) {
+  if (document.querySelector('.confirmation-dialog')) return Promise.resolve(null);
+  return new Promise(resolve => {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'modal-dialog confirmation-dialog';
+    dialog.setAttribute('aria-labelledby', 'confirmationTitle');
+    dialog.setAttribute('aria-describedby', 'confirmationMessage');
+    dialog.innerHTML = '<form method="dialog" class="modal-card"><h2 id="confirmationTitle"></h2><p id="confirmationMessage"></p><div class="inline-actions"></div></form>';
+    dialog.querySelector('h2').textContent = title;
+    dialog.querySelector('p').textContent = message;
+    let input = null;
+    if (field) {
+      const label = document.createElement('label');
+      label.className = 'field';
+      const caption = document.createElement('span');
+      caption.textContent = field.label;
+      input = document.createElement('input');
+      Object.assign(input, { type: 'number', min: '0', step: '1', required: true, value: field.value ?? '' });
+      label.append(caption, input);
+      dialog.querySelector('p').after(label);
+    }
+    for (const [value, text, style] of [['cancel', 'Cancel', 'btn-secondary'], ['confirm', confirmLabel, danger ? 'btn-danger' : 'btn-primary']]) {
+      const button = document.createElement('button');
+      button.type = 'submit'; button.value = value; button.textContent = text;
+      button.className = `btn ${style}`;
+      if (value === 'cancel') button.formNoValidate = true;
+      dialog.querySelector('.inline-actions').append(button);
+    }
+    dialog.addEventListener('close', () => {
+      const confirmed = dialog.returnValue === 'confirm';
+      const value = input ? input.value : '';
+      dialog.remove();
+      resolve(confirmed ? value : null);
+    }, { once: true });
+    document.body.append(dialog);
+    dialog.showModal();
+    input?.focus();
+  });
+}
+
 // Explicit warnings: suspended pool, or enabled template that prepares nothing in advance.
 function renderWarnings() {
   const element = $('poolWarnings');
@@ -115,13 +158,13 @@ function renderRequests() {
     const missing = r.demand.filter(d => d.missing > 0).map(d => `${d.missing} × ${escapeHtml(templateName(d.templateId))}`).join(', ');
     const label = `${escapeHtml(r.blueprintName ?? 'Lab')} — ${escapeHtml(r.classroomName ?? '')}${r.deploymentNumber != null ? ` #${r.deploymentNumber}` : ''}`;
     return `<tr>
-      <th scope="row">${label}<br><span class="muted">${r.kind === 'redeploy-workstation' ? 'Workstation redeploy' : 'Deployment'}</span></th>
+      <th scope="row">${label}<br><span class="muted">${r.kind === 'redeploy-workstation' ? 'Workplace redeploy' : 'Deployment'}</span></th>
       <td>${r.status === 'reserved' ? 'VMs reserved, being configured' : 'Waiting'}</td>
       <td>${escapeHtml(REASONS[r.blockedReason] ?? r.blockedReason ?? '—')}</td>
       <td>${missing || '—'}</td>
       <td>${formatSince(r.createdAt)}</td>
       <td>${r.status === 'waiting_for_pool' && r.deploymentStatus === 'waiting_for_pool'
-        ? `<button type="button" class="btn btn-ghost" data-pool-action="cancel-lab" data-deployment="${escapeHtml(r.deploymentId)}">Cancel lab</button>` : ''}</td>
+        ? `<button type="button" class="btn btn-ghost" data-pool-action="cancel-lab" data-deployment="${escapeHtml(r.deploymentId)}">Cancel deployment</button>` : ''}</td>
     </tr>`;
   });
   $('poolRequestsBody').innerHTML = rows.join('') || '<tr><td colspan="6" class="muted">No lab waiting for the pool.</td></tr>';
@@ -220,21 +263,34 @@ function bind() {
     }) }), () => ($('poolPaused').checked ? 'Settings saved. The pool is suspended.' : 'Settings saved. The pool is active.'), 'poolSettingsStatus');
   });
 
-  document.querySelector(`.page[data-view="${VIEW}"]`)?.addEventListener('click', event => {
+  document.querySelector(`.page[data-view="${VIEW}"]`)?.addEventListener('click', async event => {
     const button = event.target.closest('[data-pool-action]');
     if (!button) return;
     const { poolAction: action, template, deployment, vm, vmid, category, scope, max } = button.dataset;
     if (action === 'cancel-lab') {
-      if (!window.confirm('Cancel this lab? It will stop waiting for the Windows pool.')) return;
-      return void act(() => api(`/api/lifecycle/deployments/${encodeURIComponent(deployment)}/cancel-pool-wait`, { method: 'POST' }), 'Lab cancelled.', 'poolRequestsStatus');
+      if (await askDialog({
+        title: 'Cancel deployment?',
+        message: 'The lab will stop waiting for the Windows pool. It can be deployed again later.',
+        confirmLabel: 'Cancel deployment', danger: true
+      }) === null) return;
+      return void act(() => api(`/api/lifecycle/deployments/${encodeURIComponent(deployment)}/cancel-pool-wait`, { method: 'POST' }), 'Deployment cancelled.', 'poolRequestsStatus');
     }
     if (action === 'limit') {
-      const value = window.prompt(`New ceiling for "${CATEGORIES[category] ?? category}" (${scope}), 0 suspends this operation:`, max);
+      const value = await askDialog({
+        title: 'Change operation limit',
+        message: `${CATEGORIES[category] ?? category} (${scope}). A ceiling of 0 suspends this operation.`,
+        confirmLabel: 'Save limit',
+        field: { label: 'New ceiling', value: max }
+      });
       if (value === null) return;
       return void act(() => api('/api/windows-pool/limits', { method: 'PUT', body: JSON.stringify({ category, scope, maxActive: Number(value) }) }), 'Limit updated.', 'poolLimitsStatus');
     }
     if (action === 'destroy-vm') {
-      if (!window.confirm(`Destroy quarantined VM ${vmid}? Its diagnosis data will be lost.`)) return;
+      if (await askDialog({
+        title: `Destroy VM ${vmid}?`,
+        message: 'This quarantined VM and its diagnosis data will be permanently deleted.',
+        confirmLabel: 'Destroy VM', danger: true
+      }) === null) return;
       return void act(() => api(`/api/windows-pool/vms/${encodeURIComponent(vm)}/destroy`, { method: 'POST' }), `VM ${vmid} will be destroyed by the pool worker.`, 'poolQuarantineStatus');
     }
     if (action === 'timeline') {

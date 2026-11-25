@@ -9,7 +9,7 @@ function setup(fetchJson = async () => ({ days: 35, ip: '10.0.0.1' })) {
     state: { activeDeploymentDetailsId: 'lab' },
     deploymentVmDetailsList: { querySelector: () => null, querySelectorAll: () => [] },
     escapeHtml: value => String(value).replaceAll('<', '&lt;'),
-    fetchJson, confirm: () => true, renderDeploymentVmDetails: () => {},
+    fetchJson, confirmAction: async () => true, renderDeploymentVmDetails: () => {},
     refreshOpenDeploymentDetails: async () => {}, setTimeout
   };
   vm.createContext(context);
@@ -55,7 +55,7 @@ test('snapshot batches confirm once, poll tasks, limit concurrency and preserve 
     active--;
     return { complete: true, success: !url.includes('failed'), error: 'Storage failure' };
   });
-  context.confirm = message => { confirmations++; assert(message.includes('Changes since the snapshot will be lost')); return true; };
+  context.confirmAction = async (_title, message) => { confirmations++; assert(message.includes('Changes since the snapshot will be lost')); return true; };
   selection.payload.deployment.canManageSnapshots = true;
   selection.payload.vms = [1,2,3,4,5].map(id => machine(id, { snapshot: { exists: true }, proxmoxStatus: 'stopped' }))
     .concat(machine(6, { snapshot: { exists: false } }));
@@ -73,7 +73,7 @@ test('snapshot batch cancellation sends no request', async () => {
   const { context, selection } = setup(() => { throw Error('Unexpected request'); });
   selection.payload.deployment.canManageSnapshots = true;
   selection.payload.vms = [machine(1, { snapshot: { exists: false } })];
-  selection.selected.add('1'); context.confirm = () => false;
+  selection.selected.add('1'); context.confirmAction = async () => false;
   await context.runVmBulkAction('lab', 'snapshot-create');
   assert.equal(selection.running, false); assert.equal(selection.results.length, 0);
 });
@@ -114,10 +114,10 @@ test('reset actions ask once and cancellation sends no requests', async () => {
   let requests = 0, confirmations = 0;
   const { context, selection } = setup(async () => { requests++; return { ip: '10.0.0.1' }; });
   selection.payload.vms = [machine(1),machine(2)]; selection.selected = new Set(['1','2']);
-  context.confirm = () => { confirmations++; return false; };
+  context.confirmAction = async () => { confirmations++; return false; };
   await context.runVmBulkAction('lab', 'reset-password');
   assert.equal(requests, 0); assert.equal(selection.running, false);
-  context.confirm = () => { confirmations++; return true; };
+  context.confirmAction = async () => { confirmations++; return true; };
   await context.runVmBulkAction('lab', 'reset-ip');
   assert.equal(confirmations, 2); assert.equal(requests, 2);
 });
