@@ -2015,7 +2015,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.get('/api/app-info', (req, res) => {
   res.json({
     name: packageJson.name ?? 'LabFactory',
-    version: packageJson.version ?? '0.0.0',
+    // APP_VERSION: set by the dev build from the git tags (package.json may lag behind a tag).
+    version: process.env.APP_VERSION || packageJson.version || '0.0.0',
     buildTag: process.env.BUILD_TAG ?? null,
     env: process.env.NODE_ENV ?? 'production',
     auth: auth.describeSession(req)

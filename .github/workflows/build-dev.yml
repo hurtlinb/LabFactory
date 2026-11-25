@@ -11,10 +11,19 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history and tags: the dev version is derived from the last release tag.
+          fetch-depth: 0
 
       - name: Get short SHA
         id: sha
         run: echo "sha=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
+      # Version shown by the dev dashboard: last release tag + commits since it,
+      # e.g. "3.0.1-4-g2f0b907" ("3.0.1" on the tagged commit itself).
+      - name: Get dev version
+        id: version
+        run: echo "version=$(git describe --tags --always)" >> $GITHUB_OUTPUT
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -43,7 +52,9 @@ jobs:
           file: docker/dashboard/Dockerfile
           push: true
           tags: hurtlinb/labfactory:dashboard-${{ steps.sha.outputs.sha }}
-          build-args: BUILD_TAG=${{ steps.sha.outputs.sha }}
+          build-args: |
+            BUILD_TAG=${{ steps.sha.outputs.sha }}
+            APP_VERSION=${{ steps.version.outputs.version }}
           cache-from: type=registry,ref=hurtlinb/labfactory:dashboard-buildcache
           cache-to: type=registry,ref=hurtlinb/labfactory:dashboard-buildcache,mode=max
 
