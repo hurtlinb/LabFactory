@@ -2,6 +2,10 @@
 
 Les nouvelles fonctionnalités de LabFactory, par version. Les releases contenant uniquement des correctifs ou des ajustements ne sont pas affichées.
 
+## [3.1.0] — 2026-11-25
+
+- UI improvements
+
 ## [3.0.0] — 2026-11-23
 
 - Added a pool of ready VM for Windows
