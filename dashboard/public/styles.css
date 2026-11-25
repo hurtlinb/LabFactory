@@ -1788,7 +1788,6 @@ h2 { font-size: 16px; font-weight: 600; }
 .confirmation-dialog p { white-space: pre-line; }
 .job-dialog { width: min(800px, calc(100vw - 32px)); }
 .job-dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 55vh; overflow: auto; padding: 12px; background: var(--surface-soft); }
-.attention-item { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 12px 0; color: var(--warning); }
 .text-button { font: inherit; color: inherit; text-align: left; border: 0; background: transparent; cursor: pointer; }
 .text-button:hover { text-decoration: underline; }
 a { color: var(--brand); }

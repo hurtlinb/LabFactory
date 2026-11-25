@@ -443,7 +443,7 @@ test('modules search and edit dialog preserve data when cancelled and reset for 
   assert.equal(requests.filter(request => request.method === 'POST' || request.method === 'PUT').length, 0);
 });
 
-test('dashboard shows other teachers labs and attention items even when only my labs is selected', t => {
+test('dashboard shows other teachers labs even when only my labs is selected', t => {
   const { api, document } = setup(t);
   api.state.isAdmin = false;
   api.state.auth = { enabled: true };
@@ -456,7 +456,10 @@ test('dashboard shows other teachers labs and attention items even when only my 
   }));
   api.renderDashboard();
   assert.equal(document.querySelectorAll('#dashClassroomsGrid .dash-classroom-lab').length, 2);
-  assert.match(document.getElementById('attentionLabs').textContent, /Other failed/);
+  assert.match(document.getElementById('dashClassroomsGrid').textContent, /Other failed/);
+  assert.equal(document.getElementById('attentionLabs'), null, 'no "Needs attention" box any more');
+  assert.equal(document.getElementById('dashboardDeployLabButton'), null, 'no global Deploy a lab button on the dashboard');
+  assert.equal(document.querySelectorAll('#dashClassroomsGrid .dash-classroom-deploy').length, 1, 'one Deploy a lab button per classroom');
   assert(document.querySelector('#dashClassroomsGrid [data-action="stop"]'));
   assert.equal(document.querySelector('#dashClassroomsGrid [data-action="destroy"]'), null);
 });

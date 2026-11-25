@@ -1576,7 +1576,6 @@ function renderDashboardPowerActions(deployment) {
 }
 
 function renderDashboard() {
-  renderAttentionLabs();
   const dashboardDeployments = state.deployments;
   const elById = id => document.getElementById(id);
 
@@ -3791,7 +3790,6 @@ function openDeployLabDialog({ blueprintId = '', classroomId = '' } = {}) {
   (blueprintId ? deploymentClassroomSelect : deploymentBlueprintSelect).focus();
 }
 document.getElementById('openDeployLabButton')?.addEventListener('click', () => openDeployLabDialog());
-document.getElementById('dashboardDeployLabButton')?.addEventListener('click', () => openDeployLabDialog());
 document.getElementById('closeDeployLabButton')?.addEventListener('click', () => {
   if (!deploymentForm.dataset.busy) deployLabDialog.close();
 });
@@ -4286,12 +4284,6 @@ function syncFilterOptions() {
   };
   fill('blueprintCourseFilter', state.courses.map(c => [c.id, `Module ${c.courseNumber}`]), 'All modules');
   fill('labClassroomFilter', state.classrooms.map(c => [c.id, c.name]), 'All classrooms');
-}
-
-function renderAttentionLabs() {
-  const el = document.getElementById('attentionLabs'); if (!el) return;
-  const labs = state.deployments.filter(d => ['failed', 'mixed'].includes(d.status) || d.canResumeCustomization);
-  el.innerHTML = labs.length ? labs.map(d => `<a class="attention-item" href="#/lifecycle/${encodeURIComponent(d.id)}">${uiIcon('warning')} <strong>${escapeHtml(d.blueprint.name)}</strong> · ${escapeHtml(d.classroom.name)} · Lab #${escapeHtml(String(d.deploymentNumber))} · ${escapeHtml(d.canResumeCustomization ? 'Incomplete customizations' : labStatusLabel(d.status))}</a>`).join('') : '<p class="muted">No labs need attention.</p>';
 }
 
 function updateClassroomPreview() {
