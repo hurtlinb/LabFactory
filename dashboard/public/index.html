@@ -317,7 +317,7 @@
                   <button id="openDeployLabButton" class="btn btn-primary" type="button"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m7 4 14 8-14 8Z"/></svg> Deploy a lab</button>
                 </div>
               </div>
-              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, module, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially started</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option></select></label></div><div id="lifecycleList" class="saved-list">
+              <div class="filter-bar"><label class="field"><span>Search labs</span><input id="labSearch" type="search" placeholder="Name, module, owner or lab number"></label><label class="field"><span>Classroom</span><select id="labClassroomFilter"><option value="">All classrooms</option></select></label><label class="field"><span>Status</span><select id="labStatusFilter"><option value="">All statuses</option><option value="idle">Not deployed</option><option value="queued">Queued</option><option value="deploying">Creating VMs</option><option value="customizing">Configuring VMs</option><option value="running">Running</option><option value="deployed">Ready</option><option value="mixed">Partially started</option><option value="stopped">Stopped</option><option value="failed">Failed</option><option value="destroyed">VMs deleted</option><option value="forgotten">Probably forgotten</option></select></label></div><div id="lifecycleList" class="saved-list">
                 <p class="placeholder">Loading deployments…</p>
               </div>
             </article>
@@ -390,6 +390,27 @@
                 <button type="submit" id="announcementSaveButton" class="btn btn-primary">Save banner</button>
                 <span id="announcementMeta" class="muted"></span>
                 <div id="announcementStatus" class="status-message" hidden></div>
+              </div>
+            </form>
+          </article>
+
+          <article class="panel" id="labUsagePanel" aria-labelledby="labUsageTitle">
+            <div class="panel-head">
+              <div>
+                <p class="eyebrow">Lab usage</p>
+                <h3 id="labUsageTitle">Forgotten labs</h3>
+                <p class="muted">A running lab is flagged as probably forgotten on the Labs page and the dashboard when it runs longer than this, or when it is still running outside class hours (Monday to Friday, 06:00–20:00).</p>
+              </div>
+            </div>
+            <form id="labUsageForm" class="announcement-form" novalidate>
+              <label class="field">
+                <span>Flag a running lab after (days)</span>
+                <input id="labUsageForgottenDays" type="number" name="forgottenAfterDays" min="1" max="30" step="1" required>
+              </label>
+              <div class="inline-actions">
+                <button type="submit" id="labUsageSaveButton" class="btn btn-primary">Save</button>
+                <span id="labUsageMeta" class="muted"></span>
+                <div id="labUsageStatus" class="status-message" hidden></div>
               </div>
             </form>
           </article>

@@ -34,6 +34,7 @@ import {
 import { createHttpRequest, createPoolProxmox, templateDiskStorage } from '../lib/windowsPool/proxmox.js';
 import { ownershipMarker } from '../lib/windowsPool/vmidAllocator.js';
 import { activeAnnouncement, readAnnouncement, validateAnnouncement, writeAnnouncement } from '../lib/siteAnnouncement.js';
+import { readLabUsageSettings, recordLabUse, runningSinceFromResources, validateLabUsageSettings, writeLabUsageSettings } from '../lib/labUsage.js';
 
 const require = createRequire(import.meta.url);
 const { Queue, QueueEvents } = require('bullmq');
@@ -1024,6 +1025,7 @@ const mapDeployment = row => ({
   lastRunId: row.last_run_id,
   createdAt: row.created_at?.toISOString?.() ?? row.created_at,
   updatedAt: row.updated_at?.toISOString?.() ?? row.updated_at,
+  lastUsedAt: row.last_used_at?.toISOString?.() ?? row.last_used_at ?? null,
   blueprint: {
     id: row.blueprint_id,
     name: row.blueprint_name,
@@ -2041,6 +2043,20 @@ app.put('/api/settings/announcement', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ON
   res.json(await writeAnnouncement(dbPool, value, user?.email ?? user?.name ?? null));
 }));
 
+// Lab usage: the "probably forgotten" threshold is read by every Labs user (lab cards),
+// and configured by admins on the Maintenance page.
+app.get('/api/settings/lab-usage', auth.requireRole(auth.ROLE_GROUPS.LABS), wrapAsync(async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json(await readLabUsageSettings(dbPool));
+}));
+
+app.put('/api/settings/lab-usage', auth.requireRole(auth.ROLE_GROUPS.ADMIN_ONLY), wrapAsync(async (req, res) => {
+  const { value, errors } = validateLabUsageSettings(req.body);
+  if (errors) return res.status(400).json({ error: Object.values(errors).flat()[0], errors });
+  const user = getRequestUser(req);
+  res.json(await writeLabUsageSettings(dbPool, value, user?.email ?? user?.name ?? null));
+}));
+
 const changelogPath = path.resolve(__dirname, '../CHANGELOG.md');
 app.get('/api/changelog', async (_req, res) => {
   try {
@@ -2367,6 +2383,7 @@ app.get(
     }
 
     const deployments = [];
+    const runningDeploymentIds = [];
     for (const row of rows) {
       const deployment = mapDeployment(row);
       const blueprint = await fetchBlueprintById(deployment.blueprint.id);
@@ -2391,8 +2408,13 @@ app.get(
         ...deployment,
         status: effectiveDeploymentStatus
       };
+      // Since when the lab runs: start of its oldest running VM (Proxmox uptime).
+      const runningSince = resourceByVmid ? runningSinceFromResources(vmPlan.vms.map(vm => vm.vmid), resourceByVmid) : null;
+      if (runningSince) runningDeploymentIds.push(deployment.id);
       deployments.push({
         ...runtimeDeployment,
+        runningSince,
+        lastUsedAt: runningSince ? new Date().toISOString() : deployment.lastUsedAt,
         hasExistingVms: resourceByVmid ? vmPlan.vms.some(vm => resourceByVmid.has(Number(vm.vmid))) : null,
         customizationResults: customizationProgress?.results ?? null,
         canResumeCustomization: deployment.status === 'failed' && Boolean(customizationProgress?.canResume) && canManageDeployment(req, deployment),
@@ -2408,6 +2430,13 @@ app.get(
           operationTargetVmids: vmProgressSource.targetVmids
         }))
       });
+    }
+
+    // A lab with running VMs is in use: keep its last use up to date (throttled writes).
+    try {
+      await recordLabUse(dbPool, runningDeploymentIds, { throttle: true });
+    } catch (error) {
+      console.warn('Unable to update the last use of running labs', error);
     }
 
     res.json(deployments);
@@ -3425,6 +3454,11 @@ app.post(
         ...queueRetention
       }
     );
+
+    // Deploying, starting or stopping a lab counts as using it.
+    if (['deploy', 'start', 'stop'].includes(action)) {
+      await recordLabUse(dbPool, [deployment.id]).catch(error => console.warn(`Unable to record the use of lab ${deployment.id}`, error));
+    }
 
     res.json({
       ok: true,

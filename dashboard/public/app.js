@@ -1,4 +1,4 @@
-import { labStatusLabel, deploymentStatusLabel, deploymentProgressText, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
+import { labStatusLabel, deploymentStatusLabel, deploymentProgressText, labUsageInfo, blueprintFingerprint, matchesSearch, classroomPreview } from './ux.js';
 
 const UI_ICONS = {
   "copy": '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/>',
@@ -70,6 +70,8 @@ function uiIcon(name) {
 }
 
 const state = {
+  // "Probably forgotten" threshold of running labs (Maintenance page).
+  labUsageSettings: { forgottenAfterDays: 1 },
   classrooms: [],
   templates: [],
   blueprints: [],
@@ -336,7 +338,7 @@ async function setActiveView(view, { fromRoute = false } = {}) {
   document.body.classList.remove('nav-open');
   document.getElementById('menuToggle')?.setAttribute('aria-expanded', 'false');
   document.getElementById('pageTitle')?.focus({ preventScroll: true });
-  if (view === 'admin-settings') { void loadUploadedFiles(); void loadAnnouncementSettings(); }
+  if (view === 'admin-settings') { void loadUploadedFiles(); void loadAnnouncementSettings(); void loadLabUsageSettings(); }
   // Independent pages (separate modules, e.g. windowsPool.js) listen to the view changes.
   window.dispatchEvent(new CustomEvent('labfactory:view', { detail: { view } }));
   if (view !== 'blueprint') {
@@ -1328,6 +1330,34 @@ function renderLifecycleSteps(status) {
     </div>`).join('')}</div>`;
 }
 
+// " · Running for 3 h" / " · Last used 2 days ago", in orange with a warning icon when the
+// running lab is probably forgotten (rules: ux.js labUsageInfo()).
+function renderLabUsage(deployment) {
+  const usage = labUsageInfo(deployment, state.labUsageSettings);
+  if (!usage) return '';
+  return ` · <span class="lab-usage${usage.forgotten ? ' lab-usage-forgotten' : ''}" title="${escapeHtmlAttr(usage.title)}">${usage.forgotten ? `${uiIcon('warning')} ` : ''}${escapeHtml(usage.text)}</span>`;
+}
+
+function isLabProbablyForgotten(deployment) {
+  return Boolean(labUsageInfo(deployment, state.labUsageSettings)?.forgotten);
+}
+
+async function loadLabUsageSettings() {
+  try {
+    const settings = await fetchJson('/api/settings/lab-usage');
+    if (Number.isInteger(settings?.forgottenAfterDays)) state.labUsageSettings = settings;
+  } catch {
+    // Default threshold (1 day) until the next page load.
+  }
+  const input = document.getElementById('labUsageForgottenDays');
+  if (input && document.activeElement !== input) input.value = state.labUsageSettings.forgottenAfterDays;
+  const meta = document.getElementById('labUsageMeta');
+  if (meta) {
+    const { updatedAt, updatedBy } = state.labUsageSettings;
+    meta.textContent = updatedAt ? `Last change ${new Date(updatedAt).toLocaleString()}${updatedBy ? ` by ${updatedBy}` : ''}` : '';
+  }
+}
+
 function syncLabVisibilityToggle() {
   if (showOnlyMyLabsToggle) {
     showOnlyMyLabsToggle.checked = state.showOnlyMyLabs;
@@ -1340,7 +1370,7 @@ function syncLabVisibilityToggle() {
 function getVisibleLifecycleDeployments() {
   return state.deployments.filter(d => (!state.showOnlyMyLabs || isDeploymentOwnedByCurrentUser(d)) &&
     matchesSearch(filterValue('labSearch'), d.blueprint.name, d.blueprint.course?.courseNumber, d.classroom.name, d.teacherEmail, d.deploymentNumber) &&
-    (!filterValue('labStatusFilter') || d.status === filterValue('labStatusFilter')) &&
+    (!filterValue('labStatusFilter') || (filterValue('labStatusFilter') === 'forgotten' ? isLabProbablyForgotten(d) : d.status === filterValue('labStatusFilter'))) &&
     (!filterValue('labClassroomFilter') || d.classroom.id === filterValue('labClassroomFilter')));
 }
 
@@ -1399,7 +1429,7 @@ function renderLifecycleLabs() {
                 <span class="deploy-number">Lab #${escapeHtml(String(deployment.deploymentNumber))}</span>
                 ${deployment.testMode ? '<span class="mini-pill test-pill">test</span>' : ''}
               </p>
-              <p class="deploy-meta">${totalVmCount} VM${totalVmCount !== 1 ? 's' : ''}${actions.busy ? '' : ` · ${readyCount} ready`}</p>
+              <p class="deploy-meta">${totalVmCount} VM${totalVmCount !== 1 ? 's' : ''}${actions.busy ? '' : ` · ${readyCount} ready`}${renderLabUsage(deployment)}</p>
               ${customizationSummary ? `<p class="deploy-meta">${escapeHtml(customizationSummary)}</p>` : ''}
             </div>
             <div class="inline-actions">
@@ -1606,7 +1636,7 @@ function renderDashboard() {
                   <span class="dash-classroom-lab-icon">${labIcon}</span>
                   <div class="dash-row-info">
                     <a class="dash-row-name" href="#/lifecycle/${encodeURIComponent(d.id)}">${d.blueprint.course ? `${escapeHtml(String(d.blueprint.course.courseNumber))} · ` : ''}${escapeHtml(d.blueprint.name)}</a>
-                    <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}</p>
+                    <p class="dash-row-meta">Lab #${d.deploymentNumber} ${d.testMode ? '<span class="mini-pill test-pill">test</span>' : ''} · ${d.totalVmCount} VM${d.totalVmCount !== 1 ? 's' : ''}${isLabProbablyForgotten(d) ? renderLabUsage(d) : ''}</p>
                   </div>
                   <div class="dash-classroom-owner">${renderTeacherBadge(d.teacher || { email: d.teacherEmail })}</div>
                   <div class="dash-classroom-status"><span class="dash-badge ${badgeClass}">${badgeText}</span></div>
@@ -4005,6 +4035,30 @@ document.getElementById('announcementForm')?.addEventListener('submit', async ev
   }
 });
 
+document.getElementById('labUsageForm')?.addEventListener('submit', async event => {
+  event.preventDefault();
+  const button = document.getElementById('labUsageSaveButton');
+  const status = document.getElementById('labUsageStatus');
+  const days = Number(document.getElementById('labUsageForgottenDays').value);
+  if (!Number.isInteger(days) || days < 1 || days > 30) { showMessage(status, 'Enter a whole number of days between 1 and 30.', 'danger'); return; }
+  button.disabled = true;
+  try {
+    state.labUsageSettings = await fetchJson('/api/settings/lab-usage', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ forgottenAfterDays: days })
+    });
+    await loadLabUsageSettings();
+    renderLifecycleLabs();
+    renderDashboard();
+    showMessage(status, `Saved: a running lab is flagged after ${days} day${days !== 1 ? 's' : ''}.`, 'success');
+  } catch (error) {
+    showMessage(status, error.message, 'danger');
+  } finally {
+    button.disabled = false;
+  }
+});
+
 clearJobHistoryButton?.addEventListener('click', async () => {
   if (!await confirmAction('Clear finished job history?', 'Completed and failed jobs will be deleted. Their customization checkpoints will no longer be available for resume. Active and queued jobs are preserved.', 'Clear history')) return;
   clearJobHistoryButton.disabled = true;
@@ -4376,6 +4430,7 @@ async function bootstrap() {
   const loaders = [
     loadConnectionStatuses(),
     loadSiteAnnouncement(),
+    loadLabUsageSettings(),
     loadCourses(),
     loadClassrooms(),
     loadTemplates(),

@@ -317,6 +317,34 @@ test('saving clears the dirty state and a lab deep link opens a modal over the l
   assert.equal(document.getElementById('deploymentDetailsDialog').open, false);
 });
 
+test('lab usage: forgotten running labs are flagged on cards and dashboard, filterable, threshold saved from Maintenance', async t => {
+  const { api, document, w, requests } = setup(t); await api.bootstrap();
+  const day = 24 * 3600 * 1000;
+  const room = { id: 'room', name: 'A203', workstationCount: 1 };
+  api.state.classrooms = [room];
+  api.state.labUsageSettings = { forgottenAfterDays: 1 };
+  api.state.deployments = [
+    { id: 'old', deploymentNumber: 1, status: 'running', totalVmCount: 1, runningSince: new Date(Date.now() - 3 * day).toISOString(), blueprint: { id: 'bp', name: 'Forgotten lab' }, classroom: room },
+    { id: 'off', deploymentNumber: 2, status: 'stopped', totalVmCount: 1, lastUsedAt: new Date(Date.now() - 2 * day).toISOString(), blueprint: { id: 'bp', name: 'Stopped lab' }, classroom: room }
+  ];
+  api.renderLifecycleLabs();
+  const card = id => document.querySelector(`.deployment-card[data-deployment-id="${id}"]`);
+  assert.match(card('old').querySelector('.lab-usage-forgotten').textContent, /Running for 3 days/);
+  assert.match(card('old').querySelector('.lab-usage-forgotten').title, /Probably forgotten/);
+  assert.match(card('off').querySelector('.lab-usage').textContent, /Last used 2 days ago/);
+  assert.equal(card('off').querySelector('.lab-usage-forgotten'), null);
+  const filter = document.getElementById('labStatusFilter');
+  filter.value = 'forgotten'; filter.dispatchEvent(new w.Event('input'));
+  assert.deepEqual([...document.querySelectorAll('.deployment-card')].map(c => c.dataset.deploymentId), ['old']);
+  api.renderDashboard();
+  assert.equal(document.querySelectorAll('#dashClassroomsGrid .lab-usage-forgotten').length, 1, 'only the forgotten lab is flagged on the dashboard');
+  document.getElementById('labUsageForgottenDays').value = '3';
+  document.getElementById('labUsageForm').dispatchEvent(new w.Event('submit', { cancelable: true }));
+  await tick();
+  const put = requests.find(r => r.url === '/api/settings/lab-usage' && r.method === 'PUT');
+  assert.deepEqual(JSON.parse(put.body), { forgottenAfterDays: 3 });
+});
+
 test('top bar shows the page title alone, breadcrumbs only on detail views and lead back', async t => {
   const { api, document, w } = setup(t); await api.bootstrap();
   const title = () => document.getElementById('pageTitle').textContent;

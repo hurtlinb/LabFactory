@@ -35,6 +35,65 @@ export function deploymentProgressText(deployment, totalVmCount, readyCount) {
   return `Created: ${created}/${totalVmCount} · Started: ${started}/${totalVmCount} · Ready: ${readyCount}/${totalVmCount}`;
 }
 
+// ── Lab usage ────────────────────────────────────────────────────────────────
+// Class hours: Monday to Friday, 06:00–20:00 (browser local time). A lab still running
+// outside them, or running for more than the configured number of days, is flagged as
+// probably forgotten.
+export const CLASS_HOURS = Object.freeze({ startHour: 6, endHour: 20 });
+const LAB_USAGE_STATUSES = ['deployed', 'running', 'mixed', 'stopped', 'failed', 'starting', 'stopping', 'customizing'];
+const HOUR_MS = 3600 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+
+export function isOutsideClassHours(date = new Date()) {
+  const day = date.getDay();
+  const hour = date.getHours();
+  return day === 0 || day === 6 || hour < CLASS_HOURS.startHour || hour >= CLASS_HOURS.endHour;
+}
+
+// "45 min", "5 h", "3 days".
+export function formatDurationShort(milliseconds) {
+  const ms = Math.max(0, milliseconds);
+  if (ms < HOUR_MS) return `${Math.max(1, Math.round(ms / 60000))} min`;
+  if (ms < DAY_MS) return `${Math.floor(ms / HOUR_MS)} h`;
+  const days = Math.floor(ms / DAY_MS);
+  return `${days} day${days !== 1 ? 's' : ''}`;
+}
+
+function formatUsedAgo(date, now) {
+  const elapsed = now - date;
+  return elapsed < HOUR_MS ? 'Last used less than an hour ago' : `Last used ${formatDurationShort(elapsed)} ago`;
+}
+
+/**
+ * Usage line of a lab card. Null when the lab has no VMs to talk about (not deployed,
+ * queued, deleted...). settings.forgottenAfterDays comes from the Maintenance page.
+ */
+export function labUsageInfo(deployment, settings = {}, now = new Date()) {
+  if (!LAB_USAGE_STATUSES.includes(deployment?.status)) return null;
+  const nowMs = now.getTime();
+  if (deployment.runningSince) {
+    const since = new Date(deployment.runningSince);
+    const runningMs = nowMs - since.getTime();
+    const days = Number(settings.forgottenAfterDays) || 1;
+    const tooLong = runningMs >= days * DAY_MS;
+    const offHours = isOutsideClassHours(now);
+    const reason = tooLong
+      ? `running for more than ${days} day${days !== 1 ? 's' : ''}`
+      : offHours ? 'still running outside class hours (Mon–Fri 06:00–20:00)' : '';
+    return {
+      running: true,
+      forgotten: Boolean(reason),
+      text: `Running for ${formatDurationShort(runningMs)}`,
+      title: `Running since ${since.toLocaleString()}${reason ? `. Probably forgotten: ${reason}.` : ''}`
+    };
+  }
+  if (!deployment.lastUsedAt) {
+    return { running: false, forgotten: false, text: 'Last use unknown', title: 'No use recorded since usage tracking was added.' };
+  }
+  const lastUsed = new Date(deployment.lastUsedAt);
+  return { running: false, forgotten: false, text: formatUsedAgo(lastUsed.getTime(), nowMs), title: `Last used ${lastUsed.toLocaleString()}` };
+}
+
 export function blueprintFingerprint(blueprint) {
   const { name, description, courseId, windowsAdminPassword, guestPasswordMode, linuxDefaultUsername, vms } = blueprint;
   return JSON.stringify({ name, description, courseId, windowsAdminPassword, guestPasswordMode, linuxDefaultUsername, vms });
